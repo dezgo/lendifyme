@@ -27,6 +27,9 @@ def init_db():
     conn.close()
 
 
+init_db()
+
+
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
@@ -61,5 +64,4 @@ def index():
 
 
 if __name__ == "__main__":
-    init_db()
     app.run(debug=True)
