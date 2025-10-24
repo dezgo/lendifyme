@@ -26,7 +26,7 @@ def migrate_v1_create_loans_table(conn):
             date_borrowed TEXT NOT NULL,
             date_due TEXT,
             date_repaid TEXT,
-            notes TEXT,
+            note TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
     """)

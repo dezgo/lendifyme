@@ -31,21 +31,29 @@ def init_db():
 def index():
     if request.method == "POST":
         borrower = request.form.get("borrower")
+        date_borrowed = request.form.get("date_borrowed")
         amount = request.form.get("amount")
         note = request.form.get("note")
 
         if borrower and amount:
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
-            c.execute("INSERT INTO loans (borrower, amount, note) VALUES (?, ?, ?)",
-                      (borrower, float(amount), note))
+            c.execute("""
+                INSERT INTO loans (borrower, amount, note, date_borrowed)
+                VALUES (?, ?, ?, ?)
+            """, (borrower, float(amount), note, date_borrowed))
             conn.commit()
             conn.close()
         return redirect("/")
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT borrower, amount, note, created_at FROM loans ORDER BY created_at DESC")
+    c.execute("""
+        SELECT borrower, amount, note, date_borrowed, created_at
+        FROM loans
+        ORDER BY created_at DESC
+    """)
+
     loans = c.fetchall()
     conn.close()
 
