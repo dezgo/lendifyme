@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LendifyMe – Simple Loan Tracker</title>
+    <style>
+        body { font-family: sans-serif; max-width: 600px; margin: auto; padding: 2rem; }
+        input, textarea { width: 100%; margin-bottom: 1rem; padding: 0.5rem; }
+        table { width: 100%; border-collapse: collapse; margin-top: 2rem; }
+        th, td { padding: 0.5rem; border: 1px solid #ddd; }
+        th { background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>LendifyMe</h1>
+    <form method="post">
+        <label>Borrower</label>
+        <input type="text" name="borrower" required>
+
+        <label>Amount ($)</label>
+        <input type="number" step="0.01" name="amount" required>
+
+        <label>Note (optional)</label>
+        <textarea name="note"></textarea>
+
+        <button type="submit">Add Loan</button>
+    </form>
+
+    {% if loans %}
+        <h2>Loans</h2>
+        <table>
+            <tr><th>Borrower</th><th>Amount</th><th>Note</th><th>Date</th></tr>
+            {% for loan in loans %}
+                <tr>
+                    <td>{{ loan[0] }}</td>
+                    <td>${{ '%.2f'|format(loan[1]) }}</td>
+                    <td>{{ loan[2] }}</td>
+                    <td>{{ loan[3] }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+</body>
+</html>
