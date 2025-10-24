@@ -1,2 +1,5 @@
 .idea/
 loans.db
+.env
+__pycache__/
+*.py[cod]

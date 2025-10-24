@@ -1,10 +1,17 @@
 import sqlite3
 import os
+from services import migrations
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect
 
 
+# Load environment variables from .env
+load_dotenv()
+
 app = Flask(__name__)
-DB_PATH = "loans.db"
+
+# Config
+DB_PATH = 'lendifyme.db'
 
 
 @app.before_request
@@ -15,20 +22,9 @@ def redirect_www():
 
 
 def init_db():
-    if not os.path.exists(DB_PATH):
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute("""
-            CREATE TABLE loans (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                borrower TEXT NOT NULL,
-                amount REAL NOT NULL,
-                note TEXT,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        conn.commit()
-        conn.close()
+    conn = sqlite3.connect(DB_PATH)
+    migrations.run_migrations(conn)
+    conn.close()
 
 
 @app.route("/", methods=["GET", "POST"])
