@@ -2,13 +2,74 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LendifyMe – Simple Loan Tracker</title>
     <style>
-        body { font-family: sans-serif; max-width: 600px; margin: auto; padding: 2rem; }
-        input, textarea { width: 100%; margin-bottom: 1rem; padding: 0.5rem; }
-        table { width: 100%; border-collapse: collapse; margin-top: 2rem; }
-        th, td { padding: 0.5rem; border: 1px solid #ddd; }
-        th { background: #f0f0f0; }
+        * { box-sizing: border-box; }
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: auto;
+            padding: 1rem;
+            line-height: 1.5;
+        }
+        input, textarea, button {
+            width: 100%;
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            font-size: 16px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.25rem;
+            font-weight: bold;
+        }
+        h1 {
+            font-size: 1.75rem;
+            margin-bottom: 1.5rem;
+        }
+        h2 {
+            font-size: 1.25rem;
+            margin-top: 2rem;
+        }
+
+        /* Table styles for mobile */
+        .table-container {
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 400px;
+        }
+        th, td {
+            padding: 0.75rem 0.5rem;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background: #f0f0f0;
+            font-weight: bold;
+        }
+
+        @media (max-width: 480px) {
+            body { padding: 0.75rem; }
+            h1 { font-size: 1.5rem; }
+            input, textarea, button { padding: 0.65rem; }
+        }
     </style>
 </head>
 <body>
@@ -31,17 +92,19 @@
 
     {% if loans %}
         <h2>Loans</h2>
-        <table>
-            <tr><th>Borrower</th><th>Amount</th><th>Note</th><th>Date Borrowed</th></tr>
-            {% for loan in loans %}
-                <tr>
-                    <td>{{ loan[0] }}</td>
-                    <td>${{ '%.2f'|format(loan[1]) }}</td>
-                    <td>{{ loan[2] }}</td>
-                    <td>{{ loan[3] or '—' }}</td>
-                </tr>
-            {% endfor %}
-        </table>
+        <div class="table-container">
+            <table>
+                <tr><th>Borrower</th><th>Amount</th><th>Note</th><th>Date Borrowed</th></tr>
+                {% for loan in loans %}
+                    <tr>
+                        <td>{{ loan[0] }}</td>
+                        <td>${{ '%.2f'|format(loan[1]) }}</td>
+                        <td>{{ loan[2] }}</td>
+                        <td>{{ loan[3] or '—' }}</td>
+                    </tr>
+                {% endfor %}
+            </table>
+        </div>
     {% endif %}
 </body>
 </html>
