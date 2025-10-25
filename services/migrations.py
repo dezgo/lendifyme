@@ -16,6 +16,11 @@ def run_migrations(conn):
         _set_user_version(conn, 1)
         print("✅ Migration v1 applied.")
 
+    if current < 2:
+        migrate_v2_add_amount_repaid(conn)
+        _set_user_version(conn, 2)
+        print("✅ Migration v2 applied.")
+
 
 def migrate_v1_create_loans_table(conn):
     conn.execute("""
@@ -29,4 +34,11 @@ def migrate_v1_create_loans_table(conn):
             note TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         );
+    """)
+
+
+def migrate_v2_add_amount_repaid(conn):
+    conn.execute("""
+        ALTER TABLE loans
+        ADD COLUMN amount_repaid REAL DEFAULT 0 NOT NULL;
     """)

@@ -52,7 +52,7 @@ def index():
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute("""
-        SELECT borrower, amount, note, date_borrowed, created_at
+        SELECT id, borrower, amount, note, date_borrowed, amount_repaid, created_at
         FROM loans
         ORDER BY created_at DESC
     """)
@@ -61,6 +61,24 @@ def index():
     conn.close()
 
     return render_template("index.html", loans=loans)
+
+
+@app.route("/repay/<int:loan_id>", methods=["POST"])
+def repay(loan_id):
+    repayment_amount = request.form.get("repayment_amount")
+
+    if repayment_amount:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute("""
+            UPDATE loans
+            SET amount_repaid = amount_repaid + ?
+            WHERE id = ?
+        """, (float(repayment_amount), loan_id))
+        conn.commit()
+        conn.close()
+
+    return redirect("/")
 
 
 if __name__ == "__main__":
