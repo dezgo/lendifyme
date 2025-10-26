@@ -7,7 +7,18 @@ from services.transaction_matcher import match_transactions_to_loans
 from services.connectors.registry import ConnectorRegistry
 from services.connectors.csv_connector import CSVConnector
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, session, flash
+from flask import Flask, render_template, request, redirect, session, flash, url_for
+from flask_mail import Mail, Message
+from functools import wraps
+from services.auth_helpers import (
+    generate_recovery_codes,
+    verify_recovery_code,
+    generate_magic_link_token,
+    hash_token,
+    get_magic_link_expiry,
+    is_magic_link_expired
+)
+from services.email_sender import send_magic_link_email
 
 
 # Load environment variables from .env
@@ -18,6 +29,17 @@ app = Flask(__name__)
 # Config
 app.config['DATABASE'] = 'lendifyme.db'
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# Email config for magic links
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True') == 'True'
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER')
+app.config['APP_URL'] = os.getenv('APP_URL', 'http://localhost:5000')
+
+mail = Mail(app)
 
 
 def get_db_path():
@@ -59,6 +81,22 @@ def filter_duplicate_transactions(matches):
     return filtered_matches
 
 
+def login_required(f):
+    """Decorator to require login for routes."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash("Please log in to access this page.", "error")
+            return redirect(url_for('login', next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+def get_current_user_id():
+    """Get the current logged-in user's ID from session."""
+    return session.get('user_id')
+
+
 @app.before_request
 def redirect_www():
     if request.host.startswith("www."):
@@ -75,7 +113,246 @@ def init_db():
 init_db()
 
 
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    """User registration - passwordless."""
+    if request.method == "POST":
+        email = request.form.get("email")
+        name = request.form.get("name")
+
+        if not email:
+            flash("Email is required", "error")
+            return render_template("register.html")
+
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+
+        # Check if email already exists
+        c.execute("SELECT id FROM users WHERE email = ?", (email,))
+        if c.fetchone():
+            flash("Email already registered. Use 'Login' to sign in.", "error")
+            conn.close()
+            return redirect(url_for('login'))
+
+        # Generate recovery codes
+        plain_codes, hashed_codes_json = generate_recovery_codes()
+
+        # Create user
+        c.execute("""
+            INSERT INTO users (email, name, recovery_codes, auth_provider)
+            VALUES (?, ?, ?, 'magic_link')
+        """, (email, name, hashed_codes_json))
+        conn.commit()
+
+        user_id = c.lastrowid
+        conn.close()
+
+        # Store recovery codes in session to show user once
+        session['show_recovery_codes'] = plain_codes
+        session['recovery_codes_for_user'] = user_id
+
+        flash("Account created! Save your recovery codes below.", "success")
+        return redirect(url_for('show_recovery_codes'))
+
+    return render_template("register.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """User login - send magic link or use recovery code."""
+    if request.method == "POST":
+        email = request.form.get("email")
+        recovery_code = request.form.get("recovery_code")
+
+        if not email:
+            flash("Email is required", "error")
+            return render_template("login.html")
+
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+
+        c.execute("SELECT id, email, name, recovery_codes FROM users WHERE email = ?", (email,))
+        user = c.fetchone()
+
+        if not user:
+            # Don't reveal if email exists or not for security
+            flash("If that email is registered, you'll receive a magic link shortly.", "success")
+            conn.close()
+            return render_template("login.html")
+
+        user_id, user_email, user_name, recovery_codes_json = user
+
+        # If recovery code provided, try that first
+        if recovery_code:
+            is_valid, updated_codes = verify_recovery_code(recovery_code, recovery_codes_json)
+            if is_valid:
+                # Update recovery codes (remove used one)
+                c.execute("UPDATE users SET recovery_codes = ? WHERE id = ?", (updated_codes, user_id))
+                conn.commit()
+                conn.close()
+
+                # Log them in
+                session['user_id'] = user_id
+                session['user_email'] = user_email
+                session['user_name'] = user_name
+
+                flash(f"Welcome back, {user_name or user_email}! Recovery code used.", "success")
+                return redirect(url_for('index'))
+            else:
+                flash("Invalid recovery code", "error")
+                conn.close()
+                return render_template("login.html")
+
+        # Send magic link
+        token = generate_magic_link_token()
+        expires_at = get_magic_link_expiry(minutes=15)
+
+        c.execute("""
+            INSERT INTO magic_links (user_id, token, expires_at)
+            VALUES (?, ?, ?)
+        """, (user_id, token, expires_at))
+        conn.commit()
+        conn.close()
+
+        # Send email with magic link
+        magic_link = f"{app.config['APP_URL']}/auth/magic/{token}"
+        email_sent = False
+
+        # Try Mailgun API first (recommended)
+        success, message = send_magic_link_email(user_email, user_name, magic_link)
+        if success:
+            flash("Check your email! We've sent you a magic link to sign in.", "success")
+            email_sent = True
+        else:
+            # Try Flask-Mail (SMTP) as fallback
+            if app.config.get('MAIL_USERNAME') and app.config.get('MAIL_DEFAULT_SENDER'):
+                try:
+                    msg = Message(
+                        subject="Your LendifyMe Login Link",
+                        recipients=[user_email],
+                        body=f"""Hi {user_name or 'there'},
+
+Click the link below to sign in to LendifyMe:
+
+{magic_link}
+
+This link will expire in 15 minutes.
+
+If you didn't request this, you can safely ignore this email.
+
+---
+LendifyMe
+"""
+                    )
+                    mail.send(msg)
+                    flash("Check your email! We've sent you a magic link to sign in.", "success")
+                    email_sent = True
+                except Exception as e:
+                    flash(f"Error sending email: {str(e)}", "error")
+
+        # Development mode - print link to console if email failed
+        if not email_sent:
+            print("\n" + "="*70)
+            print("🔗 MAGIC LINK (Development Mode - Email not configured)")
+            print("="*70)
+            print(f"User: {user_email}")
+            print(f"Link: {magic_link}")
+            print("="*70 + "\n")
+            flash("Email not configured. Check the console for your magic link!", "success")
+
+        return render_template("login.html")
+
+    return render_template("login.html")
+
+
+@app.route("/auth/magic/<token>")
+def magic_link_auth(token):
+    """Verify magic link and log user in."""
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    c.execute("""
+        SELECT ml.id, ml.user_id, ml.expires_at, ml.used, u.email, u.name
+        FROM magic_links ml
+        JOIN users u ON ml.user_id = u.id
+        WHERE ml.token = ?
+    """, (token,))
+
+    result = c.fetchone()
+
+    if not result:
+        flash("Invalid or expired login link", "error")
+        conn.close()
+        return redirect(url_for('login'))
+
+    link_id, user_id, expires_at, used, user_email, user_name = result
+
+    # Check if already used
+    if used:
+        flash("This login link has already been used", "error")
+        conn.close()
+        return redirect(url_for('login'))
+
+    # Check if expired
+    if is_magic_link_expired(expires_at):
+        flash("This login link has expired. Request a new one.", "error")
+        conn.close()
+        return redirect(url_for('login'))
+
+    # Mark as used
+    c.execute("UPDATE magic_links SET used = 1 WHERE id = ?", (link_id,))
+    conn.commit()
+    conn.close()
+
+    # Log user in
+    session['user_id'] = user_id
+    session['user_email'] = user_email
+    session['user_name'] = user_name
+
+    flash(f"Welcome back, {user_name or user_email}!", "success")
+    return redirect(url_for('index'))
+
+
+@app.route("/auth/recovery-codes")
+def show_recovery_codes():
+    """Show recovery codes after registration (one-time view)."""
+    if 'show_recovery_codes' not in session:
+        flash("No recovery codes to show", "error")
+        return redirect(url_for('index'))
+
+    codes = session.get('show_recovery_codes')
+    user_id = session.get('recovery_codes_for_user')
+
+    # Auto-login the user who just registered
+    if user_id:
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+        c.execute("SELECT id, email, name FROM users WHERE id = ?", (user_id,))
+        user = c.fetchone()
+        conn.close()
+
+        if user:
+            session['user_id'] = user[0]
+            session['user_email'] = user[1]
+            session['user_name'] = user[2]
+
+    # Clear from session after showing once
+    session.pop('show_recovery_codes', None)
+    session.pop('recovery_codes_for_user', None)
+
+    return render_template("recovery_codes.html", codes=codes)
+
+
+@app.route("/logout")
+def logout():
+    """User logout."""
+    session.clear()
+    flash("You have been logged out", "success")
+    return redirect(url_for('login'))
+
+
 @app.route("/", methods=["GET", "POST"])
+@login_required
 def index():
     if request.method == "POST":
         borrower = request.form.get("borrower")
@@ -90,13 +367,14 @@ def index():
             conn = sqlite3.connect(get_db_path())
             c = conn.cursor()
             c.execute("""
-                INSERT INTO loans (borrower, bank_name, amount, note, date_borrowed, repayment_amount, repayment_frequency)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO loans (borrower, bank_name, amount, note, date_borrowed, repayment_amount, repayment_frequency, user_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """, (borrower,
                   bank_name if bank_name else None,
                   float(amount), note, date_borrowed,
                   float(repayment_amount) if repayment_amount else None,
-                  repayment_frequency if repayment_frequency else None))
+                  repayment_frequency if repayment_frequency else None,
+                  get_current_user_id()))
             conn.commit()
             conn.close()
         return redirect("/")
@@ -104,11 +382,15 @@ def index():
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
     c.execute("""
-        SELECT id, borrower, amount, note, date_borrowed, amount_repaid,
-               repayment_amount, repayment_frequency, bank_name, created_at
-        FROM loans
-        ORDER BY created_at DESC
-    """)
+        SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
+               COALESCE(SUM(at.amount), 0) as amount_repaid,
+               l.repayment_amount, l.repayment_frequency, l.bank_name, l.created_at
+        FROM loans l
+        LEFT JOIN applied_transactions at ON l.id = at.loan_id
+        WHERE l.user_id = ?
+        GROUP BY l.id
+        ORDER BY l.created_at DESC
+    """, (get_current_user_id(),))
 
     loans = c.fetchall()
     conn.close()
@@ -117,24 +399,29 @@ def index():
 
 
 @app.route("/repay/<int:loan_id>", methods=["POST"])
+@login_required
 def repay(loan_id):
     repayment_amount = request.form.get("repayment_amount")
 
     if repayment_amount:
+        # Verify loan ownership
         conn = sqlite3.connect(get_db_path())
         c = conn.cursor()
-        c.execute("""
-            UPDATE loans
-            SET amount_repaid = amount_repaid + ?
-            WHERE id = ?
-        """, (float(repayment_amount), loan_id))
-        conn.commit()
+        c.execute("SELECT id FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
+        if c.fetchone():
+            # Record manual repayment as applied transaction
+            c.execute("""
+                INSERT INTO applied_transactions (date, description, amount, loan_id)
+                VALUES (date('now'), 'Manual repayment', ?, ?)
+            """, (float(repayment_amount), loan_id))
+            conn.commit()
         conn.close()
 
     return redirect("/")
 
 
 @app.route("/edit/<int:loan_id>", methods=["GET", "POST"])
+@login_required
 def edit_loan(loan_id):
     if request.method == "POST":
         borrower = request.form.get("borrower")
@@ -152,13 +439,13 @@ def edit_loan(loan_id):
                 UPDATE loans
                 SET borrower = ?, bank_name = ?, amount = ?, date_borrowed = ?, note = ?,
                     repayment_amount = ?, repayment_frequency = ?
-                WHERE id = ?
+                WHERE id = ? AND user_id = ?
             """, (borrower,
                   bank_name if bank_name else None,
                   float(amount), date_borrowed, note,
                   float(repayment_amount) if repayment_amount else None,
                   repayment_frequency if repayment_frequency else None,
-                  loan_id))
+                  loan_id, get_current_user_id()))
             conn.commit()
             conn.close()
             flash("Loan updated successfully", "success")
@@ -169,11 +456,14 @@ def edit_loan(loan_id):
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
     c.execute("""
-        SELECT id, borrower, amount, note, date_borrowed, amount_repaid,
-               repayment_amount, repayment_frequency, bank_name
-        FROM loans
-        WHERE id = ?
-    """, (loan_id,))
+        SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
+               COALESCE(SUM(at.amount), 0) as amount_repaid,
+               l.repayment_amount, l.repayment_frequency, l.bank_name
+        FROM loans l
+        LEFT JOIN applied_transactions at ON l.id = at.loan_id
+        WHERE l.id = ? AND l.user_id = ?
+        GROUP BY l.id
+    """, (loan_id, get_current_user_id()))
     loan = c.fetchone()
     conn.close()
 
@@ -185,10 +475,11 @@ def edit_loan(loan_id):
 
 
 @app.route("/delete/<int:loan_id>", methods=["POST"])
+@login_required
 def delete_loan(loan_id):
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
-    c.execute("DELETE FROM loans WHERE id = ?", (loan_id,))
+    c.execute("DELETE FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
     conn.commit()
     conn.close()
 
@@ -197,17 +488,22 @@ def delete_loan(loan_id):
 
 
 @app.route("/loan/<int:loan_id>/transactions")
+@login_required
 def loan_transactions(loan_id):
     """View all applied transactions for a specific loan."""
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
 
-    # Get loan details
+    # Get loan details with calculated repaid amount
     c.execute("""
-        SELECT id, borrower, amount, date_borrowed, amount_repaid, bank_name
-        FROM loans
-        WHERE id = ?
-    """, (loan_id,))
+        SELECT l.id, l.borrower, l.amount, l.date_borrowed,
+               COALESCE(SUM(at.amount), 0) as amount_repaid,
+               l.bank_name
+        FROM loans l
+        LEFT JOIN applied_transactions at ON l.id = at.loan_id
+        WHERE l.id = ? AND l.user_id = ?
+        GROUP BY l.id
+    """, (loan_id, get_current_user_id()))
     loan = c.fetchone()
 
     if not loan:
@@ -229,17 +525,22 @@ def loan_transactions(loan_id):
 
 
 @app.route("/loan/<int:loan_id>/transactions/export")
+@login_required
 def export_loan_transactions(loan_id):
     """Export loan transactions as CSV."""
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
 
-    # Get loan details
+    # Get loan details with calculated repaid amount
     c.execute("""
-        SELECT id, borrower, amount, date_borrowed, amount_repaid, bank_name
-        FROM loans
-        WHERE id = ?
-    """, (loan_id,))
+        SELECT l.id, l.borrower, l.amount, l.date_borrowed,
+               COALESCE(SUM(at.amount), 0) as amount_repaid,
+               l.bank_name
+        FROM loans l
+        LEFT JOIN applied_transactions at ON l.id = at.loan_id
+        WHERE l.id = ? AND l.user_id = ?
+        GROUP BY l.id
+    """, (loan_id, get_current_user_id()))
     loan = c.fetchone()
 
     if not loan:
@@ -301,6 +602,7 @@ def export_loan_transactions(loan_id):
 
 
 @app.route("/match", methods=["GET", "POST"])
+@login_required
 def match_transactions():
     if request.method == "POST":
         connector_type = request.form.get("connector_type", "csv")
@@ -363,14 +665,18 @@ def match_transactions():
             transaction_dicts = [t.to_dict() for t in transactions]
             all_transactions_dicts = [t.to_dict() for t in all_transactions]
 
-            # Get all loans
+            # Get all loans for current user with calculated repaid amounts
             conn = sqlite3.connect(get_db_path())
             c = conn.cursor()
             c.execute("""
-                SELECT id, borrower, amount, note, date_borrowed, amount_repaid,
-                       repayment_amount, repayment_frequency, bank_name
-                FROM loans
-            """)
+                SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
+                       COALESCE(SUM(at.amount), 0) as amount_repaid,
+                       l.repayment_amount, l.repayment_frequency, l.bank_name
+                FROM loans l
+                LEFT JOIN applied_transactions at ON l.id = at.loan_id
+                WHERE l.user_id = ?
+                GROUP BY l.id
+            """, (get_current_user_id(),))
             loan_rows = c.fetchall()
             conn.close()
 
@@ -447,6 +753,7 @@ def match_transactions():
 
 
 @app.route("/match/review")
+@login_required
 def review_matches():
     """Show pending matches for review."""
     matches = session.get('pending_matches', [])
@@ -460,6 +767,7 @@ def review_matches():
 
 
 @app.route("/apply-match", methods=["POST"])
+@login_required
 def apply_match():
     match_index = request.form.get("match_index")
 
@@ -473,23 +781,21 @@ def apply_match():
             amount = match['transaction']['amount']
             transaction = match['transaction']
 
-            # Apply the repayment
+            # Record the applied transaction
             conn = sqlite3.connect(get_db_path())
             c = conn.cursor()
-            c.execute("""
-                UPDATE loans
-                SET amount_repaid = amount_repaid + ?
-                WHERE id = ?
-            """, (amount, loan_id))
 
-            # Record the applied transaction to prevent duplicates
-            c.execute("""
-                INSERT INTO applied_transactions (date, description, amount, loan_id)
-                VALUES (?, ?, ?, ?)
-            """, (transaction['date'], transaction['description'],
-                  transaction['amount'], loan_id))
+            # Verify loan ownership
+            c.execute("SELECT id FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
+            if c.fetchone():
+                # Record the applied transaction
+                c.execute("""
+                    INSERT INTO applied_transactions (date, description, amount, loan_id)
+                    VALUES (?, ?, ?, ?)
+                """, (transaction['date'], transaction['description'],
+                      transaction['amount'], loan_id))
+                conn.commit()
 
-            conn.commit()
             conn.close()
 
             # Remove the applied match from session
@@ -503,6 +809,7 @@ def apply_match():
 
 
 @app.route("/reject-match", methods=["POST"])
+@login_required
 def reject_match():
     match_index = request.form.get("match_index")
 
@@ -537,31 +844,26 @@ def reject_match():
 
 
 @app.route("/remove-transaction/<int:transaction_id>", methods=["POST"])
+@login_required
 def remove_transaction(transaction_id):
     """Remove an applied transaction and reverse its effect on the loan."""
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
 
-    # Get the transaction details before deleting
+    # Get the transaction details and verify ownership
     c.execute("""
-        SELECT loan_id, amount, description, date
-        FROM applied_transactions
-        WHERE id = ?
-    """, (transaction_id,))
+        SELECT at.loan_id, at.amount, at.description, at.date
+        FROM applied_transactions at
+        JOIN loans l ON at.loan_id = l.id
+        WHERE at.id = ? AND l.user_id = ?
+    """, (transaction_id, get_current_user_id()))
 
     transaction = c.fetchone()
 
     if transaction:
         loan_id, amount, description, date = transaction
 
-        # Reverse the repayment
-        c.execute("""
-            UPDATE loans
-            SET amount_repaid = amount_repaid - ?
-            WHERE id = ?
-        """, (amount, loan_id))
-
-        # Delete the applied transaction
+        # Delete the applied transaction (amount_repaid will recalculate automatically)
         c.execute("""
             DELETE FROM applied_transactions
             WHERE id = ?

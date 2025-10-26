@@ -124,6 +124,16 @@
             gap: 0.25rem;
             align-items: center;
         }
+        .action-buttons form {
+            margin: 0;
+            display: inline-block;
+        }
+        .action-buttons button {
+          width: auto;
+          margin-bottom: 0;
+          padding: 0.25rem 0.5rem; /* match your .btn-* */
+          font-size: 0.8rem;
+        }
         .btn-view, .btn-edit, .btn-delete {
             padding: 0.25rem 0.5rem;
             font-size: 0.8rem;
@@ -132,6 +142,9 @@
             cursor: pointer;
             text-decoration: none;
             display: inline-block;
+            line-height: 1.5;
+            font-family: inherit;
+            vertical-align: middle;
         }
         .btn-view {
             background: #6c757d;
@@ -154,15 +167,46 @@
         .btn-delete:hover {
             background: #bb2d3b;
         }
+        .user-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding: 0.75rem 1rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .user-info span {
+            color: #6c757d;
+            font-size: 0.9rem;
+        }
+        .logout-link {
+            color: #dc3545;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .logout-link:hover {
+            text-decoration: underline;
+        }
 
         @media (max-width: 480px) {
             body { padding: 0.75rem; }
             h1 { font-size: 1.5rem; }
             input, textarea, button { padding: 0.65rem; }
+            .user-info {
+                flex-direction: column;
+                gap: 0.5rem;
+                align-items: flex-start;
+            }
         }
     </style>
 </head>
 <body>
+    <div class="user-info">
+        <span>Logged in as {{ session.user_name or session.user_email }}</span>
+        <a href="/logout" class="logout-link">Logout</a>
+    </div>
+
     <h1>LendifyMe</h1>
 
     <a href="/match" class="nav-link">📊 Match Bank Transactions</a>

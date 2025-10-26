@@ -3,3 +3,5 @@ gunicorn
 python-dotenv
 pytest
 requests
+webauthn
+flask-mail

@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recovery Codes – LendifyMe</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: 3rem auto;
+            padding: 1rem;
+            line-height: 1.5;
+        }
+        .recovery-container {
+            background: #f8f9fa;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            font-size: 1.75rem;
+            margin-bottom: 1rem;
+            text-align: center;
+            color: #dc3545;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
+        }
+        .warning strong {
+            color: #856404;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        .warning p {
+            color: #856404;
+            margin: 0.25rem 0;
+            font-size: 0.9rem;
+        }
+        .codes-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 0.75rem;
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: white;
+            border-radius: 4px;
+            border: 1px solid #dee2e6;
+        }
+        .code-item {
+            font-family: 'Courier New', monospace;
+            font-size: 1rem;
+            font-weight: bold;
+            padding: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 3px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+        button, .btn {
+            width: 100%;
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            text-decoration: none;
+            display: block;
+            text-align: center;
+        }
+        .btn-primary {
+            background: #198754;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #157347;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        .info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+            padding: 1rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            margin-top: 1rem;
+        }
+        @media (max-width: 480px) {
+            .codes-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="recovery-container">
+        <h1>🔐 Save Your Recovery Codes</h1>
+
+        <div class="warning">
+            <strong>⚠️ IMPORTANT - Save These Now!</strong>
+            <p>These recovery codes are shown ONLY ONCE.</p>
+            <p>Save them somewhere safe (password manager, printed copy, etc.)</p>
+            <p>You'll need one if you ever lose access to your email.</p>
+        </div>
+
+        <div class="codes-grid">
+            {% for code in codes %}
+                <div class="code-item">{{ code }}</div>
+            {% endfor %}
+        </div>
+
+        <button onclick="copyAllCodes()" class="btn btn-secondary">📋 Copy All Codes</button>
+        <button onclick="window.print()" class="btn btn-secondary">🖨️ Print Codes</button>
+        <a href="/" class="btn btn-primary">✓ I've Saved My Codes - Continue</a>
+
+        <div class="info">
+            💡 <strong>Tip:</strong> Each code can only be used once. When you use a code to sign in, it will be permanently deleted.
+        </div>
+    </div>
+
+    <script>
+        function copyAllCodes() {
+            const codes = {{ codes|tojson }};
+            const text = codes.join('\n');
+            navigator.clipboard.writeText(text).then(() => {
+                alert('All codes copied to clipboard!');
+            }).catch(err => {
+                alert('Failed to copy codes. Please select and copy them manually.');
+            });
+        }
+    </script>
+
+    <style media="print">
+        button, .btn-secondary, .info {
+            display: none !important;
+        }
+        .recovery-container {
+            box-shadow: none;
+        }
+        body {
+            margin: 0;
+            max-width: 100%;
+        }
+    </style>
+</body>
+</html>
