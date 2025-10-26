@@ -1,8 +1,11 @@
 # services/connectors/up_bank.py
 import requests
+import logging
 from typing import List, Optional
 from datetime import datetime, timedelta
 from .base import BankConnector, Transaction
+
+logger = logging.getLogger(__name__)
 
 
 class UpBankConnector(BankConnector):

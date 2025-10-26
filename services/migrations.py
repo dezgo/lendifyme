@@ -98,6 +98,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 11:
+        try:
+            migrate_v11_create_pending_matches_table(conn)
+            _set_user_version(conn, 11)
+            conn.commit()
+            print("✅ Migration v11 applied.")
+        except Exception as e:
+            print(f"❌ Migration v11 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -402,3 +415,37 @@ def migrate_v10_passwordless_auth(conn):
     """)
 
     print("  Users table migration complete.")
+
+
+def migrate_v11_create_pending_matches_table(conn):
+    """
+    Create table to store pending transaction matches (replacing session storage).
+    This fixes the session cookie size limit issue.
+    """
+    # Create pending_matches_data table
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS pending_matches_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            session_key TEXT NOT NULL,
+            matches_json TEXT NOT NULL,
+            context_transactions_json TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        );
+    """)
+
+    # Create index for faster lookups
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pending_matches_session
+        ON pending_matches_data(user_id, session_key);
+    """)
+
+    # Create index for cleanup of expired data
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pending_matches_expires
+        ON pending_matches_data(expires_at);
+    """)
+
+    print("  Pending matches table created successfully.")
