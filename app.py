@@ -860,6 +860,10 @@ def match_transactions():
 
             # Store only the session key in the actual session cookie
             session['pending_matches_key'] = session_key
+
+            # Clear any old cache to force fresh load
+            session.pop('pending_matches_cache', None)
+
             app.logger.info(f"Stored {len(matches)} matches and {len(context_transactions)} context transactions in database")
 
             return redirect("/match/review")
@@ -893,25 +897,45 @@ def review_matches():
         flash("No pending matches. Import transactions first.", "error")
         return redirect("/match")
 
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
+    # Check if we have cached matches in session (for performance)
+    # Only cache matches, not all_transactions (to avoid cookie size issues)
+    if 'pending_matches_cache' in session:
+        matches = session['pending_matches_cache']
+        # Still need to load all_transactions from DB
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+        c.execute("""
+            SELECT context_transactions_json
+            FROM pending_matches_data
+            WHERE user_id = ? AND session_key = ? AND expires_at > ?
+        """, (get_current_user_id(), session_key, datetime.now().isoformat()))
+        result = c.fetchone()
+        conn.close()
+        all_transactions = json.loads(result[0]) if result and result[0] else []
+    else:
+        # Load from database and cache matches only
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
 
-    c.execute("""
-        SELECT matches_json, context_transactions_json
-        FROM pending_matches_data
-        WHERE user_id = ? AND session_key = ? AND expires_at > ?
-    """, (get_current_user_id(), session_key, datetime.now().isoformat()))
+        c.execute("""
+            SELECT matches_json, context_transactions_json
+            FROM pending_matches_data
+            WHERE user_id = ? AND session_key = ? AND expires_at > ?
+        """, (get_current_user_id(), session_key, datetime.now().isoformat()))
 
-    result = c.fetchone()
-    conn.close()
+        result = c.fetchone()
+        conn.close()
 
-    if not result:
-        flash("No pending matches found or session expired. Import transactions again.", "error")
-        session.pop('pending_matches_key', None)
-        return redirect("/match")
+        if not result:
+            flash("No pending matches found or session expired. Import transactions again.", "error")
+            session.pop('pending_matches_key', None)
+            return redirect("/match")
 
-    matches = json.loads(result[0]) if result[0] else []
-    all_transactions = json.loads(result[1]) if result[1] else []
+        matches = json.loads(result[0]) if result[0] else []
+        all_transactions = json.loads(result[1]) if result[1] else []
+
+        # Cache only matches in session for fast access (all_transactions is too large)
+        session['pending_matches_cache'] = matches
 
     if not matches:
         flash("No pending matches. Import transactions first.", "error")
@@ -924,55 +948,48 @@ def review_matches():
 @login_required
 def apply_match():
     match_index = request.form.get("match_index")
-    session_key = session.get('pending_matches_key')
 
-    if match_index is not None and session_key:
-        # Retrieve from database
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
+    # Use cached session data for speed
+    if match_index is not None and 'pending_matches_cache' in session:
+        matches = session['pending_matches_cache']
+        match_idx = int(match_index)
 
-        c.execute("""
-            SELECT id, matches_json, context_transactions_json
-            FROM pending_matches_data
-            WHERE user_id = ? AND session_key = ?
-        """, (get_current_user_id(), session_key))
+        if 0 <= match_idx < len(matches):
+            match = matches[match_idx]
+            loan_id = match['loan']['id']
+            amount = match['transaction']['amount']
+            transaction = match['transaction']
 
-        result = c.fetchone()
+            conn = sqlite3.connect(get_db_path())
+            c = conn.cursor()
 
-        if result:
-            db_id, matches_json, context_json = result
-            matches = json.loads(matches_json)
-            match_idx = int(match_index)
+            # Verify loan ownership and insert transaction in one go
+            c.execute("SELECT id FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
+            if c.fetchone():
+                # Record the applied transaction
+                c.execute("""
+                    INSERT INTO applied_transactions (date, description, amount, loan_id)
+                    VALUES (?, ?, ?, ?)
+                """, (transaction['date'], transaction['description'],
+                      transaction['amount'], loan_id))
 
-            if 0 <= match_idx < len(matches):
-                match = matches[match_idx]
-                loan_id = match['loan']['id']
-                amount = match['transaction']['amount']
-                transaction = match['transaction']
+                # Remove from cache
+                matches.pop(match_idx)
+                session['pending_matches_cache'] = matches
 
-                # Verify loan ownership
-                c.execute("SELECT id FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
-                if c.fetchone():
-                    # Record the applied transaction
-                    c.execute("""
-                        INSERT INTO applied_transactions (date, description, amount, loan_id)
-                        VALUES (?, ?, ?, ?)
-                    """, (transaction['date'], transaction['description'],
-                          transaction['amount'], loan_id))
-                    conn.commit()
-
-                    # Remove the applied match and update database
-                    matches.pop(match_idx)
+                # Update database with new matches list - single commit for both operations
+                session_key = session.get('pending_matches_key')
+                if session_key:
                     c.execute("""
                         UPDATE pending_matches_data
                         SET matches_json = ?
-                        WHERE id = ?
-                    """, (json.dumps(matches), db_id))
-                    conn.commit()
+                        WHERE user_id = ? AND session_key = ?
+                    """, (json.dumps(matches), get_current_user_id(), session_key))
 
-                    flash(f"Applied ${amount:.2f} payment to {match['loan']['borrower']}", "success")
+                conn.commit()
+                flash(f"Applied ${amount:.2f} payment to {match['loan']['borrower']}", "success")
 
-        conn.close()
+            conn.close()
 
     # Return to review page with remaining matches
     return redirect("/match/review")
@@ -982,51 +999,44 @@ def apply_match():
 @login_required
 def reject_match():
     match_index = request.form.get("match_index")
-    session_key = session.get('pending_matches_key')
 
-    if match_index is not None and session_key:
-        # Retrieve from database
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
+    # Use cached session data for speed
+    if match_index is not None and 'pending_matches_cache' in session:
+        matches = session['pending_matches_cache']
+        match_idx = int(match_index)
 
-        c.execute("""
-            SELECT id, matches_json
-            FROM pending_matches_data
-            WHERE user_id = ? AND session_key = ?
-        """, (get_current_user_id(), session_key))
+        if 0 <= match_idx < len(matches):
+            match = matches[match_idx]
+            loan_id = match['loan']['id']
+            transaction = match['transaction']
 
-        result = c.fetchone()
+            conn = sqlite3.connect(get_db_path())
+            c = conn.cursor()
 
-        if result:
-            db_id, matches_json = result
-            matches = json.loads(matches_json)
-            match_idx = int(match_index)
+            # Record the rejected match to prevent future suggestions
+            c.execute("""
+                INSERT INTO rejected_matches (date, description, amount, loan_id)
+                VALUES (?, ?, ?, ?)
+            """, (transaction['date'], transaction['description'],
+                  transaction['amount'], loan_id))
 
-            if 0 <= match_idx < len(matches):
-                match = matches[match_idx]
-                loan_id = match['loan']['id']
-                transaction = match['transaction']
+            # Remove from cache
+            matches.pop(match_idx)
+            session['pending_matches_cache'] = matches
 
-                # Record the rejected match to prevent future suggestions
-                c.execute("""
-                    INSERT INTO rejected_matches (date, description, amount, loan_id)
-                    VALUES (?, ?, ?, ?)
-                """, (transaction['date'], transaction['description'],
-                      transaction['amount'], loan_id))
-                conn.commit()
-
-                # Remove the rejected match and update database
-                matches.pop(match_idx)
+            # Update database with new matches list - single commit for both operations
+            session_key = session.get('pending_matches_key')
+            if session_key:
                 c.execute("""
                     UPDATE pending_matches_data
                     SET matches_json = ?
-                    WHERE id = ?
-                """, (json.dumps(matches), db_id))
-                conn.commit()
+                    WHERE user_id = ? AND session_key = ?
+                """, (json.dumps(matches), get_current_user_id(), session_key))
 
-                flash(f"Marked transaction as not a match for {match['loan']['borrower']}", "success")
+            conn.commit()
+            flash(f"Marked transaction as not a match for {match['loan']['borrower']}", "success")
 
-        conn.close()
+            conn.close()
 
     # Return to review page with remaining matches
     return redirect("/match/review")
