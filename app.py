@@ -205,8 +205,10 @@ def register():
 def login():
     """User login - send magic link or use recovery code."""
     if request.method == "POST":
+        app.logger.info("Login POST request received")
         email = request.form.get("email")
         recovery_code = request.form.get("recovery_code")
+        app.logger.info(f"Login attempt for email: {email}, has_recovery_code: {bool(recovery_code)}")
 
         if not email:
             flash("Email is required", "error")
@@ -220,11 +222,13 @@ def login():
 
         if not user:
             # Don't reveal if email exists or not for security
+            app.logger.info(f"User not found for email: {email}")
             flash("If that email is registered, you'll receive a magic link shortly.", "success")
             conn.close()
             return render_template("login.html")
 
         user_id, user_email, user_name, recovery_codes_json = user
+        app.logger.info(f"User found: {user_id} - {user_email}")
 
         # If recovery code provided, try that first
         if recovery_code:
@@ -248,6 +252,7 @@ def login():
                 return render_template("login.html")
 
         # Send magic link
+        app.logger.info(f"Generating magic link for user {user_id}")
         token = generate_magic_link_token()
         expires_at = get_magic_link_expiry(minutes=15)
 
@@ -257,13 +262,16 @@ def login():
         """, (user_id, token, expires_at))
         conn.commit()
         conn.close()
+        app.logger.info(f"Magic link token saved to database")
 
         # Send email with magic link
         magic_link = f"{app.config['APP_URL']}/auth/magic/{token}"
         email_sent = False
+        app.logger.info(f"About to send magic link email to {user_email}")
 
         # Try Mailgun API first (recommended)
         success, message = send_magic_link_email(user_email, user_name, magic_link)
+        app.logger.info(f"send_magic_link_email returned: success={success}, message={message}")
         if success:
             app.logger.info(f"Magic link sent successfully to {user_email}")
             flash("Check your email! We've sent you a magic link to sign in.", "success")
