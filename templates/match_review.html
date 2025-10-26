@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Matches – LendifyMe</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: auto;
+            padding: 1rem;
+            line-height: 1.5;
+        }
+        h1 {
+            font-size: 1.75rem;
+            margin-bottom: 1rem;
+        }
+        .back-link {
+            display: inline-block;
+            margin-bottom: 1rem;
+            color: #007bff;
+            text-decoration: none;
+        }
+        .back-link:hover {
+            text-decoration: underline;
+        }
+        .match-card {
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            background: white;
+        }
+        .match-card.high-confidence {
+            border-color: #198754;
+            background: #f0fdf4;
+        }
+        .match-card.medium-confidence {
+            border-color: #ffc107;
+            background: #fffbeb;
+        }
+        .confidence-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+        }
+        .confidence-high {
+            background: #198754;
+            color: white;
+        }
+        .confidence-medium {
+            background: #ffc107;
+            color: black;
+        }
+        .confidence-low {
+            background: #6c757d;
+            color: white;
+        }
+        .match-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+        .detail-section {
+            padding: 0.75rem;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+        }
+        .detail-section h3 {
+            font-size: 0.9rem;
+            margin: 0 0 0.5rem 0;
+            color: #6c757d;
+            text-transform: uppercase;
+            font-weight: bold;
+        }
+        .detail-section p {
+            margin: 0.25rem 0;
+            font-size: 0.95rem;
+        }
+        .amount {
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: #198754;
+        }
+        .reasons {
+            margin: 0.75rem 0;
+            padding: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        .reasons ul {
+            margin: 0.25rem 0 0 1.5rem;
+            padding: 0;
+        }
+        .reasons li {
+            font-size: 0.9rem;
+            margin-bottom: 0.25rem;
+        }
+        button {
+            padding: 0.5rem 1.5rem;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .btn-apply {
+            background: #198754;
+            color: white;
+        }
+        .btn-apply:hover {
+            background: #157347;
+        }
+        .btn-reject {
+            background: #6c757d;
+            color: white;
+            margin-left: 0.5rem;
+        }
+        .btn-reject:hover {
+            background: #5a6268;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        .extra-details {
+            margin-top: 1rem;
+            padding: 0.75rem;
+            background: #f8f9fa;
+            border-radius: 4px;
+            font-size: 0.85rem;
+        }
+        .extra-details summary {
+            cursor: pointer;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .extra-details summary:hover {
+            color: #0056b3;
+        }
+        .extra-details p {
+            margin: 0.25rem 0;
+            font-size: 0.85rem;
+        }
+        .no-matches {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: #6c757d;
+        }
+        .no-matches h2 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .try-again {
+            display: inline-block;
+            margin-top: 1rem;
+            padding: 0.5rem 1.5rem;
+            background: #007bff;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .try-again:hover {
+            background: #0056b3;
+        }
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .context-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+        }
+        .context-table th {
+            background: #e9ecef;
+            padding: 0.5rem;
+            text-align: left;
+            font-weight: bold;
+            border: 1px solid #dee2e6;
+        }
+        .context-table td {
+            padding: 0.5rem;
+            border: 1px solid #dee2e6;
+        }
+        .context-table tr.current-transaction {
+            background: #fff3cd;
+            font-weight: bold;
+        }
+        .context-table tr.incoming {
+            background: #f0fdf4;
+        }
+        .context-table tr.outgoing {
+            background: #fff5f5;
+        }
+        .context-incoming {
+            color: #198754;
+        }
+        .context-outgoing {
+            color: #dc3545;
+        }
+        @media (max-width: 640px) {
+            .match-details {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <a href="/" class="back-link">← Back to Loans</a>
+
+    <h1>Suggested Matches</h1>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    {% if matches %}
+        <p>We found {{ matches|length }} potential match{{ 'es' if matches|length != 1 else '' }}. Review and apply them below:</p>
+
+        {% for match in matches %}
+            <div class="match-card {% if match.confidence >= 70 %}high-confidence{% elif match.confidence >= 40 %}medium-confidence{% endif %}">
+                <span class="confidence-badge {% if match.confidence >= 70 %}confidence-high{% elif match.confidence >= 40 %}confidence-medium{% else %}confidence-low{% endif %}">
+                    {{ '%.0f'|format(match.confidence) }}% Confidence
+                </span>
+
+                <div class="match-details">
+                    <div class="detail-section">
+                        <h3>Transaction</h3>
+                        <p><strong>Date:</strong> {{ match.transaction.date }}</p>
+                        <p><strong>Description:</strong> {{ match.transaction.description }}</p>
+
+                        {% if match.transaction.raw_data and match.transaction.raw_data.attributes %}
+                            {% set attrs = match.transaction.raw_data.attributes %}
+
+                            {% if attrs.message %}
+                                <p><strong>Message:</strong> {{ attrs.message }}</p>
+                            {% endif %}
+
+                            {% if attrs.rawText and attrs.rawText != match.transaction.description %}
+                                <p><strong>Raw Text:</strong> {{ attrs.rawText }}</p>
+                            {% endif %}
+
+                            {% if attrs.settledAt %}
+                                <p><strong>Settled:</strong> {{ attrs.settledAt.split('T')[0] }}</p>
+                            {% endif %}
+                        {% endif %}
+
+                        <p class="amount">${{ '%.2f'|format(match.transaction.amount) }}</p>
+                    </div>
+
+                    <div class="detail-section">
+                        <h3>Loan</h3>
+                        <p><strong>Borrower:</strong> {{ match.loan.borrower }}</p>
+                        <p><strong>Original Amount:</strong> ${{ '%.2f'|format(match.loan.amount) }}</p>
+                        <p><strong>Already Repaid:</strong> ${{ '%.2f'|format(match.loan.amount_repaid) }}</p>
+                        <p><strong>Remaining:</strong> ${{ '%.2f'|format(match.loan.amount - match.loan.amount_repaid) }}</p>
+                    </div>
+                </div>
+
+                <div class="reasons">
+                    <strong>Why this matches:</strong>
+                    <ul>
+                        {% for reason in match.reasons %}
+                            <li>{{ reason }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+
+                {% if match.transaction.raw_data and match.transaction.raw_data.attributes %}
+                    <details class="extra-details">
+                        <summary>Show More Transaction Details</summary>
+                        {% set attrs = match.transaction.raw_data.attributes %}
+
+                        {% if attrs.transactionType %}
+                            <p><strong>Type:</strong> {{ attrs.transactionType }}</p>
+                        {% endif %}
+
+                        {% if attrs.status %}
+                            <p><strong>Status:</strong> {{ attrs.status }}</p>
+                        {% endif %}
+
+                        {% if attrs.foreignAmount %}
+                            <p><strong>Foreign Amount:</strong> {{ attrs.foreignAmount.currencyCode }} {{ attrs.foreignAmount.value }}</p>
+                        {% endif %}
+
+                        {% if attrs.roundUp %}
+                            <p><strong>Round Up:</strong> ${{ '%.2f'|format(attrs.roundUp.amount.value|float) }}</p>
+                        {% endif %}
+
+                        {% if attrs.cashback %}
+                            <p><strong>Cashback:</strong> ${{ '%.2f'|format(attrs.cashback.amount.value|float) }}</p>
+                        {% endif %}
+
+                        {% if match.transaction.raw_data.relationships and match.transaction.raw_data.relationships.category and match.transaction.raw_data.relationships.category.data %}
+                            <p><strong>Category:</strong> {{ match.transaction.raw_data.relationships.category.data.id }}</p>
+                        {% endif %}
+
+                        {% if match.transaction.raw_data.relationships and match.transaction.raw_data.relationships.tags and match.transaction.raw_data.relationships.tags.data %}
+                            <p><strong>Tags:</strong>
+                            {% for tag in match.transaction.raw_data.relationships.tags.data %}
+                                {{ tag.id }}{% if not loop.last %}, {% endif %}
+                            {% endfor %}
+                            </p>
+                        {% endif %}
+
+                        <p><strong>Created:</strong> {{ attrs.createdAt }}</p>
+                    </details>
+                {% endif %}
+
+                {% if all_transactions %}
+                    <details class="extra-details">
+                        <summary>Show Context (Nearby Transactions)</summary>
+                        <p style="margin-top: 0.5rem; color: #6c757d;">
+                            Transactions within ±5 days of {{ match.transaction.date }} to help jog your memory:
+                        </p>
+
+                        {# Filter transactions within ±5 days of the matched transaction #}
+                        {% set match_date = match.transaction.date %}
+                        {% set context_transactions = [] %}
+
+                        {% for t in all_transactions %}
+                            {# Calculate day difference #}
+                            {% set t_parts = t.date.split('-') %}
+                            {% set m_parts = match_date.split('-') %}
+
+                            {# Simple date comparison - check if within same month or adjacent months #}
+                            {% set t_year = t_parts[0]|int %}
+                            {% set t_month = t_parts[1]|int %}
+                            {% set t_day = t_parts[2]|int %}
+                            {% set m_year = m_parts[0]|int %}
+                            {% set m_month = m_parts[1]|int %}
+                            {% set m_day = m_parts[2]|int %}
+
+                            {# Include if same month and within ±5 days, or adjacent months #}
+                            {% if t_year == m_year and t_month == m_month %}
+                                {% if (t_day - m_day)|abs <= 5 %}
+                                    {% set _ = context_transactions.append(t) %}
+                                {% endif %}
+                            {% elif t_year == m_year and (t_month - m_month)|abs == 1 %}
+                                {# Adjacent months - include if likely within range #}
+                                {% if (t_month > m_month and t_day <= 5 and m_day >= 25) or (t_month < m_month and t_day >= 25 and m_day <= 5) %}
+                                    {% set _ = context_transactions.append(t) %}
+                                {% endif %}
+                            {% endif %}
+                        {% endfor %}
+
+                        {% if context_transactions %}
+                            <table class="context-table">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th>Description</th>
+                                        <th>Amount</th>
+                                        <th>Type</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for t in context_transactions|sort(attribute='date', reverse=true) %}
+                                        <tr class="{% if t.date == match.transaction.date and t.description == match.transaction.description %}current-transaction{% elif t.amount > 0 %}incoming{% else %}outgoing{% endif %}">
+                                            <td>{{ t.date }}</td>
+                                            <td>
+                                                {% if t.date == match.transaction.date and t.description == match.transaction.description %}
+                                                    <strong>→ {{ t.description[:50] }}</strong>
+                                                {% else %}
+                                                    {{ t.description[:50] }}
+                                                {% endif %}
+                                            </td>
+                                            <td class="{% if t.amount > 0 %}context-incoming{% else %}context-outgoing{% endif %}">
+                                                ${{ '%.2f'|format(t.amount) }}
+                                            </td>
+                                            <td>
+                                                {% if t.date == match.transaction.date and t.description == match.transaction.description %}
+                                                    This match
+                                                {% elif t.amount > 0 %}
+                                                    Incoming
+                                                {% else %}
+                                                    Outgoing
+                                                {% endif %}
+                                            </td>
+                                        </tr>
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <p style="color: #6c757d; margin-top: 0.5rem;">No other transactions found within ±5 days</p>
+                        {% endif %}
+                    </details>
+                {% endif %}
+
+                <div class="action-buttons">
+                    <form method="post" action="/apply-match" style="margin: 0;">
+                        <input type="hidden" name="match_index" value="{{ loop.index0 }}">
+                        <button type="submit" class="btn-apply">✓ Apply This Match</button>
+                    </form>
+                    <form method="post" action="/reject-match" style="margin: 0;">
+                        <input type="hidden" name="match_index" value="{{ loop.index0 }}">
+                        <button type="submit" class="btn-reject">✗ Not a Match</button>
+                    </form>
+                </div>
+            </div>
+        {% endfor %}
+
+    {% else %}
+        <div class="no-matches">
+            <h2>No Matches Found</h2>
+            <p>We couldn't find any transactions that match your loans.</p>
+            <p>Try uploading more transactions or check that your CSV format is correct.</p>
+            <a href="/match" class="try-again">Try Again</a>
+        </div>
+    {% endif %}
+</body>
+</html>

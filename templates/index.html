@@ -53,7 +53,7 @@
         table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 650px;
+            min-width: 900px;
         }
         th, td {
             padding: 0.75rem 0.5rem;
@@ -91,6 +91,69 @@
         .fully-paid {
             color: #198754;
         }
+        .nav-link {
+            display: inline-block;
+            margin-bottom: 1rem;
+            padding: 0.5rem 1rem;
+            background: #6c757d;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        .nav-link:hover {
+            background: #5a6268;
+        }
+        .alert {
+            padding: 0.75rem 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        .alert-error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .alert-success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .action-buttons {
+            display: flex;
+            gap: 0.25rem;
+            align-items: center;
+        }
+        .btn-view, .btn-edit, .btn-delete {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .btn-view {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-view:hover {
+            background: #5a6268;
+        }
+        .btn-edit {
+            background: #0d6efd;
+            color: white;
+        }
+        .btn-edit:hover {
+            background: #0b5ed7;
+        }
+        .btn-delete {
+            background: #dc3545;
+            color: white;
+        }
+        .btn-delete:hover {
+            background: #bb2d3b;
+        }
 
         @media (max-width: 480px) {
             body { padding: 0.75rem; }
@@ -101,15 +164,43 @@
 </head>
 <body>
     <h1>LendifyMe</h1>
+
+    <a href="/match" class="nav-link">📊 Match Bank Transactions</a>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ category }}">{{ message }}</div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
     <form method="post">
-        <label>Borrower</label>
-        <input type="text" name="borrower" required>
+        <label>Borrower Name</label>
+        <input type="text" name="borrower" placeholder="e.g. Alice Smith" required>
+
+        <label>Bank Statement Name (optional)</label>
+        <input type="text" name="bank_name" placeholder="e.g. Alice S or A Smith - as it appears in your bank">
+        <p style="font-size: 0.85rem; color: #6c757d; margin-top: -0.5rem; margin-bottom: 1rem;">
+            Use this if their name appears differently in your bank transactions
+        </p>
 
         <label>Date Borrowed</label>
         <input type="date" name="date_borrowed" required>
 
         <label>Amount ($)</label>
         <input type="number" step="0.01" name="amount" required>
+
+        <label>Repayment Schedule (optional)</label>
+        <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
+            <input type="number" step="0.01" name="repayment_amount" placeholder="Amount" style="flex: 1;">
+            <select name="repayment_frequency" style="flex: 1;">
+                <option value="">No schedule</option>
+                <option value="weekly">Weekly</option>
+                <option value="fortnightly">Fortnightly</option>
+                <option value="monthly">Monthly</option>
+            </select>
+        </div>
 
         <label>Note (optional)</label>
         <textarea name="note"></textarea>
@@ -126,9 +217,11 @@
                     <th>Amount</th>
                     <th>Repaid</th>
                     <th>Remaining</th>
+                    <th>Schedule</th>
                     <th>Note</th>
                     <th>Date</th>
                     <th>Add Repayment</th>
+                    <th>Actions</th>
                 </tr>
                 {% for loan in loans %}
                     {% set remaining = loan[2] - loan[5] %}
@@ -138,6 +231,13 @@
                         <td class="amount-cell">${{ '%.2f'|format(loan[5]) }}</td>
                         <td class="amount-cell {% if remaining > 0 %}outstanding{% else %}fully-paid{% endif %}">
                             ${{ '%.2f'|format(remaining) }}
+                        </td>
+                        <td class="amount-cell">
+                            {% if loan[6] and loan[7] %}
+                                ${{ '%.2f'|format(loan[6]) }}/{{ loan[7] }}
+                            {% else %}
+                                —
+                            {% endif %}
                         </td>
                         <td>{{ loan[3] or '—' }}</td>
                         <td>{{ loan[4] or '—' }}</td>
@@ -150,6 +250,15 @@
                             {% else %}
                                 <span class="fully-paid">✓ Paid</span>
                             {% endif %}
+                        </td>
+                        <td>
+                            <div class="action-buttons">
+                                <a href="/loan/{{ loan[0] }}/transactions" class="btn-view">View</a>
+                                <a href="/edit/{{ loan[0] }}" class="btn-edit">Edit</a>
+                                <form method="post" action="/delete/{{ loan[0] }}" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this loan?');">
+                                    <button type="submit" class="btn-delete">Delete</button>
+                                </form>
+                            </div>
                         </td>
                     </tr>
                 {% endfor %}
