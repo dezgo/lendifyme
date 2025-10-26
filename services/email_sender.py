@@ -28,6 +28,11 @@ def _send_via_mailgun_api(recipient_email: str, recipient_name: Optional[str], m
     sender_email = os.getenv('MAIL_DEFAULT_SENDER', f'postmaster@{domain}')
     sender_name = os.getenv('MAIL_SENDER_NAME', 'LendifyMe')
 
+    print(f"📧 Sending via Mailgun API...")
+    print(f"   Domain: {domain}")
+    print(f"   From: {sender_name} <{sender_email}>")
+    print(f"   To: {recipient_email}")
+
     try:
         response = requests.post(
             f"https://api.mailgun.net/v3/{domain}/messages",
@@ -85,9 +90,12 @@ LendifyMe
         )
 
         if response.status_code == 200:
+            print(f"✅ Mailgun: Email sent to {recipient_email}")
             return True, "Email sent successfully via Mailgun"
         else:
-            return False, f"Mailgun API error: {response.status_code} - {response.text}"
+            error_msg = f"Mailgun API error: {response.status_code} - {response.text}"
+            print(f"❌ Mailgun error: {error_msg}")
+            return False, error_msg
 
     except requests.exceptions.Timeout:
         return False, "Email request timed out"
