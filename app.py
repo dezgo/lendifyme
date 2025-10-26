@@ -400,6 +400,57 @@ def logout():
     return redirect(url_for('login'))
 
 
+@app.route("/health")
+def health():
+    """Health check endpoint with diagnostics."""
+    import sys
+
+    # Write a test log entry
+    app.logger.info("Health check endpoint accessed")
+
+    diagnostics = {
+        "status": "ok",
+        "app_root": os.path.dirname(os.path.abspath(__file__)),
+        "log_file": log_file,
+        "log_file_exists": os.path.exists(log_file),
+        "log_dir_exists": os.path.exists(log_dir),
+        "debug_mode": app.debug,
+        "python_version": sys.version,
+        "working_directory": os.getcwd(),
+        "email_config": {
+            "mailgun_configured": bool(os.getenv('MAILGUN_API_KEY') and os.getenv('MAILGUN_DOMAIN')),
+            "mailgun_domain": os.getenv('MAILGUN_DOMAIN', 'Not set'),
+            "smtp_configured": bool(os.getenv('MAIL_USERNAME')),
+        },
+        "log_dir_writable": os.access(log_dir, os.W_OK) if os.path.exists(log_dir) else "Dir doesn't exist"
+    }
+
+    # Try to read last 10 lines of log file
+    log_preview = []
+    if os.path.exists(log_file):
+        try:
+            with open(log_file, 'r') as f:
+                log_preview = f.readlines()[-10:]
+        except Exception as e:
+            log_preview = [f"Error reading log: {str(e)}"]
+    else:
+        log_preview = ["Log file doesn't exist yet"]
+
+    diagnostics["log_preview"] = log_preview
+
+    # Return as formatted text for easy reading
+    output = "=== LendifyMe Health Check ===\n\n"
+    for key, value in diagnostics.items():
+        if key == "log_preview":
+            output += f"\n{key}:\n"
+            for line in value:
+                output += f"  {line}"
+        else:
+            output += f"{key}: {value}\n"
+
+    return output, 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
+
 @app.route("/", methods=["GET", "POST"])
 @login_required
 def index():
