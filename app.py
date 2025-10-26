@@ -1,6 +1,8 @@
 import sqlite3
 import os
 import json
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from services import migrations
 from services.transaction_matcher import match_transactions_to_loans
@@ -40,6 +42,23 @@ app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER')
 app.config['APP_URL'] = os.getenv('APP_URL', 'http://localhost:5000')
 
 mail = Mail(app)
+
+# Configure logging
+if not app.debug:
+    # Create logs directory if it doesn't exist
+    if not os.path.exists('logs'):
+        os.mkdir('logs')
+
+    # File handler with rotation (max 10MB, keep 10 backup files)
+    file_handler = RotatingFileHandler('logs/lendifyme.log', maxBytes=10240000, backupCount=10)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+    ))
+    file_handler.setLevel(logging.INFO)
+    app.logger.addHandler(file_handler)
+
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('LendifyMe startup')
 
 
 def get_db_path():
@@ -221,9 +240,11 @@ def login():
         # Try Mailgun API first (recommended)
         success, message = send_magic_link_email(user_email, user_name, magic_link)
         if success:
+            app.logger.info(f"Magic link sent successfully to {user_email}")
             flash("Check your email! We've sent you a magic link to sign in.", "success")
             email_sent = True
         else:
+            app.logger.warning(f"Mailgun failed for {user_email}: {message}")
             # Try Flask-Mail (SMTP) as fallback
             if app.config.get('MAIL_USERNAME') and app.config.get('MAIL_DEFAULT_SENDER'):
                 try:
@@ -245,13 +266,16 @@ LendifyMe
 """
                     )
                     mail.send(msg)
+                    app.logger.info(f"Magic link sent via SMTP to {user_email}")
                     flash("Check your email! We've sent you a magic link to sign in.", "success")
                     email_sent = True
                 except Exception as e:
+                    app.logger.error(f"SMTP failed for {user_email}: {str(e)}")
                     flash(f"Error sending email: {str(e)}", "error")
 
         # Development mode - print link to console if email failed
         if not email_sent:
+            app.logger.warning(f"No email provider configured. Magic link for {user_email}: {magic_link}")
             print("\n" + "="*70)
             print("🔗 MAGIC LINK (Development Mode - Email not configured)")
             print("="*70)

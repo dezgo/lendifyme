@@ -1,6 +1,7 @@
 .idea/
 lendifyme.db
 .env
-.env.example
 __pycache__/
 *.py[cod]
+logs/
+*.log
