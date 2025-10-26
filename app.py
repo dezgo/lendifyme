@@ -43,22 +43,47 @@ app.config['APP_URL'] = os.getenv('APP_URL', 'http://localhost:5000')
 
 mail = Mail(app)
 
-# Configure logging
-if not app.debug:
-    # Create logs directory if it doesn't exist
-    if not os.path.exists('logs'):
-        os.mkdir('logs')
+# Configure logging (always enabled, not just in production)
+# Create logs directory if it doesn't exist
+log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
 
-    # File handler with rotation (max 10MB, keep 10 backup files)
-    file_handler = RotatingFileHandler('logs/lendifyme.log', maxBytes=10240000, backupCount=10)
-    file_handler.setFormatter(logging.Formatter(
-        '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-    ))
-    file_handler.setLevel(logging.INFO)
-    app.logger.addHandler(file_handler)
+log_file = os.path.join(log_dir, 'lendifyme.log')
 
-    app.logger.setLevel(logging.INFO)
-    app.logger.info('LendifyMe startup')
+# File handler with rotation (max 10MB, keep 10 backup files)
+file_handler = RotatingFileHandler(log_file, maxBytes=10240000, backupCount=10)
+file_handler.setFormatter(logging.Formatter(
+    '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+))
+file_handler.setLevel(logging.INFO)
+app.logger.addHandler(file_handler)
+
+# Also log to console
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+app.logger.addHandler(console_handler)
+
+app.logger.setLevel(logging.INFO)
+app.logger.info(f'LendifyMe startup - Debug mode: {app.debug}')
+app.logger.info(f'Log file location: {log_file}')
+
+# Log email configuration status
+mailgun_configured = bool(os.getenv('MAILGUN_API_KEY') and os.getenv('MAILGUN_DOMAIN'))
+smtp_configured = bool(os.getenv('MAIL_USERNAME') and os.getenv('MAIL_DEFAULT_SENDER'))
+app.logger.info(f'Email config - Mailgun: {mailgun_configured}, SMTP: {smtp_configured}')
+if mailgun_configured:
+    app.logger.info(f'Mailgun domain: {os.getenv("MAILGUN_DOMAIN")}')
+
+# Print to console as well so we always see it
+print(f"🚀 LendifyMe starting...")
+print(f"📝 Logging to: {log_file}")
+print(f"🐛 Debug mode: {app.debug}")
+print(f"📧 Mailgun configured: {mailgun_configured}")
+print(f"📧 SMTP configured: {smtp_configured}")
+if mailgun_configured:
+    print(f"📧 Mailgun domain: {os.getenv('MAILGUN_DOMAIN')}")
 
 
 def get_db_path():
