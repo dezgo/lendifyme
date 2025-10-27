@@ -245,9 +245,98 @@
                 align-items: flex-start;
             }
         }
+
+        /* Toast Notification System */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 400px;
+        }
+        .toast {
+            background: white;
+            border-radius: 8px;
+            padding: 1rem 1.25rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            animation: slideIn 0.3s ease-out;
+            border-left: 4px solid #198754;
+        }
+        .toast.error {
+            border-left-color: #dc3545;
+        }
+        .toast.info {
+            border-left-color: #0dcaf0;
+        }
+        .toast-icon {
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+        .toast-message {
+            flex: 1;
+            font-size: 0.95rem;
+            color: #212529;
+        }
+        .toast-close {
+            background: none;
+            border: none;
+            font-size: 1.25rem;
+            color: #6c757d;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .toast-close:hover {
+            background: #f8f9fa;
+        }
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+        }
+        .toast.hiding {
+            animation: slideOut 0.3s ease-out forwards;
+        }
+        @media (max-width: 480px) {
+            .toast-container {
+                right: 10px;
+                left: 10px;
+                max-width: none;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Toast notification container -->
+    <div class="toast-container" id="toast-container"></div>
+
     <div class="user-info">
         <span>Logged in as {{ session.user_name or session.user_email }}</span>
         <a href="/logout" class="logout-link">Logout</a>
@@ -381,11 +470,43 @@
     {% endif %}
 
     <script>
+        // Toast notification system
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+
+            const icons = {
+                success: '✓',
+                error: '✗',
+                info: 'ℹ'
+            };
+
+            toast.innerHTML = `
+                <span class="toast-icon">${icons[type] || icons.success}</span>
+                <span class="toast-message">${message}</span>
+                <button class="toast-close" onclick="dismissToast(this)">×</button>
+            `;
+
+            container.appendChild(toast);
+
+            // Auto-dismiss after 4 seconds
+            setTimeout(() => {
+                dismissToast(toast.querySelector('.toast-close'));
+            }, 4000);
+        }
+
+        function dismissToast(button) {
+            const toast = button.closest('.toast');
+            toast.classList.add('hiding');
+            setTimeout(() => toast.remove(), 300);
+        }
+
         function copyLink(link) {
             navigator.clipboard.writeText(link).then(() => {
-                alert('Borrower portal link copied to clipboard!');
+                showToast('Portal link copied to clipboard!', 'success');
             }).catch(err => {
-                alert('Failed to copy link: ' + err);
+                showToast('Failed to copy link. Please try again.', 'error');
             });
         }
 
