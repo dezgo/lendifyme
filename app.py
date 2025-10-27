@@ -641,8 +641,11 @@ def send_borrower_invite(loan_id):
 
 
 @app.route("/", methods=["GET", "POST"])
-@login_required
 def index():
+    # Show landing page if not logged in
+    if not session.get('user_id'):
+        return render_template("landing.html")
+
     if request.method == "POST":
         borrower = request.form.get("borrower")
         bank_name = request.form.get("bank_name")
