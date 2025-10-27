@@ -1,528 +1,607 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LendifyMe – Simple Loan Tracker</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: sans-serif;
-            max-width: 600px;
-            margin: auto;
-            padding: 1rem;
-            line-height: 1.5;
-        }
-        input, textarea, button {
-            width: 100%;
-            margin-bottom: 1rem;
-            padding: 0.75rem;
-            font-size: 16px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        button {
-            background: #007bff;
-            color: white;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        button:hover {
-            background: #0056b3;
-        }
-        label {
-            display: block;
-            margin-bottom: 0.25rem;
-            font-weight: bold;
-        }
-        h1 {
-            font-size: 1.75rem;
-            margin-bottom: 1.5rem;
-        }
-        h2 {
-            font-size: 1.25rem;
-            margin-top: 2rem;
-        }
+{% extends "base.html" %}
 
-        /* Table styles for mobile */
-        .table-container {
-            overflow-x: auto;
-            margin-top: 1rem;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 1200px;
-        }
-        th, td {
-            padding: 0.75rem 0.5rem;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-        th {
-            background: #f0f0f0;
-            font-weight: bold;
-        }
-        .amount-cell {
-            white-space: nowrap;
-        }
-        .repayment-form {
-            display: flex;
-            gap: 0.25rem;
-            align-items: center;
-        }
-        .repayment-form input {
-            width: 80px;
-            padding: 0.25rem;
-            margin: 0;
-            font-size: 14px;
-        }
-        .repayment-form button {
-            width: auto;
-            padding: 0.25rem 0.5rem;
-            margin: 0;
-            font-size: 14px;
-        }
-        .outstanding {
-            font-weight: bold;
-            color: #d63384;
-        }
-        .fully-paid {
-            color: #198754;
-        }
-        .nav-link {
-            display: inline-block;
-            margin-bottom: 1rem;
-            padding: 0.5rem 1rem;
-            background: #6c757d;
-            color: white;
-            text-decoration: none;
-            border-radius: 4px;
-            font-size: 0.9rem;
-        }
-        .nav-link:hover {
-            background: #5a6268;
-        }
-        .alert {
-            padding: 0.75rem 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .action-buttons {
-            display: flex;
-            gap: 0.25rem;
-            align-items: center;
-        }
-        .action-buttons form {
-            margin: 0;
-            display: inline-block;
-        }
-        .action-buttons button {
-          width: auto;
-          margin-bottom: 0;
-          padding: 0.25rem 0.5rem; /* match your .btn-* */
-          font-size: 0.8rem;
-        }
-        .btn-view, .btn-edit, .btn-delete {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.8rem;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            line-height: 1.5;
-            font-family: inherit;
-            vertical-align: middle;
-        }
-        .btn-view {
-            background: #6c757d;
-            color: white;
-        }
-        .btn-view:hover {
-            background: #5a6268;
-        }
-        .btn-edit {
-            background: #0d6efd;
-            color: white;
-        }
-        .btn-edit:hover {
-            background: #0b5ed7;
-        }
-        .btn-delete {
-            background: #dc3545;
-            color: white;
-        }
-        .btn-delete:hover {
-            background: #bb2d3b;
-        }
-        .btn-invite {
-            background: #198754;
-            color: white;
-        }
-        .btn-invite:hover {
-            background: #157347;
-        }
-        .borrower-link {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-            font-size: 0.8rem;
-        }
-        .copy-link {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.75rem;
-            background: #6c757d;
-            color: white;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        .copy-link:hover {
-            background: #5a6268;
-        }
-        .link-display {
-            font-size: 0.7rem;
-            color: #6c757d;
-            word-break: break-all;
-            max-width: 200px;
-        }
-        .user-info {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 1.5rem;
-            padding: 0.75rem 1rem;
-            background: #f8f9fa;
-            border-radius: 4px;
-        }
-        .user-info span {
-            color: #6c757d;
-            font-size: 0.9rem;
-        }
-        .logout-link {
-            color: #dc3545;
-            text-decoration: none;
-            font-size: 0.9rem;
-        }
-        .logout-link:hover {
-            text-decoration: underline;
-        }
-        .loan-type-badge {
-            display: inline-block;
-            padding: 0.2rem 0.5rem;
-            border-radius: 3px;
-            font-size: 0.75rem;
-            font-weight: bold;
-        }
-        .loan-type-lending {
-            background: #d4edda;
-            color: #155724;
-        }
-        .loan-type-borrowing {
-            background: #cfe2ff;
-            color: #084298;
-        }
+{% block title %}Your Loans – LendifyMe{% endblock %}
 
-        @media (max-width: 480px) {
-            body { padding: 0.75rem; }
-            h1 { font-size: 1.5rem; }
-            input, textarea, button { padding: 0.65rem; }
-            .user-info {
-                flex-direction: column;
-                gap: 0.5rem;
-                align-items: flex-start;
-            }
-        }
+{% block extra_css %}
+/* Action Bar */
+.action-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+.page-title {
+    font-size: 1.75rem;
+    margin: 0;
+    color: #212529;
+}
+.btn {
+    padding: 0.65rem 1.25rem;
+    font-size: 1rem;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    transition: all 0.2s;
+}
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+.btn-primary:hover {
+    background: #0056b3;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,123,255,0.3);
+}
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+.btn-secondary:hover {
+    background: #5a6268;
+}
 
-        /* Toast Notification System */
-        .toast-container {
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 10000;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            max-width: 400px;
-        }
-        .toast {
-            background: white;
-            border-radius: 8px;
-            padding: 1rem 1.25rem;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            animation: slideIn 0.3s ease-out;
-            border-left: 4px solid #198754;
-        }
-        .toast.error {
-            border-left-color: #dc3545;
-        }
-        .toast.info {
-            border-left-color: #0dcaf0;
-        }
-        .toast-icon {
-            font-size: 1.5rem;
-            flex-shrink: 0;
-        }
-        .toast-message {
-            flex: 1;
-            font-size: 0.95rem;
-            color: #212529;
-        }
-        .toast-close {
-            background: none;
-            border: none;
-            font-size: 1.25rem;
-            color: #6c757d;
-            cursor: pointer;
-            padding: 0;
-            width: 24px;
-            height: 24px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 4px;
-            transition: background 0.2s;
-        }
-        .toast-close:hover {
-            background: #f8f9fa;
-        }
-        @keyframes slideIn {
-            from {
-                transform: translateX(400px);
-                opacity: 0;
-            }
-            to {
-                transform: translateX(0);
-                opacity: 1;
-            }
-        }
-        @keyframes slideOut {
-            from {
-                transform: translateX(0);
-                opacity: 1;
-            }
-            to {
-                transform: translateX(400px);
-                opacity: 0;
-            }
-        }
-        .toast.hiding {
-            animation: slideOut 0.3s ease-out forwards;
-        }
-        @media (max-width: 480px) {
-            .toast-container {
-                right: 10px;
-                left: 10px;
-                max-width: none;
-            }
-        }
-    </style>
-</head>
-<body>
-    <!-- Toast notification container -->
-    <div class="toast-container" id="toast-container"></div>
+/* Summary Cards */
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+.summary-card {
+    background: white;
+    border-radius: 8px;
+    padding: 1.25rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.summary-label {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.summary-value {
+    font-size: 1.75rem;
+    font-weight: bold;
+    color: #212529;
+}
+.summary-value.positive {
+    color: #198754;
+}
+.summary-value.negative {
+    color: #dc3545;
+}
 
-    <div class="user-info">
-        <span>Logged in as {{ session.user_name or session.user_email }}</span>
-        <a href="/logout" class="logout-link">Logout</a>
+/* Loan Cards */
+.loans-grid {
+    display: grid;
+    gap: 1rem;
+}
+.loan-card {
+    background: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    transition: all 0.2s;
+}
+.loan-card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    transform: translateY(-2px);
+}
+.loan-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+}
+.loan-person {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #212529;
+    margin: 0;
+}
+.loan-type-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+.badge-lending {
+    background: #d4edda;
+    color: #155724;
+}
+.badge-borrowing {
+    background: #cfe2ff;
+    color: #084298;
+}
+.loan-amounts {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+    gap: 1rem;
+}
+.amount-item {
+    flex: 1;
+}
+.amount-label {
+    font-size: 0.8rem;
+    color: #6c757d;
+    margin-bottom: 0.25rem;
+}
+.amount-value {
+    font-size: 1.25rem;
+    font-weight: bold;
+}
+.amount-original {
+    color: #495057;
+}
+.amount-repaid {
+    color: #198754;
+}
+.amount-remaining {
+    color: #dc3545;
+}
+.amount-remaining.paid {
+    color: #198754;
+}
+.progress-bar-container {
+    height: 8px;
+    background: #e9ecef;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 1rem;
+}
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #198754, #20c997);
+    transition: width 0.3s ease;
+}
+.loan-meta {
+    display: flex;
+    gap: 1.5rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+.meta-item {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+.loan-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+.btn-small {
+    padding: 0.4rem 0.75rem;
+    font-size: 0.85rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 500;
+    text-decoration: none;
+    display: inline-block;
+    transition: all 0.2s;
+}
+.btn-view {
+    background: #007bff;
+    color: white;
+}
+.btn-view:hover {
+    background: #0056b3;
+}
+.btn-edit {
+    background: #6c757d;
+    color: white;
+}
+.btn-edit:hover {
+    background: #5a6268;
+}
+.btn-delete {
+    background: #dc3545;
+    color: white;
+}
+.btn-delete:hover {
+    background: #bb2d3b;
+}
+.btn-invite {
+    background: #198754;
+    color: white;
+}
+.btn-invite:hover {
+    background: #157347;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 4rem 2rem;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.empty-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+}
+.empty-title {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+    color: #212529;
+}
+.empty-text {
+    color: #6c757d;
+    margin-bottom: 2rem;
+}
+
+/* Modal */
+.modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 1000;
+    overflow-y: auto;
+    padding: 1rem;
+}
+.modal.active {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.modal-content {
+    background: white;
+    border-radius: 12px;
+    max-width: 600px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+    animation: slideUp 0.3s ease-out;
+}
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+.modal-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid #dee2e6;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.modal-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0;
+}
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 1.5rem;
+    color: #6c757d;
+    cursor: pointer;
+    padding: 0;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    transition: background 0.2s;
+}
+.modal-close:hover {
+    background: #f8f9fa;
+}
+.modal-body {
+    padding: 1.5rem;
+}
+.form-group {
+    margin-bottom: 1rem;
+}
+.form-label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: #212529;
+}
+.form-control {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 1rem;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+.form-control:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+}
+.form-text {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-top: 0.25rem;
+}
+.form-row {
+    display: flex;
+    gap: 0.75rem;
+}
+.form-row .form-group {
+    flex: 1;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .action-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .summary-grid {
+        grid-template-columns: 1fr;
+    }
+    .loan-amounts {
+        flex-direction: column;
+    }
+}
+{% endblock %}
+
+{% block content %}
+<!-- Action Bar -->
+<div class="action-bar">
+    <h2 class="page-title">Your Loans</h2>
+    <div style="display: flex; gap: 0.75rem;">
+        <button onclick="openModal()" class="btn btn-primary">
+            <span>+</span> Add New Loan
+        </button>
+        <a href="/match" class="btn btn-secondary">📊 Match Transactions</a>
+    </div>
+</div>
+
+{% if loans %}
+    <!-- Summary Cards -->
+    {% set ns = namespace(total_lent=0, total_borrowed=0, total_repaid_lending=0, total_repaid_borrowing=0) %}
+    {% for loan in loans %}
+        {% if loan[12] == 'lending' %}
+            {% set ns.total_lent = ns.total_lent + loan[2] %}
+            {% set ns.total_repaid_lending = ns.total_repaid_lending + loan[5] %}
+        {% else %}
+            {% set ns.total_borrowed = ns.total_borrowed + loan[2] %}
+            {% set ns.total_repaid_borrowing = ns.total_repaid_borrowing + loan[5] %}
+        {% endif %}
+    {% endfor %}
+
+    <div class="summary-grid">
+        <div class="summary-card">
+            <div class="summary-label">Total Lent</div>
+            <div class="summary-value">${{ '%.2f'|format(ns.total_lent) }}</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-label">Outstanding (Lending)</div>
+            <div class="summary-value positive">${{ '%.2f'|format(ns.total_lent - ns.total_repaid_lending) }}</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-label">Total Borrowed</div>
+            <div class="summary-value">${{ '%.2f'|format(ns.total_borrowed) }}</div>
+        </div>
+        <div class="summary-card">
+            <div class="summary-label">Owed (Borrowing)</div>
+            <div class="summary-value negative">${{ '%.2f'|format(ns.total_borrowed - ns.total_repaid_borrowing) }}</div>
+        </div>
     </div>
 
-    <h1>LendifyMe</h1>
+    <!-- Loan Cards -->
+    <div class="loans-grid">
+        {% for loan in loans %}
+            {% set remaining = loan[2] - loan[5] %}
+            {% set progress = (loan[5] / loan[2] * 100) if loan[2] > 0 else 0 %}
+            <div class="loan-card">
+                <div class="loan-header">
+                    <h3 class="loan-person">{{ loan[1] }}</h3>
+                    <span class="loan-type-badge {% if loan[12] == 'lending' %}badge-lending{% else %}badge-borrowing{% endif %}">
+                        {{ '📤 Lending' if loan[12] == 'lending' else '📥 Borrowing' }}
+                    </span>
+                </div>
 
-    <a href="/match" class="nav-link">📊 Match Bank Transactions</a>
+                <div class="loan-amounts">
+                    <div class="amount-item">
+                        <div class="amount-label">Original</div>
+                        <div class="amount-value amount-original">${{ '%.2f'|format(loan[2]) }}</div>
+                    </div>
+                    <div class="amount-item">
+                        <div class="amount-label">Repaid</div>
+                        <div class="amount-value amount-repaid">${{ '%.2f'|format(loan[5]) }}</div>
+                    </div>
+                    <div class="amount-item">
+                        <div class="amount-label">Remaining</div>
+                        <div class="amount-value amount-remaining {% if remaining <= 0 %}paid{% endif %}">${{ '%.2f'|format(remaining) }}</div>
+                    </div>
+                </div>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
+                <div class="progress-bar-container">
+                    <div class="progress-bar" style="width: {{ progress }}%"></div>
+                </div>
 
-    <form method="post">
-        <label>Loan Type</label>
-        <select name="loan_type" id="loan_type" onchange="updateLoanLabels()" style="width: 100%; margin-bottom: 1rem; padding: 0.75rem; font-size: 16px; border: 1px solid #ddd; border-radius: 4px;">
-            <option value="lending">Lending (I gave money to someone)</option>
-            <option value="borrowing">Borrowing (I received money from someone)</option>
-        </select>
+                <div class="loan-meta">
+                    <div class="meta-item">
+                        <span>📅</span>
+                        <span>{{ loan[4]|format_date }}</span>
+                    </div>
+                    {% if loan[6] and loan[7] %}
+                        <div class="meta-item">
+                            <span>💰</span>
+                            <span>${{ '%.2f'|format(loan[6]) }}/{{ loan[7] }}</span>
+                        </div>
+                    {% endif %}
+                    {% if loan[8] %}
+                        <div class="meta-item">
+                            <span>🏦</span>
+                            <span>{{ loan[8] }}</span>
+                        </div>
+                    {% endif %}
+                </div>
 
-        <label id="label_person">Borrower Name</label>
-        <input type="text" name="borrower" id="input_person" placeholder="e.g. Alice Smith" required>
+                <div class="loan-actions">
+                    <a href="/loan/{{ loan[0] }}/transactions" class="btn-small btn-view">View Details</a>
+                    <a href="/edit/{{ loan[0] }}" class="btn-small btn-edit">Edit</a>
+                    {% if loan[10] %}
+                        <button onclick="copyLink('{{ app_url }}/borrower/{{ loan[10] }}')" class="btn-small btn-invite">📋 Copy Portal Link</button>
+                        <a href="/loan/{{ loan[0] }}/send-invite" class="btn-small btn-invite">✉️ Send Invite</a>
+                    {% endif %}
+                    <form method="post" action="/delete/{{ loan[0] }}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this loan?');">
+                        <button type="submit" class="btn-small btn-delete">Delete</button>
+                    </form>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+{% else %}
+    <!-- Empty State -->
+    <div class="empty-state">
+        <div class="empty-icon">💸</div>
+        <h3 class="empty-title">No loans yet</h3>
+        <p class="empty-text">Start tracking your loans by adding your first one.</p>
+        <button onclick="openModal()" class="btn btn-primary">
+            <span>+</span> Add Your First Loan
+        </button>
+    </div>
+{% endif %}
 
-        <label>Bank Statement Name (optional)</label>
-        <input type="text" name="bank_name" placeholder="e.g. Alice S or A Smith - as it appears in your bank">
-        <p style="font-size: 0.85rem; color: #6c757d; margin-top: -0.5rem; margin-bottom: 1rem;">
-            Use this if their name appears differently in your bank transactions
-        </p>
-
-        <label>Date Borrowed</label>
-        <input type="date" name="date_borrowed" required>
-
-        <label>Amount ($)</label>
-        <input type="number" step="0.01" name="amount" required>
-
-        <label>Repayment Schedule (optional)</label>
-        <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
-            <input type="number" step="0.01" name="repayment_amount" placeholder="Amount" style="flex: 1;">
-            <select name="repayment_frequency" style="flex: 1;">
-                <option value="">No schedule</option>
-                <option value="weekly">Weekly</option>
-                <option value="fortnightly">Fortnightly</option>
-                <option value="monthly">Monthly</option>
-            </select>
+<!-- Add Loan Modal -->
+<div id="addLoanModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 class="modal-title">Add New Loan</h3>
+            <button class="modal-close" onclick="closeModal()">&times;</button>
         </div>
+        <div class="modal-body">
+            <form method="post">
+                <div class="form-group">
+                    <label class="form-label">Loan Type</label>
+                    <select name="loan_type" id="loan_type" class="form-control" onchange="updateLoanLabels()">
+                        <option value="lending">Lending (I gave money to someone)</option>
+                        <option value="borrowing">Borrowing (I received money from someone)</option>
+                    </select>
+                </div>
 
-        <label>Note (optional)</label>
-        <textarea name="note"></textarea>
+                <div class="form-group">
+                    <label class="form-label" id="label_person">Borrower Name</label>
+                    <input type="text" name="borrower" id="input_person" class="form-control" placeholder="e.g. Alice Smith" required>
+                </div>
 
-        <button type="submit">Add Loan</button>
-    </form>
+                <div class="form-group">
+                    <label class="form-label">Bank Statement Name (optional)</label>
+                    <input type="text" name="bank_name" class="form-control" placeholder="e.g. Alice S or A Smith">
+                    <small class="form-text">Use this if their name appears differently in your bank transactions</small>
+                </div>
 
-    {% if loans %}
-        <h2>Loans</h2>
-        <div class="table-container">
-            <table>
-                <tr>
-                    <th>Type</th>
-                    <th>Person</th>
-                    <th>Amount</th>
-                    <th>Repaid</th>
-                    <th>Remaining</th>
-                    <th>Schedule</th>
-                    <th>Note</th>
-                    <th>Date</th>
-                    <th>Add Repayment</th>
-                    <th>Portal Access</th>
-                    <th>Actions</th>
-                </tr>
-                {% for loan in loans %}
-                    {% set remaining = loan[2] - loan[5] %}
-                    {% set loan_type = loan[12] %}
-                    <tr>
-                        <td>
-                            <span class="loan-type-badge loan-type-{{ loan_type }}">
-                                {{ '📤 Lending' if loan_type == 'lending' else '📥 Borrowing' }}
-                            </span>
-                        </td>
-                        <td>{{ loan[1] }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(loan[2]) }}</td>
-                        <td class="amount-cell">${{ '%.2f'|format(loan[5]) }}</td>
-                        <td class="amount-cell {% if remaining > 0 %}outstanding{% else %}fully-paid{% endif %}">
-                            ${{ '%.2f'|format(remaining) }}
-                        </td>
-                        <td class="amount-cell">
-                            {% if loan[6] and loan[7] %}
-                                ${{ '%.2f'|format(loan[6]) }}/{{ loan[7] }}
-                            {% else %}
-                                —
-                            {% endif %}
-                        </td>
-                        <td>{{ loan[3] or '—' }}</td>
-                        <td>{{ loan[4]|format_date }}</td>
-                        <td>
-                            {% if remaining > 0 %}
-                                <form method="post" action="/repay/{{ loan[0] }}" class="repayment-form">
-                                    <input type="number" step="0.01" name="repayment_amount" placeholder="0.00" max="{{ remaining }}" required>
-                                    <button type="submit">Pay</button>
-                                </form>
-                            {% else %}
-                                <span class="fully-paid">✓ Paid</span>
-                            {% endif %}
-                        </td>
-                        <td>
-                            <div class="borrower-link">
-                                {% if loan[10] %}
-                                    <button class="copy-link" onclick="copyLink('{{ app_url }}/borrower/{{ loan[10] }}')">📋 Copy Link</button>
-                                    <a href="/loan/{{ loan[0] }}/send-invite" class="btn-invite" style="text-align: center;">✉️ Send Invite</a>
-                                {% else %}
-                                    <span style="color: #6c757d; font-size: 0.75rem;">—</span>
-                                {% endif %}
-                            </div>
-                        </td>
-                        <td>
-                            <div class="action-buttons">
-                                <a href="/loan/{{ loan[0] }}/transactions" class="btn-view">View</a>
-                                <a href="/edit/{{ loan[0] }}" class="btn-edit">Edit</a>
-                                <form method="post" action="/delete/{{ loan[0] }}" style="margin: 0;" onsubmit="return confirm('Are you sure you want to delete this loan?');">
-                                    <button type="submit" class="btn-delete">Delete</button>
-                                </form>
-                            </div>
-                        </td>
-                    </tr>
-                {% endfor %}
-            </table>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">Date Borrowed</label>
+                        <input type="date" name="date_borrowed" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">Amount ($)</label>
+                        <input type="number" step="0.01" name="amount" class="form-control" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Repayment Schedule (optional)</label>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <input type="number" step="0.01" name="repayment_amount" class="form-control" placeholder="Amount">
+                        </div>
+                        <div class="form-group">
+                            <select name="repayment_frequency" class="form-control">
+                                <option value="">No schedule</option>
+                                <option value="weekly">Weekly</option>
+                                <option value="fortnightly">Fortnightly</option>
+                                <option value="monthly">Monthly</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Note (optional)</label>
+                    <textarea name="note" class="form-control" rows="3"></textarea>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Add Loan</button>
+            </form>
         </div>
-    {% endif %}
+    </div>
+</div>
+{% endblock %}
 
-    <script>
-        // Toast notification system
-        function showToast(message, type = 'success') {
-            const container = document.getElementById('toast-container');
-            const toast = document.createElement('div');
-            toast.className = `toast ${type}`;
+{% block extra_js %}
+// Modal functions
+function openModal() {
+    document.getElementById('addLoanModal').classList.add('active');
+    document.body.style.overflow = 'hidden';
+}
 
-            const icons = {
-                success: '✓',
-                error: '✗',
-                info: 'ℹ'
-            };
+function closeModal() {
+    document.getElementById('addLoanModal').classList.remove('active');
+    document.body.style.overflow = '';
+}
 
-            toast.innerHTML = `
-                <span class="toast-icon">${icons[type] || icons.success}</span>
-                <span class="toast-message">${message}</span>
-                <button class="toast-close" onclick="dismissToast(this)">×</button>
-            `;
+// Close modal when clicking outside
+document.getElementById('addLoanModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeModal();
+    }
+});
 
-            container.appendChild(toast);
+// Close modal on Escape key
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        closeModal();
+    }
+});
 
-            // Auto-dismiss after 4 seconds
-            setTimeout(() => {
-                dismissToast(toast.querySelector('.toast-close'));
-            }, 4000);
-        }
+// Copy link function
+function copyLink(link) {
+    navigator.clipboard.writeText(link).then(() => {
+        showToast('Portal link copied to clipboard!', 'success');
+    }).catch(err => {
+        showToast('Failed to copy link. Please try again.', 'error');
+    });
+}
 
-        function dismissToast(button) {
-            const toast = button.closest('.toast');
-            toast.classList.add('hiding');
-            setTimeout(() => toast.remove(), 300);
-        }
+// Update form labels based on loan type
+function updateLoanLabels() {
+    const loanType = document.getElementById('loan_type').value;
+    const labelPerson = document.getElementById('label_person');
+    const inputPerson = document.getElementById('input_person');
 
-        function copyLink(link) {
-            navigator.clipboard.writeText(link).then(() => {
-                showToast('Portal link copied to clipboard!', 'success');
-            }).catch(err => {
-                showToast('Failed to copy link. Please try again.', 'error');
-            });
-        }
-
-        function updateLoanLabels() {
-            const loanType = document.getElementById('loan_type').value;
-            const labelPerson = document.getElementById('label_person');
-            const inputPerson = document.getElementById('input_person');
-
-            if (loanType === 'borrowing') {
-                labelPerson.textContent = 'Lender Name';
-                inputPerson.placeholder = 'e.g. Brighte';
-            } else {
-                labelPerson.textContent = 'Borrower Name';
-                inputPerson.placeholder = 'e.g. Alice Smith';
-            }
-        }
-    </script>
-</body>
-</html>
+    if (loanType === 'borrowing') {
+        labelPerson.textContent = 'Lender Name';
+        inputPerson.placeholder = 'e.g. Brighte';
+    } else {
+        labelPerson.textContent = 'Borrower Name';
+        inputPerson.placeholder = 'e.g. Alice Smith';
+    }
+}
+{% endblock %}

@@ -1,144 +1,112 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Send Borrower Invite – LendifyMe</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: sans-serif;
-            max-width: 600px;
-            margin: auto;
-            padding: 2rem;
-            line-height: 1.5;
-            background: #f8f9fa;
-        }
-        .container {
-            background: white;
-            padding: 2rem;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        h1 {
-            font-size: 1.5rem;
-            margin-bottom: 0.5rem;
-        }
-        .subtitle {
-            color: #6c757d;
-            margin-bottom: 1.5rem;
-            font-size: 0.9rem;
-        }
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: bold;
-        }
-        input {
-            width: 100%;
-            padding: 0.75rem;
-            font-size: 16px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-        button {
-            width: 100%;
-            padding: 0.75rem;
-            font-size: 16px;
-            background: #198754;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-weight: bold;
-            margin-bottom: 0.5rem;
-        }
-        button:hover {
-            background: #157347;
-        }
-        .back-link {
-            display: inline-block;
-            margin-bottom: 1.5rem;
-            color: #007bff;
-            text-decoration: none;
-        }
-        .back-link:hover {
-            text-decoration: underline;
-        }
-        .loan-info {
-            background: #f8f9fa;
-            padding: 1rem;
-            border-radius: 6px;
-            margin-bottom: 1.5rem;
-        }
-        .loan-info p {
-            margin: 0.5rem 0;
-            font-size: 0.9rem;
-        }
-        .loan-info strong {
-            color: #6c757d;
-        }
-        .alert {
-            padding: 0.75rem 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .help-text {
-            font-size: 0.85rem;
-            color: #6c757d;
-            margin-top: -0.5rem;
-            margin-bottom: 1rem;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <a href="/" class="back-link">← Back to Loans</a>
+{% extends "base.html" %}
 
-        <h1>Send Borrower Invite</h1>
-        <p class="subtitle">Send an email invitation with a secure link to the borrower portal</p>
+{% block title %}Send Borrower Invite – LendifyMe{% endblock %}
 
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                    <div class="alert alert-{{ category }}">{{ message }}</div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
+{% block extra_css %}
+.invite-container {
+    background: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    max-width: 600px;
+    margin: 0 auto;
+}
+h1 {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #6c757d;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+}
+label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: bold;
+}
+input {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 16px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    margin-bottom: 1rem;
+}
+button {
+    width: 100%;
+    padding: 0.75rem;
+    font-size: 16px;
+    background: #198754;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+button:hover {
+    background: #157347;
+}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1.5rem;
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 600;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+.loan-info {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+}
+.loan-info p {
+    margin: 0.5rem 0;
+    font-size: 0.9rem;
+}
+.loan-info strong {
+    color: #6c757d;
+}
+.help-text {
+    font-size: 0.85rem;
+    color: #6c757d;
+    margin-top: -0.5rem;
+    margin-bottom: 1rem;
+}
+{% endblock %}
 
-        <div class="loan-info">
-            <p><strong>Borrower:</strong> {{ loan[1] }}</p>
-            <p><strong>Loan Amount:</strong> ${{ '%.2f'|format(loan[4]) }}</p>
-            <p><strong>Amount Repaid:</strong> ${{ '%.2f'|format(loan[5]) }}</p>
-            <p><strong>Outstanding:</strong> ${{ '%.2f'|format(loan[4] - loan[5]) }}</p>
-        </div>
+{% block content %}
+<div class="invite-container">
+    <a href="/" class="back-link">← Back to Loans</a>
 
-        <form method="post">
-            <label for="borrower_email">Borrower's Email Address</label>
-            <input
-                type="email"
-                id="borrower_email"
-                name="borrower_email"
-                placeholder="borrower@example.com"
-                {% if loan[3] %}value="{{ loan[3] }}"{% endif %}
-                required
-            >
-            <p class="help-text">
-                The borrower will receive an email with a secure link to view their loan status and payment history.
-            </p>
-            <button type="submit">✉️ Send Invitation Email</button>
-        </form>
+    <h1>Send Borrower Invite</h1>
+    <p class="subtitle">Send an email invitation with a secure link to the borrower portal</p>
+
+    <div class="loan-info">
+        <p><strong>Borrower:</strong> {{ loan[1] }}</p>
+        <p><strong>Loan Amount:</strong> ${{ '%.2f'|format(loan[4]) }}</p>
+        <p><strong>Amount Repaid:</strong> ${{ '%.2f'|format(loan[5]) }}</p>
+        <p><strong>Outstanding:</strong> ${{ '%.2f'|format(loan[4] - loan[5]) }}</p>
     </div>
-</body>
-</html>
+
+    <form method="post">
+        <label for="borrower_email">Borrower's Email Address</label>
+        <input
+            type="email"
+            id="borrower_email"
+            name="borrower_email"
+            placeholder="borrower@example.com"
+            {% if loan[3] %}value="{{ loan[3] }}"{% endif %}
+            required
+        >
+        <p class="help-text">
+            The borrower will receive an email with a secure link to view their loan status and payment history.
+        </p>
+        <button type="submit">✉️ Send Invitation Email</button>
+    </form>
+</div>
+{% endblock %}

@@ -1,305 +1,271 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Match Transactions – LendifyMe</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: sans-serif;
-            max-width: 800px;
-            margin: auto;
-            padding: 1rem;
-            line-height: 1.5;
-        }
-        textarea, button, select, input[type="date"] {
-            width: 100%;
-            margin-bottom: 1rem;
-            padding: 0.75rem;
-            font-size: 16px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-        }
-        select {
-            background-color: white;
-            cursor: pointer;
-        }
-        textarea {
-            font-family: monospace;
-            min-height: 300px;
-        }
-        button {
-            background: #007bff;
-            color: white;
-            border: none;
-            cursor: pointer;
-            font-weight: bold;
-        }
-        button:hover {
-            background: #0056b3;
-        }
-        .back-link {
-            display: inline-block;
-            margin-bottom: 1rem;
-            color: #007bff;
-            text-decoration: none;
-        }
-        .back-link:hover {
-            text-decoration: underline;
-        }
-        h1 {
-            font-size: 1.75rem;
-            margin-bottom: 1rem;
-        }
-        .instructions {
-            background: #f8f9fa;
-            padding: 1rem;
-            border-radius: 4px;
-            margin-bottom: 1.5rem;
-        }
-        .instructions h2 {
-            font-size: 1.1rem;
-            margin-top: 0;
-        }
-        .instructions ol {
-            margin: 0.5rem 0 0 1.5rem;
-            padding: 0;
-        }
-        .instructions li {
-            margin-bottom: 0.5rem;
-        }
-        .example {
-            background: white;
-            padding: 0.5rem;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 0.85rem;
-            margin-top: 0.5rem;
-            white-space: pre;
-            overflow-x: auto;
-        }
-        label {
-            display: block;
-            margin-bottom: 0.5rem;
-            font-weight: bold;
-        }
-        .connector-options {
-            display: flex;
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-            flex-wrap: wrap;
-        }
-        .connector-option {
-            flex: 1;
-            min-width: 200px;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            padding: 1rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .connector-option:hover {
-            border-color: #007bff;
-            background: #f8f9fa;
-        }
-        .connector-option input[type="radio"] {
-            margin-right: 0.5rem;
-        }
-        .connector-option.active {
-            border-color: #007bff;
-            background: #e7f3ff;
-        }
-        .connector-label {
-            display: flex;
-            align-items: center;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        .connector-description {
-            margin-top: 0.5rem;
-            font-size: 0.9rem;
-            color: #6c757d;
-        }
-        #csv-section, #api-section {
-            display: none;
-        }
-        #csv-section.active, #api-section.active {
-            display: block;
-        }
-        .alert {
-            padding: 0.75rem 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-    </style>
-</head>
-<body>
-    <a href="/" class="back-link">← Back to Loans</a>
+{% extends "base.html" %}
 
-    <h1>Match Bank Transactions</h1>
+{% block title %}Match Transactions – LendifyMe{% endblock %}
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }}">{{ message }}</div>
+{% block extra_css %}
+textarea, button, select, input[type="date"] {
+    width: 100%;
+    margin-bottom: 1rem;
+    padding: 0.75rem;
+    font-size: 16px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+select {
+    background-color: white;
+    cursor: pointer;
+}
+textarea {
+    font-family: monospace;
+    min-height: 300px;
+}
+button {
+    background: #007bff;
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-weight: bold;
+}
+button:hover {
+    background: #0056b3;
+}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1rem;
+    color: #007bff;
+    text-decoration: none;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+h1 {
+    font-size: 1.75rem;
+    margin-bottom: 1rem;
+}
+.instructions {
+    background: #f8f9fa;
+    padding: 1rem;
+    border-radius: 4px;
+    margin-bottom: 1.5rem;
+}
+.instructions h2 {
+    font-size: 1.1rem;
+    margin-top: 0;
+}
+.instructions ol {
+    margin: 0.5rem 0 0 1.5rem;
+    padding: 0;
+}
+.instructions li {
+    margin-bottom: 0.5rem;
+}
+.example {
+    background: white;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+    white-space: pre;
+    overflow-x: auto;
+}
+label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: bold;
+}
+.connector-options {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+.connector-option {
+    flex: 1;
+    min-width: 200px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    padding: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.connector-option:hover {
+    border-color: #007bff;
+    background: #f8f9fa;
+}
+.connector-option input[type="radio"] {
+    margin-right: 0.5rem;
+}
+.connector-option.active {
+    border-color: #007bff;
+    background: #e7f3ff;
+}
+.connector-label {
+    display: flex;
+    align-items: center;
+    font-weight: bold;
+    cursor: pointer;
+}
+.connector-description {
+    margin-top: 0.5rem;
+    font-size: 0.9rem;
+    color: #6c757d;
+}
+#csv-section, #api-section {
+    display: none;
+}
+#csv-section.active, #api-section.active {
+    display: block;
+}
+{% endblock %}
+
+{% block content %}
+<a href="/" class="back-link">← Back to Loans</a>
+
+<h1>Match Bank Transactions</h1>
+
+<form method="post">
+    <h2>Choose Import Method</h2>
+
+    <div class="connector-options">
+        <!-- API Connectors -->
+        {% if available_connectors %}
+            {% for connector_id, connector_name in available_connectors.items() %}
+                <div class="connector-option" data-connector="{{ connector_id }}">
+                    <label class="connector-label">
+                        <input type="radio" name="connector_type" value="{{ connector_id }}" required>
+                        {{ connector_name }}
+                    </label>
+                    <div class="connector-description">
+                        Automatically fetch transactions from {{ connector_name }}
+                    </div>
+                </div>
             {% endfor %}
         {% endif %}
-    {% endwith %}
 
-    <form method="post">
-        <h2>Choose Import Method</h2>
-
-        <div class="connector-options">
-            <!-- API Connectors -->
-            {% if available_connectors %}
-                {% for connector_id, connector_name in available_connectors.items() %}
-                    <div class="connector-option" data-connector="{{ connector_id }}">
-                        <label class="connector-label">
-                            <input type="radio" name="connector_type" value="{{ connector_id }}" required>
-                            {{ connector_name }}
-                        </label>
-                        <div class="connector-description">
-                            Automatically fetch transactions from {{ connector_name }}
-                        </div>
-                    </div>
-                {% endfor %}
-            {% endif %}
-
-            <!-- CSV Upload Option -->
-            <div class="connector-option" data-connector="csv">
-                <label class="connector-label">
-                    <input type="radio" name="connector_type" value="csv" required>
-                    Manual CSV Upload
-                </label>
-                <div class="connector-description">
-                    Upload transactions from any bank as CSV
-                </div>
+        <!-- CSV Upload Option -->
+        <div class="connector-option" data-connector="csv">
+            <label class="connector-label">
+                <input type="radio" name="connector_type" value="csv" required>
+                Manual CSV Upload
+            </label>
+            <div class="connector-description">
+                Upload transactions from any bank as CSV
             </div>
         </div>
+    </div>
 
-        <!-- API Section -->
-        <div id="api-section">
-            <div class="instructions">
-                <h2>Automatic Import</h2>
-                <p>Select your date range below and click "Fetch & Match" to automatically import and match your bank transactions to loans.</p>
-            </div>
-
-            <label>Date Range</label>
-            <select name="date_range" id="date-range-select">
-                <option value="7">Last 7 days</option>
-                <option value="30" selected>Last 30 days</option>
-                <option value="60">Last 60 days</option>
-                <option value="90">Last 90 days</option>
-                <option value="custom">Custom date...</option>
-            </select>
-
-            <div id="custom-date-section" style="display: none; margin-top: 1rem;">
-                <label>Since Date</label>
-                <input type="date" name="since_date" id="since-date-input">
-            </div>
-
-            <button type="submit">Fetch & Match Transactions</button>
+    <!-- API Section -->
+    <div id="api-section">
+        <div class="instructions">
+            <h2>Automatic Import</h2>
+            <p>Select your date range below and click "Fetch & Match" to automatically import and match your bank transactions to loans.</p>
         </div>
 
-        <!-- CSV Upload Section -->
-        <div id="csv-section">
-            <div class="instructions">
-                <h2>Manual CSV Import</h2>
-                <ol>
-                    <li>Export your bank transactions as CSV</li>
-                    <li>Paste the CSV data below (must include Date, Description, Amount columns)</li>
-                    <li>Click "Find Matches" to see suggested loan repayments</li>
-                </ol>
+        <label>Date Range</label>
+        <select name="date_range" id="date-range-select">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="60">Last 60 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="custom">Custom date...</option>
+        </select>
 
-                <div class="example">Date,Description,Amount
+        <div id="custom-date-section" style="display: none; margin-top: 1rem;">
+            <label>Since Date</label>
+            <input type="date" name="since_date" id="since-date-input">
+        </div>
+
+        <button type="submit">Fetch & Match Transactions</button>
+    </div>
+
+    <!-- CSV Upload Section -->
+    <div id="csv-section">
+        <div class="instructions">
+            <h2>Manual CSV Import</h2>
+            <ol>
+                <li>Export your bank transactions as CSV</li>
+                <li>Paste the CSV data below (must include Date, Description, Amount columns)</li>
+                <li>Click "Find Matches" to see suggested loan repayments</li>
+            </ol>
+
+            <div class="example">Date,Description,Amount
 2025-10-15,Transfer from Alice Smith,50.00
 2025-10-20,Payment Bob Johnson,25.50
 2025-10-22,Zelle Alice,100.00</div>
-            </div>
+        </div>
 
-            <label>Paste Bank Transactions (CSV)</label>
-            <textarea name="transactions_csv" placeholder="Date,Description,Amount
+        <label>Paste Bank Transactions (CSV)</label>
+        <textarea name="transactions_csv" placeholder="Date,Description,Amount
 2025-10-15,Transfer from Alice Smith,50.00
 2025-10-20,Payment Bob Johnson,25.50"></textarea>
 
-            <button type="submit">Find Matches</button>
-        </div>
-    </form>
+        <button type="submit">Find Matches</button>
+    </div>
+</form>
+{% endblock %}
 
-    <script>
-        // Handle connector selection
-        document.querySelectorAll('.connector-option').forEach(option => {
-            option.addEventListener('click', function() {
-                const radio = this.querySelector('input[type="radio"]');
-                radio.checked = true;
+{% block extra_js %}
+// Handle connector selection
+document.querySelectorAll('.connector-option').forEach(option => {
+    option.addEventListener('click', function() {
+        const radio = this.querySelector('input[type="radio"]');
+        radio.checked = true;
 
-                // Update visual state
-                document.querySelectorAll('.connector-option').forEach(opt => {
-                    opt.classList.remove('active');
-                });
-                this.classList.add('active');
-
-                // Show/hide appropriate section
-                const connectorType = this.dataset.connector;
-                const csvSection = document.getElementById('csv-section');
-                const apiSection = document.getElementById('api-section');
-
-                if (connectorType === 'csv') {
-                    csvSection.classList.add('active');
-                    apiSection.classList.remove('active');
-                    // Make CSV textarea required
-                    csvSection.querySelector('textarea').required = true;
-                } else {
-                    apiSection.classList.add('active');
-                    csvSection.classList.remove('active');
-                    // CSV textarea not required for API connectors
-                    csvSection.querySelector('textarea').required = false;
-                }
-            });
+        // Update visual state
+        document.querySelectorAll('.connector-option').forEach(opt => {
+            opt.classList.remove('active');
         });
+        this.classList.add('active');
 
-        // Handle date range selection
-        const dateRangeSelect = document.getElementById('date-range-select');
-        const customDateSection = document.getElementById('custom-date-section');
-        const sinceDateInput = document.getElementById('since-date-input');
+        // Show/hide appropriate section
+        const connectorType = this.dataset.connector;
+        const csvSection = document.getElementById('csv-section');
+        const apiSection = document.getElementById('api-section');
 
-        if (dateRangeSelect) {
-            dateRangeSelect.addEventListener('change', function() {
-                if (this.value === 'custom') {
-                    customDateSection.style.display = 'block';
-                    sinceDateInput.required = true;
-
-                    // Set default to 30 days ago
-                    const defaultDate = new Date();
-                    defaultDate.setDate(defaultDate.getDate() - 30);
-                    sinceDateInput.value = defaultDate.toISOString().split('T')[0];
-                } else {
-                    customDateSection.style.display = 'none';
-                    sinceDateInput.required = false;
-                    sinceDateInput.value = '';
-                }
-            });
+        if (connectorType === 'csv') {
+            csvSection.classList.add('active');
+            apiSection.classList.remove('active');
+            // Make CSV textarea required
+            csvSection.querySelector('textarea').required = true;
+        } else {
+            apiSection.classList.add('active');
+            csvSection.classList.remove('active');
+            // CSV textarea not required for API connectors
+            csvSection.querySelector('textarea').required = false;
         }
+    });
+});
 
-        // Set default selection to CSV if no API connectors available
-        window.addEventListener('DOMContentLoaded', function() {
-            const firstOption = document.querySelector('.connector-option');
-            if (firstOption) {
-                firstOption.click();
-            }
-        });
-    </script>
-</body>
-</html>
+// Handle date range selection
+const dateRangeSelect = document.getElementById('date-range-select');
+const customDateSection = document.getElementById('custom-date-section');
+const sinceDateInput = document.getElementById('since-date-input');
+
+if (dateRangeSelect) {
+    dateRangeSelect.addEventListener('change', function() {
+        if (this.value === 'custom') {
+            customDateSection.style.display = 'block';
+            sinceDateInput.required = true;
+
+            // Set default to 30 days ago
+            const defaultDate = new Date();
+            defaultDate.setDate(defaultDate.getDate() - 30);
+            sinceDateInput.value = defaultDate.toISOString().split('T')[0];
+        } else {
+            customDateSection.style.display = 'none';
+            sinceDateInput.required = false;
+            sinceDateInput.value = '';
+        }
+    });
+}
+
+// Set default selection to CSV if no API connectors available
+window.addEventListener('DOMContentLoaded', function() {
+    const firstOption = document.querySelector('.connector-option');
+    if (firstOption) {
+        firstOption.click();
+    }
+});
+{% endblock %}

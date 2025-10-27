@@ -1,281 +1,256 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transaction History – LendifyMe</title>
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            font-family: sans-serif;
-            max-width: 900px;
-            margin: auto;
-            padding: 1rem;
-            line-height: 1.5;
-        }
-        h1 {
-            font-size: 1.75rem;
-            margin-bottom: 0.5rem;
-        }
-        h2 {
-            font-size: 1.25rem;
-            margin-top: 2rem;
-            margin-bottom: 1rem;
-        }
-        .back-link {
-            display: inline-block;
-            margin-bottom: 1rem;
-            color: #007bff;
-            text-decoration: none;
-        }
-        .back-link:hover {
-            text-decoration: underline;
-        }
-        .loan-summary {
-            background: #f8f9fa;
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 1.5rem;
-        }
-        .loan-summary h2 {
-            margin-top: 0;
-            font-size: 1.1rem;
-        }
-        .loan-summary p {
-            margin: 0.5rem 0;
-        }
-        .summary-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-            margin-top: 0.5rem;
-        }
-        .summary-item strong {
-            color: #6c757d;
-            display: block;
-            font-size: 0.85rem;
-            margin-bottom: 0.25rem;
-        }
-        .summary-item .value {
-            font-size: 1.25rem;
-            font-weight: bold;
-        }
-        .amount {
-            color: #198754;
-        }
-        .outstanding {
-            color: #d63384;
-        }
-        .fully-paid {
-            color: #198754;
-        }
-        .table-container {
-            overflow-x: auto;
-            margin-top: 1rem;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 600px;
-        }
-        th, td {
-            padding: 0.75rem;
-            border: 1px solid #ddd;
-            text-align: left;
-        }
-        th {
-            background: #f0f0f0;
-            font-weight: bold;
-        }
-        tr:hover {
-            background: #f8f9fa;
-        }
-        .no-transactions {
-            text-align: center;
-            padding: 3rem 1rem;
-            color: #6c757d;
-        }
-        .no-transactions h3 {
-            font-size: 1.25rem;
-            margin-bottom: 0.5rem;
-        }
-        .transaction-date {
-            white-space: nowrap;
-        }
-        .applied-date {
-            font-size: 0.85rem;
-            color: #6c757d;
-        }
-        .btn-remove {
-            padding: 0.25rem 0.5rem;
-            font-size: 0.8rem;
-            background: #dc3545;
-            color: white;
-            border: none;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-        .btn-remove:hover {
-            background: #bb2d3b;
-        }
-        .alert {
-            padding: 0.75rem 1rem;
-            border-radius: 4px;
-            margin-bottom: 1rem;
-        }
-        .alert-error {
-            background: #f8d7da;
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .alert-success {
-            background: #d4edda;
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .action-toolbar {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-            flex-wrap: wrap;
-        }
-        .btn-print, .btn-export {
-            padding: 0.5rem 1rem;
-            font-size: 0.9rem;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            font-weight: bold;
-        }
-        .btn-print {
-            background: #6c757d;
-            color: white;
-        }
-        .btn-print:hover {
-            background: #5a6268;
-        }
-        .btn-export {
-            background: #198754;
-            color: white;
-        }
-        .btn-export:hover {
-            background: #157347;
-        }
+{% extends "base.html" %}
 
-        @media print {
-            .back-link, .btn-remove, .action-toolbar, .alert {
-                display: none !important;
-            }
-            body {
-                max-width: 100%;
-                padding: 0;
-            }
-            h1 {
-                margin-top: 0;
-            }
-            table {
-                min-width: 100%;
-                page-break-inside: auto;
-            }
-            tr {
-                page-break-inside: avoid;
-                page-break-after: auto;
-            }
-            thead {
-                display: table-header-group;
-            }
-            tfoot {
-                display: table-footer-group;
-            }
-        }
-    </style>
-</head>
-<body>
-    <a href="/" class="back-link">← Back to Loans</a>
+{% block title %}Transaction History – LendifyMe{% endblock %}
 
-    <h1>Transaction History</h1>
+{% block extra_css %}
+h1 {
+    font-size: 1.75rem;
+    margin-bottom: 0.5rem;
+}
+h2 {
+    font-size: 1.25rem;
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1rem;
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 600;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+.loan-summary {
+    background: white;
+    padding: 1.5rem;
+    border-radius: 8px;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.loan-summary h2 {
+    margin-top: 0;
+    font-size: 1.1rem;
+}
+.loan-summary p {
+    margin: 0.5rem 0;
+}
+.summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 0.5rem;
+}
+.summary-item strong {
+    color: #6c757d;
+    display: block;
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+}
+.summary-item .value {
+    font-size: 1.25rem;
+    font-weight: bold;
+}
+.amount {
+    color: #198754;
+}
+.outstanding {
+    color: #d63384;
+}
+.fully-paid {
+    color: #198754;
+}
+.table-container {
+    overflow-x: auto;
+    margin-top: 1rem;
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 600px;
+}
+th, td {
+    padding: 0.75rem;
+    border: 1px solid #ddd;
+    text-align: left;
+}
+th {
+    background: #f0f0f0;
+    font-weight: bold;
+}
+tr:hover {
+    background: #f8f9fa;
+}
+.no-transactions {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #6c757d;
+    background: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+.no-transactions h3 {
+    font-size: 1.25rem;
+    margin-bottom: 0.5rem;
+}
+.transaction-date {
+    white-space: nowrap;
+}
+.applied-date {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+.btn-remove {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    background: #dc3545;
+    color: white;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+}
+.btn-remove:hover {
+    background: #bb2d3b;
+}
+.action-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+.btn-print, .btn-export {
+    padding: 0.5rem 1rem;
+    font-size: 0.9rem;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    text-decoration: none;
+    display: inline-block;
+    font-weight: 600;
+}
+.btn-print {
+    background: #6c757d;
+    color: white;
+}
+.btn-print:hover {
+    background: #5a6268;
+}
+.btn-export {
+    background: #198754;
+    color: white;
+}
+.btn-export:hover {
+    background: #157347;
+}
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-            {% for category, message in messages %}
-                <div class="alert alert-{{ category }}">{{ message }}</div>
-            {% endfor %}
-        {% endif %}
-    {% endwith %}
+@media print {
+    .back-link, .btn-remove, .action-toolbar, .alert, .header {
+        display: none !important;
+    }
+    .container {
+        max-width: 100%;
+        padding: 0;
+    }
+    h1 {
+        margin-top: 0;
+    }
+    table {
+        min-width: 100%;
+        page-break-inside: auto;
+    }
+    tr {
+        page-break-inside: avoid;
+        page-break-after: auto;
+    }
+    thead {
+        display: table-header-group;
+    }
+    tfoot {
+        display: table-footer-group;
+    }
+}
+{% endblock %}
 
-    <div class="action-toolbar">
-        <button onclick="window.print()" class="btn-print">🖨️ Print / Save as PDF</button>
-        <a href="/loan/{{ loan[0] }}/transactions/export" class="btn-export">📥 Export CSV</a>
-    </div>
+{% block content %}
+<a href="/" class="back-link">← Back to Loans</a>
 
-    <div class="loan-summary">
-        <h2>Loan Details</h2>
-        <p><strong>Borrower:</strong> {{ loan[1] }}{% if loan[5] %} ({{ loan[5] }}){% endif %}</p>
+<h1>Transaction History</h1>
 
-        <div class="summary-grid">
-            <div class="summary-item">
-                <strong>Original Amount</strong>
-                <div class="value">${{ '%.2f'|format(loan[2]) }}</div>
-            </div>
-            <div class="summary-item">
-                <strong>Total Repaid</strong>
-                <div class="value amount">${{ '%.2f'|format(loan[4]) }}</div>
-            </div>
-            <div class="summary-item">
-                <strong>Remaining</strong>
-                {% set remaining = loan[2] - loan[4] %}
-                <div class="value {% if remaining > 0 %}outstanding{% else %}fully-paid{% endif %}">
-                    ${{ '%.2f'|format(remaining) }}
-                </div>
+<div class="action-toolbar">
+    <button onclick="window.print()" class="btn-print">🖨️ Print / Save as PDF</button>
+    <a href="/loan/{{ loan[0] }}/transactions/export" class="btn-export">📥 Export CSV</a>
+</div>
+
+<div class="loan-summary">
+    <h2>Loan Details</h2>
+    <p><strong>Borrower:</strong> {{ loan[1] }}{% if loan[5] %} ({{ loan[5] }}){% endif %}</p>
+
+    <div class="summary-grid">
+        <div class="summary-item">
+            <strong>Original Amount</strong>
+            <div class="value">${{ '%.2f'|format(loan[2]) }}</div>
+        </div>
+        <div class="summary-item">
+            <strong>Total Repaid</strong>
+            <div class="value amount">${{ '%.2f'|format(loan[4]) }}</div>
+        </div>
+        <div class="summary-item">
+            <strong>Remaining</strong>
+            {% set remaining = loan[2] - loan[4] %}
+            <div class="value {% if remaining > 0 %}outstanding{% else %}fully-paid{% endif %}">
+                ${{ '%.2f'|format(remaining) }}
             </div>
         </div>
     </div>
+</div>
 
-    {% if transactions %}
-        <h2>Applied Transactions ({{ transactions|length }})</h2>
-        <div class="table-container">
-            <table>
-                <thead>
+{% if transactions %}
+    <h2>Applied Transactions ({{ transactions|length }})</h2>
+    <div class="table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>Transaction Date</th>
+                    <th>Description</th>
+                    <th>Amount</th>
+                    <th>Applied On</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for transaction in transactions %}
                     <tr>
-                        <th>Transaction Date</th>
-                        <th>Description</th>
-                        <th>Amount</th>
-                        <th>Applied On</th>
-                        <th>Actions</th>
+                        <td class="transaction-date">{{ transaction[1]|format_date }}</td>
+                        <td>{{ transaction[2] }}</td>
+                        <td class="amount">${{ '%.2f'|format(transaction[3]) }}</td>
+                        <td class="applied-date">{{ transaction[4]|format_date }}</td>
+                        <td>
+                            <form method="post" action="/remove-transaction/{{ transaction[0] }}" style="margin: 0;" onsubmit="return confirm('Are you sure you want to remove this transaction? This will reduce the repaid amount on the loan.');">
+                                <button type="submit" class="btn-remove">Remove</button>
+                            </form>
+                        </td>
                     </tr>
-                </thead>
-                <tbody>
-                    {% for transaction in transactions %}
-                        <tr>
-                            <td class="transaction-date">{{ transaction[1]|format_date }}</td>
-                            <td>{{ transaction[2] }}</td>
-                            <td class="amount">${{ '%.2f'|format(transaction[3]) }}</td>
-                            <td class="applied-date">{{ transaction[4]|format_date }}</td>
-                            <td>
-                                <form method="post" action="/remove-transaction/{{ transaction[0] }}" style="margin: 0;" onsubmit="return confirm('Are you sure you want to remove this transaction? This will reduce the repaid amount on the loan.');">
-                                    <button type="submit" class="btn-remove">Remove</button>
-                                </form>
-                            </td>
-                        </tr>
-                    {% endfor %}
-                </tbody>
-                <tfoot>
-                    <tr style="font-weight: bold; background: #f8f9fa;">
-                        <td colspan="2" style="text-align: right;">Total:</td>
-                        <td class="amount">${{ '%.2f'|format(loan[4]) }}</td>
-                        <td colspan="2"></td>
-                    </tr>
-                </tfoot>
-            </table>
-        </div>
-    {% else %}
-        <div class="no-transactions">
-            <h3>No Transactions Yet</h3>
-            <p>No transactions have been matched to this loan.</p>
-            <p>Use the "Match Bank Transactions" feature to automatically match payments.</p>
-        </div>
-    {% endif %}
-</body>
-</html>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr style="font-weight: bold; background: #f8f9fa;">
+                    <td colspan="2" style="text-align: right;">Total:</td>
+                    <td class="amount">${{ '%.2f'|format(loan[4]) }}</td>
+                    <td colspan="2"></td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+{% else %}
+    <div class="no-transactions">
+        <h3>No Transactions Yet</h3>
+        <p>No transactions have been matched to this loan.</p>
+        <p>Use the "Match Bank Transactions" feature to automatically match payments.</p>
+    </div>
+{% endif %}
+{% endblock %}
