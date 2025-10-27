@@ -137,19 +137,30 @@ def filter_duplicate_transactions(matches):
         transaction = match['transaction']
         loan_id = match['loan']['id']
 
+        # Use absolute value for amount comparison since:
+        # - Borrowing loans have negative transaction amounts
+        # - But we store all amounts as positive in applied_transactions
+        transaction_amount_abs = abs(transaction['amount'])
+
         # Check if this transaction has already been applied (to any loan)
+        # We check with absolute value to catch both positive and negative transactions
         c.execute("""
             SELECT COUNT(*) FROM applied_transactions
             WHERE date = ? AND description = ? AND amount = ?
-        """, (transaction['date'], transaction['description'], transaction['amount']))
+        """, (transaction['date'], transaction['description'], transaction_amount_abs))
 
         applied_count = c.fetchone()[0]
 
         # Check if this transaction was rejected for this specific loan
+        # Now storing absolute values in rejected_matches too (as of this fix)
+        # But check both for backwards compatibility with old data
         c.execute("""
             SELECT COUNT(*) FROM rejected_matches
-            WHERE date = ? AND description = ? AND amount = ? AND loan_id = ?
-        """, (transaction['date'], transaction['description'], transaction['amount'], loan_id))
+            WHERE date = ? AND description = ?
+            AND (amount = ? OR amount = ?)
+            AND loan_id = ?
+        """, (transaction['date'], transaction['description'],
+              transaction_amount_abs, transaction['amount'], loan_id))
 
         rejected_count = c.fetchone()[0]
 
@@ -640,6 +651,7 @@ def index():
         note = request.form.get("note")
         repayment_amount = request.form.get("repayment_amount")
         repayment_frequency = request.form.get("repayment_frequency")
+        loan_type = request.form.get("loan_type", "lending")  # Default to lending
 
         if borrower and amount:
             conn = sqlite3.connect(get_db_path())
@@ -647,15 +659,16 @@ def index():
             # Generate unique access token for borrower
             access_token = generate_borrower_access_token()
             c.execute("""
-                INSERT INTO loans (borrower, bank_name, amount, note, date_borrowed, repayment_amount, repayment_frequency, user_id, borrower_access_token)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO loans (borrower, bank_name, amount, note, date_borrowed, repayment_amount, repayment_frequency, user_id, borrower_access_token, loan_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (borrower,
                   bank_name if bank_name else None,
                   float(amount), note, date_borrowed,
                   float(repayment_amount) if repayment_amount else None,
                   repayment_frequency if repayment_frequency else None,
                   get_current_user_id(),
-                  access_token))
+                  access_token,
+                  loan_type))
             conn.commit()
             conn.close()
         return redirect("/")
@@ -666,7 +679,7 @@ def index():
         SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
                COALESCE(SUM(at.amount), 0) as amount_repaid,
                l.repayment_amount, l.repayment_frequency, l.bank_name, l.created_at,
-               l.borrower_access_token, l.borrower_email
+               l.borrower_access_token, l.borrower_email, l.loan_type
         FROM loans l
         LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.user_id = ?
@@ -950,13 +963,13 @@ def match_transactions():
                 connector = ConnectorRegistry.create_from_env(connector_type)
 
                 if not connector:
-                    flash(f"API credentials not configured for {connector_type}. Please add to .env file.", "error")
+                    flash(f"Unable to connect to your bank. Please contact support to set up automatic imports.", "error")
                     return render_template("match_upload.html",
                                          available_connectors=ConnectorRegistry.get_available_connectors())
 
                 # Test connection first
                 if not connector.test_connection():
-                    flash(f"Failed to connect to {connector.connector_name}. Please check your API credentials.", "error")
+                    flash(f"Unable to connect to {connector.connector_name}. Please try again or contact support if the issue persists.", "error")
                     return render_template("match_upload.html",
                                          available_connectors=ConnectorRegistry.get_available_connectors())
 
@@ -980,22 +993,23 @@ def match_transactions():
 
                 # Fetch transactions
                 all_transactions = connector.get_transactions(since_date=since_date)
-                # Only consider incoming transactions
-                transactions = connector.filter_incoming_only(all_transactions)
+                # Keep ALL transactions (both incoming and outgoing) for now
+                # We'll filter based on loan type during matching
+                transactions = all_transactions
 
-                flash(f"Successfully fetched {len(transactions)} incoming transactions from {connector.connector_name} since {since_date}", "success")
+                flash(f"Successfully fetched {len(transactions)} transactions from {connector.connector_name} since {since_date}", "success")
 
             # Convert Transaction objects to dicts
             transaction_dicts = [t.to_dict() for t in transactions]
             all_transactions_dicts = [t.to_dict() for t in all_transactions]
 
-            # Get all loans for current user with calculated repaid amounts
+            # Get all loans for current user with calculated repaid amounts AND loan_type
             conn = sqlite3.connect(get_db_path())
             c = conn.cursor()
             c.execute("""
                 SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
                        COALESCE(SUM(at.amount), 0) as amount_repaid,
-                       l.repayment_amount, l.repayment_frequency, l.bank_name
+                       l.repayment_amount, l.repayment_frequency, l.bank_name, l.loan_type
                 FROM loans l
                 LEFT JOIN applied_transactions at ON l.id = at.loan_id
                 WHERE l.user_id = ?
@@ -1016,7 +1030,8 @@ def match_transactions():
                     'amount_repaid': row[5],
                     'repayment_amount': row[6],
                     'repayment_frequency': row[7],
-                    'bank_name': row[8]
+                    'bank_name': row[8],
+                    'loan_type': row[9]  # 'lending' or 'borrowing'
                 })
 
             # Find matches
@@ -1024,6 +1039,13 @@ def match_transactions():
 
             # Filter out already-applied transactions
             matches = filter_duplicate_transactions(matches)
+
+            # Add unique IDs to each match to avoid index sync issues
+            import hashlib
+            for match in matches:
+                # Create unique ID from transaction details + loan ID
+                match_str = f"{match['transaction']['date']}-{match['transaction']['description']}-{match['transaction']['amount']}-{match['loan']['id']}"
+                match['match_id'] = hashlib.md5(match_str.encode()).hexdigest()[:16]
 
             # Only store context transactions (within ±7 days of any match) to avoid session size limits
             context_transactions = []
@@ -1140,10 +1162,10 @@ def review_matches():
 @app.route("/apply-match", methods=["POST"])
 @login_required
 def apply_match():
-    match_index = request.form.get("match_index")
+    match_id = request.form.get("match_id")
     session_key = session.get('pending_matches_key')
 
-    if match_index is not None and session_key:
+    if match_id and session_key:
         conn = sqlite3.connect(get_db_path())
         c = conn.cursor()
 
@@ -1159,10 +1181,17 @@ def apply_match():
         if result:
             db_id, matches_json = result
             matches = json.loads(matches_json)
-            match_idx = int(match_index)
 
-            if 0 <= match_idx < len(matches):
-                match = matches[match_idx]
+            # Find the match by match_id instead of index
+            match = None
+            match_idx = None
+            for idx, m in enumerate(matches):
+                if m.get('match_id') == match_id:
+                    match = m
+                    match_idx = idx
+                    break
+
+            if match:
                 loan_id = match['loan']['id']
                 amount = match['transaction']['amount']
                 transaction = match['transaction']
@@ -1170,7 +1199,7 @@ def apply_match():
                 # Verify loan ownership and get loan details
                 c.execute("""
                     SELECT l.id, l.borrower, l.borrower_email, l.borrower_access_token, l.amount,
-                           COALESCE(SUM(at.amount), 0) as current_repaid
+                           COALESCE(SUM(at.amount), 0) as current_repaid, l.loan_type
                     FROM loans l
                     LEFT JOIN applied_transactions at ON l.id = at.loan_id
                     WHERE l.id = ? AND l.user_id = ?
@@ -1179,14 +1208,18 @@ def apply_match():
                 loan_details = c.fetchone()
 
                 if loan_details:
-                    loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid = loan_details
+                    loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid, loan_type = loan_details
 
-                    # Record the applied transaction
+                    # For borrowing loans, transactions are negative (outgoing), but we store as positive repayments
+                    # For lending loans, transactions are already positive (incoming)
+                    amount_to_store = abs(transaction['amount'])
+
+                    # Record the applied transaction (always store as positive)
                     c.execute("""
                         INSERT INTO applied_transactions (date, description, amount, loan_id)
                         VALUES (?, ?, ?, ?)
                     """, (transaction['date'], transaction['description'],
-                          transaction['amount'], loan_id))
+                          amount_to_store, loan_id))
 
                     # Remove the match and update database
                     matches.pop(match_idx)
@@ -1198,8 +1231,8 @@ def apply_match():
 
                     conn.commit()
 
-                    # Calculate new balance after this payment
-                    new_balance = loan_amount - (current_repaid + amount)
+                    # Calculate new balance after this payment (using absolute value)
+                    new_balance = loan_amount - (current_repaid + amount_to_store)
 
                     # Send email notification if borrower has email and access token
                     if borrower_email and access_token:
@@ -1213,7 +1246,7 @@ def apply_match():
                                 borrower_name=borrower_name,
                                 portal_link=portal_link,
                                 lender_name=lender_name,
-                                payment_amount=amount,
+                                payment_amount=amount_to_store,
                                 payment_date=transaction['date'],
                                 payment_description=transaction['description'],
                                 new_balance=new_balance,
@@ -1227,20 +1260,21 @@ def apply_match():
                         except Exception as e:
                             app.logger.error(f"Error sending payment notification: {e}")
 
-                    flash(f"Applied ${amount:.2f} payment to {borrower_name}", "success")
+                    conn.close()
+                    return ('', 204)  # Success, no content
 
         conn.close()
 
-    return redirect("/match/review")
+    return ('', 400)  # Bad request
 
 
 @app.route("/reject-match", methods=["POST"])
 @login_required
 def reject_match():
-    match_index = request.form.get("match_index")
+    match_id = request.form.get("match_id")
     session_key = session.get('pending_matches_key')
 
-    if match_index is not None and session_key:
+    if match_id and session_key:
         conn = sqlite3.connect(get_db_path())
         c = conn.cursor()
 
@@ -1256,19 +1290,27 @@ def reject_match():
         if result:
             db_id, matches_json = result
             matches = json.loads(matches_json)
-            match_idx = int(match_index)
 
-            if 0 <= match_idx < len(matches):
-                match = matches[match_idx]
+            # Find the match by match_id instead of index
+            match = None
+            match_idx = None
+            for idx, m in enumerate(matches):
+                if m.get('match_id') == match_id:
+                    match = m
+                    match_idx = idx
+                    break
+
+            if match:
                 loan_id = match['loan']['id']
                 transaction = match['transaction']
 
                 # Record the rejected match to prevent future suggestions
+                # Store absolute value for consistency with applied_transactions
                 c.execute("""
                     INSERT INTO rejected_matches (date, description, amount, loan_id)
                     VALUES (?, ?, ?, ?)
                 """, (transaction['date'], transaction['description'],
-                      transaction['amount'], loan_id))
+                      abs(transaction['amount']), loan_id))
 
                 # Remove the match and update database
                 matches.pop(match_idx)
@@ -1279,11 +1321,12 @@ def reject_match():
                 """, (json.dumps(matches), db_id))
 
                 conn.commit()
-                flash(f"Marked transaction as not a match for {match['loan']['borrower']}", "success")
+                conn.close()
+                return ('', 204)  # Success, no content
 
         conn.close()
 
-    return redirect("/match/review")
+    return ('', 400)  # Bad request
 
 
 @app.route("/remove-transaction/<int:transaction_id>", methods=["POST"])

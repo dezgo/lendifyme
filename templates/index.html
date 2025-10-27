@@ -53,7 +53,7 @@
         table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 1100px;
+            min-width: 1200px;
         }
         th, td {
             padding: 0.75rem 0.5rem;
@@ -219,6 +219,21 @@
         .logout-link:hover {
             text-decoration: underline;
         }
+        .loan-type-badge {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: 3px;
+            font-size: 0.75rem;
+            font-weight: bold;
+        }
+        .loan-type-lending {
+            background: #d4edda;
+            color: #155724;
+        }
+        .loan-type-borrowing {
+            background: #cfe2ff;
+            color: #084298;
+        }
 
         @media (max-width: 480px) {
             body { padding: 0.75rem; }
@@ -251,8 +266,14 @@
     {% endwith %}
 
     <form method="post">
-        <label>Borrower Name</label>
-        <input type="text" name="borrower" placeholder="e.g. Alice Smith" required>
+        <label>Loan Type</label>
+        <select name="loan_type" id="loan_type" onchange="updateLoanLabels()" style="width: 100%; margin-bottom: 1rem; padding: 0.75rem; font-size: 16px; border: 1px solid #ddd; border-radius: 4px;">
+            <option value="lending">Lending (I gave money to someone)</option>
+            <option value="borrowing">Borrowing (I received money from someone)</option>
+        </select>
+
+        <label id="label_person">Borrower Name</label>
+        <input type="text" name="borrower" id="input_person" placeholder="e.g. Alice Smith" required>
 
         <label>Bank Statement Name (optional)</label>
         <input type="text" name="bank_name" placeholder="e.g. Alice S or A Smith - as it appears in your bank">
@@ -288,7 +309,8 @@
         <div class="table-container">
             <table>
                 <tr>
-                    <th>Borrower</th>
+                    <th>Type</th>
+                    <th>Person</th>
                     <th>Amount</th>
                     <th>Repaid</th>
                     <th>Remaining</th>
@@ -296,12 +318,18 @@
                     <th>Note</th>
                     <th>Date</th>
                     <th>Add Repayment</th>
-                    <th>Borrower Access</th>
+                    <th>Portal Access</th>
                     <th>Actions</th>
                 </tr>
                 {% for loan in loans %}
                     {% set remaining = loan[2] - loan[5] %}
+                    {% set loan_type = loan[12] %}
                     <tr>
+                        <td>
+                            <span class="loan-type-badge loan-type-{{ loan_type }}">
+                                {{ '📤 Lending' if loan_type == 'lending' else '📥 Borrowing' }}
+                            </span>
+                        </td>
                         <td>{{ loan[1] }}</td>
                         <td class="amount-cell">${{ '%.2f'|format(loan[2]) }}</td>
                         <td class="amount-cell">${{ '%.2f'|format(loan[5]) }}</td>
@@ -333,7 +361,7 @@
                                     <button class="copy-link" onclick="copyLink('{{ app_url }}/borrower/{{ loan[10] }}')">📋 Copy Link</button>
                                     <a href="/loan/{{ loan[0] }}/send-invite" class="btn-invite" style="text-align: center;">✉️ Send Invite</a>
                                 {% else %}
-                                    <span style="color: #6c757d; font-size: 0.75rem;">No token</span>
+                                    <span style="color: #6c757d; font-size: 0.75rem;">—</span>
                                 {% endif %}
                             </div>
                         </td>
@@ -359,6 +387,20 @@
             }).catch(err => {
                 alert('Failed to copy link: ' + err);
             });
+        }
+
+        function updateLoanLabels() {
+            const loanType = document.getElementById('loan_type').value;
+            const labelPerson = document.getElementById('label_person');
+            const inputPerson = document.getElementById('input_person');
+
+            if (loanType === 'borrowing') {
+                labelPerson.textContent = 'Lender Name';
+                inputPerson.placeholder = 'e.g. Brighte';
+            } else {
+                labelPerson.textContent = 'Borrower Name';
+                inputPerson.placeholder = 'e.g. Alice Smith';
+            }
         }
     </script>
 </body>

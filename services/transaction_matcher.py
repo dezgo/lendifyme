@@ -25,13 +25,13 @@ def parse_csv_transactions(csv_content):
                 amount_clean = amount.replace('$', '').replace(',', '').strip()
                 amount_float = float(amount_clean)
 
-                # Only consider positive amounts (incoming payments)
-                if amount_float > 0:
-                    transactions.append({
-                        'date': date,
-                        'description': description.strip(),
-                        'amount': amount_float
-                    })
+                # Include both incoming (positive) and outgoing (negative) transactions
+                # Filtering will happen during matching based on loan type
+                transactions.append({
+                    'date': date,
+                    'description': description.strip(),
+                    'amount': amount_float
+                })
         except (ValueError, AttributeError):
             continue
 
@@ -64,10 +64,24 @@ def match_transactions_to_loans(transactions, loans):
             if remaining <= 0:
                 continue
 
+            # Determine loan type (default to 'lending' for backward compatibility)
+            loan_type = loan.get('loan_type', 'lending')
+
+            # Filter transactions based on loan type:
+            # - lending loans: match positive amounts (money received)
+            # - borrowing loans: match negative amounts (money paid out)
+            if loan_type == 'lending' and transaction['amount'] <= 0:
+                continue  # Skip outgoing transactions for lending loans
+            if loan_type == 'borrowing' and transaction['amount'] >= 0:
+                continue  # Skip incoming transactions for borrowing loans
+
+            # Use absolute value of transaction amount for comparisons
+            trans_amount = abs(transaction['amount'])
+
             confidence = 0
             reasons = []
 
-            # 1. Check if borrower name appears in transaction description
+            # 1. Check if borrower/lender name appears in transaction description
             # Use bank_name if available, otherwise use borrower name
             name_to_match = loan.get('bank_name') or loan['borrower']
             name_similarity = calculate_similarity(name_to_match, transaction['description'])
@@ -75,21 +89,21 @@ def match_transactions_to_loans(transactions, loans):
                 confidence += 40 * name_similarity
                 reasons.append(f"Name match ({int(name_similarity * 100)}%)")
 
-            # 2. Check if amount matches exactly
-            if abs(transaction['amount'] - remaining) < 0.01:
+            # 2. Check if amount matches exactly (using absolute values)
+            if abs(trans_amount - remaining) < 0.01:
                 confidence += 40
                 reasons.append("Exact amount match (full remaining balance)")
-            elif abs(transaction['amount'] - loan['amount']) < 0.01:
+            elif abs(trans_amount - loan['amount']) < 0.01:
                 confidence += 35
                 reasons.append("Exact amount match (original loan amount)")
-            elif loan.get('repayment_amount') and abs(transaction['amount'] - loan['repayment_amount']) < 0.01:
+            elif loan.get('repayment_amount') and abs(trans_amount - loan['repayment_amount']) < 0.01:
                 # Matches scheduled repayment amount
                 confidence += 45
                 frequency = loan.get('repayment_frequency', '')
                 reasons.append(f"Matches {frequency} repayment schedule (${loan['repayment_amount']:.2f})")
-            elif transaction['amount'] < remaining and transaction['amount'] > 0:
+            elif trans_amount < remaining and trans_amount > 0:
                 # Partial payment - check if it's a round number
-                if transaction['amount'] % 10 == 0 or transaction['amount'] % 5 == 0:
+                if trans_amount % 10 == 0 or trans_amount % 5 == 0:
                     confidence += 20
                     reasons.append("Round number partial payment")
                 else:

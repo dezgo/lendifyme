@@ -124,6 +124,32 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 13:
+        try:
+            migrate_v13_add_loan_type(conn)
+            _set_user_version(conn, 13)
+            conn.commit()
+            print("✅ Migration v13 applied.")
+        except Exception as e:
+            print(f"❌ Migration v13 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
+    if current < 14:
+        try:
+            migrate_v14_fix_negative_amounts(conn)
+            _set_user_version(conn, 14)
+            conn.commit()
+            print("✅ Migration v14 applied.")
+        except Exception as e:
+            print(f"❌ Migration v14 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -502,3 +528,57 @@ def migrate_v12_add_borrower_access_token(conn):
     """)
 
     print("  Borrower access token column added successfully.")
+
+
+def migrate_v13_add_loan_type(conn):
+    """
+    Add loan_type column to support both lending (money you lent) and borrowing (money you borrowed).
+    This enables tracking loans in both directions.
+    """
+    # Add loan_type column - defaults to 'lending' for backwards compatibility
+    conn.execute("""
+        ALTER TABLE loans
+        ADD COLUMN loan_type TEXT DEFAULT 'lending' NOT NULL;
+    """)
+
+    # Update all existing loans to be 'lending' type (explicit, though default handles it)
+    conn.execute("""
+        UPDATE loans
+        SET loan_type = 'lending'
+        WHERE loan_type IS NULL;
+    """)
+
+    print("  Loan type column added successfully (lending/borrowing support enabled).")
+
+
+def migrate_v14_fix_negative_amounts(conn):
+    """
+    Fix negative amounts in applied_transactions and rejected_matches tables.
+    For borrowing loans, transactions were stored as negative values, but they should
+    always be positive (representing repayment amounts).
+    """
+    c = conn.cursor()
+
+    # Fix applied_transactions table
+    c.execute("SELECT id, amount FROM applied_transactions WHERE amount < 0")
+    negative_applied = c.fetchall()
+
+    if negative_applied:
+        for trans_id, amount in negative_applied:
+            c.execute("UPDATE applied_transactions SET amount = ? WHERE id = ?",
+                     (abs(amount), trans_id))
+        print(f"  Fixed {len(negative_applied)} negative amounts in applied_transactions.")
+    else:
+        print("  No negative amounts found in applied_transactions.")
+
+    # Fix rejected_matches table
+    c.execute("SELECT id, amount FROM rejected_matches WHERE amount < 0")
+    negative_rejected = c.fetchall()
+
+    if negative_rejected:
+        for match_id, amount in negative_rejected:
+            c.execute("UPDATE rejected_matches SET amount = ? WHERE id = ?",
+                     (abs(amount), match_id))
+        print(f"  Fixed {len(negative_rejected)} negative amounts in rejected_matches.")
+    else:
+        print("  No negative amounts found in rejected_matches.")

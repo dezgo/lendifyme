@@ -126,6 +126,14 @@
         .btn-reject:hover {
             background: #5a6268;
         }
+        .btn-reject-all {
+            background: #dc3545;
+            color: white;
+            font-size: 0.85rem;
+        }
+        .btn-reject-all:hover {
+            background: #bb2d3b;
+        }
         .action-buttons {
             display: flex;
             gap: 0.5rem;
@@ -244,7 +252,12 @@
         <p>We found {{ matches|length }} potential match{{ 'es' if matches|length != 1 else '' }}. Review and apply them below:</p>
 
         {% for match in matches %}
-            <div class="match-card {% if match.confidence >= 70 %}high-confidence{% elif match.confidence >= 40 %}medium-confidence{% endif %}">
+            <div class="match-card {% if match.confidence >= 70 %}high-confidence{% elif match.confidence >= 40 %}medium-confidence{% endif %}"
+                 data-match-id="{{ match.match_id }}"
+                 data-loan-id="{{ match.loan.id }}"
+                 data-loan-amount="{{ match.loan.amount }}"
+                 data-amount-repaid="{{ match.loan.amount_repaid }}"
+                 data-transaction-amount="{{ match.transaction.amount|abs }}">
                 <span class="confidence-badge {% if match.confidence >= 70 %}confidence-high{% elif match.confidence >= 40 %}confidence-medium{% else %}confidence-low{% endif %}">
                     {{ '%.0f'|format(match.confidence) }}% Confidence
                 </span>
@@ -271,15 +284,15 @@
                             {% endif %}
                         {% endif %}
 
-                        <p class="amount">${{ '%.2f'|format(match.transaction.amount) }}</p>
+                        <p class="amount">${{ '%.2f'|format(match.transaction.amount|abs) }}</p>
                     </div>
 
                     <div class="detail-section">
                         <h3>Loan</h3>
-                        <p><strong>Borrower:</strong> {{ match.loan.borrower }}</p>
+                        <p><strong>Borrower:</strong> <span class="loan-borrower">{{ match.loan.borrower }}</span></p>
                         <p><strong>Original Amount:</strong> ${{ '%.2f'|format(match.loan.amount) }}</p>
-                        <p><strong>Already Repaid:</strong> ${{ '%.2f'|format(match.loan.amount_repaid) }}</p>
-                        <p><strong>Remaining:</strong> ${{ '%.2f'|format(match.loan.amount - match.loan.amount_repaid) }}</p>
+                        <p><strong>Already Repaid:</strong> $<span class="loan-amount-repaid">{{ '%.2f'|format(match.loan.amount_repaid) }}</span></p>
+                        <p><strong>Remaining:</strong> $<span class="loan-remaining">{{ '%.2f'|format(match.loan.amount - match.loan.amount_repaid) }}</span></p>
                     </div>
                 </div>
 
@@ -414,14 +427,15 @@
                 {% endif %}
 
                 <div class="action-buttons">
-                    <form method="post" action="/apply-match" style="margin: 0;">
-                        <input type="hidden" name="match_index" value="{{ loop.index0 }}">
-                        <button type="submit" class="btn-apply">✓ Apply This Match</button>
-                    </form>
-                    <form method="post" action="/reject-match" style="margin: 0;">
-                        <input type="hidden" name="match_index" value="{{ loop.index0 }}">
-                        <button type="submit" class="btn-reject">✗ Not a Match</button>
-                    </form>
+                    <button onclick="handleMatch('{{ match.match_id }}', 'apply', this)" class="btn-apply">
+                        ✓ Apply This Match
+                    </button>
+                    <button onclick="handleMatch('{{ match.match_id }}', 'reject', this)" class="btn-reject">
+                        ✗ Not a Match
+                    </button>
+                    <button onclick="rejectAllForLoan({{ match.loan.id }}, '{{ match.loan.borrower }}', this)" class="btn-reject-all" title="Reject all remaining matches for this loan">
+                        ✗ Reject All for {{ match.loan.borrower }}
+                    </button>
                 </div>
             </div>
         {% endfor %}
@@ -434,5 +448,177 @@
             <a href="/match" class="try-again">Try Again</a>
         </div>
     {% endif %}
+
+    <script>
+        function updateLoanAmounts(loanId, transactionAmount) {
+            // Find all remaining cards for this loan and update their amounts
+            const cards = document.querySelectorAll(`.match-card[data-loan-id="${loanId}"]`);
+
+            cards.forEach(card => {
+                const currentRepaid = parseFloat(card.dataset.amountRepaid);
+                const loanAmount = parseFloat(card.dataset.loanAmount);
+                const newRepaid = currentRepaid + transactionAmount;
+                const newRemaining = loanAmount - newRepaid;
+
+                // Update data attributes
+                card.dataset.amountRepaid = newRepaid.toFixed(2);
+
+                // Update displayed values
+                const repaidSpan = card.querySelector('.loan-amount-repaid');
+                const remainingSpan = card.querySelector('.loan-remaining');
+
+                if (repaidSpan) {
+                    repaidSpan.textContent = newRepaid.toFixed(2);
+                    // Highlight the updated value briefly
+                    repaidSpan.style.background = '#fff3cd';
+                    repaidSpan.style.transition = 'background 0.5s ease';
+                    setTimeout(() => {
+                        repaidSpan.style.background = 'transparent';
+                    }, 1000);
+                }
+
+                if (remainingSpan) {
+                    remainingSpan.textContent = newRemaining.toFixed(2);
+                    remainingSpan.style.background = '#fff3cd';
+                    remainingSpan.style.transition = 'background 0.5s ease';
+                    setTimeout(() => {
+                        remainingSpan.style.background = 'transparent';
+                    }, 1000);
+                }
+            });
+        }
+
+        async function rejectAllForLoan(loanId, borrowerName, button) {
+            if (!confirm(`Reject all remaining matches for ${borrowerName}?\n\nThis will mark all remaining transactions for this loan as "not a match".`)) {
+                return;
+            }
+
+            // Disable the button
+            button.disabled = true;
+            button.innerHTML = '⏳ Rejecting all...';
+
+            // Find all cards for this loan
+            const cards = document.querySelectorAll(`.match-card[data-loan-id="${loanId}"]`);
+
+            let successCount = 0;
+            let failCount = 0;
+
+            // Process each card
+            for (const card of cards) {
+                const matchId = card.dataset.matchId;
+
+                try {
+                    const response = await fetch('/reject-match', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                        },
+                        body: `match_id=${matchId}`
+                    });
+
+                    if (response.ok) {
+                        successCount++;
+                        // Animate out
+                        card.style.opacity = '0';
+                        card.style.transform = 'scale(0.95)';
+                        card.style.transition = 'all 0.2s ease-out';
+                    } else {
+                        failCount++;
+                    }
+                } catch (error) {
+                    failCount++;
+                }
+            }
+
+            // Remove all cards after animation
+            setTimeout(() => {
+                cards.forEach(card => card.remove());
+
+                // Check if there are any matches left
+                const remainingMatches = document.querySelectorAll('.match-card').length;
+                if (remainingMatches === 0) {
+                    // Show "all done" message
+                    document.body.innerHTML = `
+                        <div style="max-width: 900px; margin: 2rem auto; padding: 3rem 1rem; text-align: center;">
+                            <h1 style="color: #198754; font-size: 2rem; margin-bottom: 1rem;">🎉 All Done!</h1>
+                            <p style="font-size: 1.1rem; margin-bottom: 2rem;">You've reviewed all matches.</p>
+                            <a href="/" style="display: inline-block; padding: 0.75rem 1.5rem; background: #007bff; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">
+                                Back to Loans
+                            </a>
+                        </div>
+                    `;
+                } else if (failCount > 0) {
+                    alert(`Rejected ${successCount} matches. ${failCount} failed.`);
+                }
+            }, 200);
+        }
+
+        async function handleMatch(matchId, action, button) {
+            // Get the match card element
+            const card = button.closest('.match-card');
+            const loanId = card.dataset.loanId;
+            const transactionAmount = parseFloat(card.dataset.transactionAmount);
+
+            // Disable buttons immediately
+            const buttons = card.querySelectorAll('button');
+            buttons.forEach(btn => btn.disabled = true);
+
+            // Add loading state
+            button.innerHTML = action === 'apply' ? '⏳ Applying...' : '⏳ Rejecting...';
+
+            try {
+                // Send AJAX request
+                const endpoint = action === 'apply' ? '/apply-match' : '/reject-match';
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: `match_id=${matchId}`
+                });
+
+                if (response.ok) {
+                    // If applying, update amounts for all remaining matches of this loan
+                    if (action === 'apply') {
+                        updateLoanAmounts(loanId, transactionAmount);
+                    }
+
+                    // Animate out and remove the card
+                    card.style.opacity = '0';
+                    card.style.transform = 'scale(0.95)';
+                    card.style.transition = 'all 0.2s ease-out';
+
+                    setTimeout(() => {
+                        card.remove();
+
+                        // Check if there are any matches left
+                        const remainingMatches = document.querySelectorAll('.match-card').length;
+                        if (remainingMatches === 0) {
+                            // Show "all done" message
+                            document.body.innerHTML = `
+                                <div style="max-width: 900px; margin: 2rem auto; padding: 3rem 1rem; text-align: center;">
+                                    <h1 style="color: #198754; font-size: 2rem; margin-bottom: 1rem;">🎉 All Done!</h1>
+                                    <p style="font-size: 1.1rem; margin-bottom: 2rem;">You've reviewed all matches.</p>
+                                    <a href="/" style="display: inline-block; padding: 0.75rem 1.5rem; background: #007bff; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">
+                                        Back to Loans
+                                    </a>
+                                </div>
+                            `;
+                        }
+                    }, 200);
+                } else {
+                    // Error - restore button state
+                    button.innerHTML = action === 'apply' ? '✓ Apply This Match' : '✗ Not a Match';
+                    buttons.forEach(btn => btn.disabled = false);
+                    alert('Failed to process match. Please try again.');
+                }
+            } catch (error) {
+                // Network error - restore button state
+                button.innerHTML = action === 'apply' ? '✓ Apply This Match' : '✗ Not a Match';
+                buttons.forEach(btn => btn.disabled = false);
+                alert('Network error. Please check your connection and try again.');
+            }
+        }
+    </script>
 </body>
 </html>
