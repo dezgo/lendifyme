@@ -111,6 +111,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 12:
+        try:
+            migrate_v12_add_borrower_access_token(conn)
+            _set_user_version(conn, 12)
+            conn.commit()
+            print("✅ Migration v12 applied.")
+        except Exception as e:
+            print(f"❌ Migration v12 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -449,3 +462,43 @@ def migrate_v11_create_pending_matches_table(conn):
     """)
 
     print("  Pending matches table created successfully.")
+
+
+def migrate_v12_add_borrower_access_token(conn):
+    """
+    Add borrower_access_token and borrower_email columns to loans table.
+    This enables the borrower self-service portal feature.
+    """
+    import secrets
+
+    # Add borrower_access_token column (unique token for borrower access)
+    conn.execute("""
+        ALTER TABLE loans
+        ADD COLUMN borrower_access_token TEXT;
+    """)
+
+    # Add borrower_email column for sending invitations and notifications
+    conn.execute("""
+        ALTER TABLE loans
+        ADD COLUMN borrower_email TEXT;
+    """)
+
+    # Generate tokens for all existing loans that don't have one
+    c = conn.cursor()
+    c.execute("SELECT id FROM loans WHERE borrower_access_token IS NULL")
+    loans_without_tokens = c.fetchall()
+
+    for (loan_id,) in loans_without_tokens:
+        token = secrets.token_urlsafe(32)
+        c.execute("UPDATE loans SET borrower_access_token = ? WHERE id = ?", (token, loan_id))
+
+    if loans_without_tokens:
+        print(f"  Generated access tokens for {len(loans_without_tokens)} existing loans")
+
+    # Create unique index on borrower_access_token for fast lookups and uniqueness
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_loans_borrower_token
+        ON loans(borrower_access_token);
+    """)
+
+    print("  Borrower access token column added successfully.")

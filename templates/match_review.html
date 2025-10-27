@@ -252,7 +252,7 @@
                 <div class="match-details">
                     <div class="detail-section">
                         <h3>Transaction</h3>
-                        <p><strong>Date:</strong> {{ match.transaction.date }}</p>
+                        <p><strong>Date:</strong> {{ match.transaction.date|format_date }}</p>
                         <p><strong>Description:</strong> {{ match.transaction.description }}</p>
 
                         {% if match.transaction.raw_data and match.transaction.raw_data.attributes %}
@@ -337,7 +337,7 @@
                     <details class="extra-details">
                         <summary>Show Context (Nearby Transactions)</summary>
                         <p style="margin-top: 0.5rem; color: #6c757d;">
-                            Transactions within ±5 days of {{ match.transaction.date }} to help jog your memory:
+                            Transactions within ±5 days of {{ match.transaction.date|format_date }} to help jog your memory:
                         </p>
 
                         {# Filter transactions within ±5 days of the matched transaction #}
@@ -383,7 +383,7 @@
                                 <tbody>
                                     {% for t in context_transactions|sort(attribute='date', reverse=true) %}
                                         <tr class="{% if t.date == match.transaction.date and t.description == match.transaction.description %}current-transaction{% elif t.amount > 0 %}incoming{% else %}outgoing{% endif %}">
-                                            <td>{{ t.date }}</td>
+                                            <td>{{ t.date|format_date }}</td>
                                             <td>
                                                 {% if t.date == match.transaction.date and t.description == match.transaction.description %}
                                                     <strong>→ {{ t.description[:50] }}</strong>

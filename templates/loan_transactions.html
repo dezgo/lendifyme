@@ -249,15 +249,10 @@
                 <tbody>
                     {% for transaction in transactions %}
                         <tr>
-                            <td class="transaction-date">{{ transaction[1] }}</td>
+                            <td class="transaction-date">{{ transaction[1]|format_date }}</td>
                             <td>{{ transaction[2] }}</td>
                             <td class="amount">${{ '%.2f'|format(transaction[3]) }}</td>
-                            <td class="applied-date">
-                                {{ transaction[4].split('T')[0] if 'T' in transaction[4] else transaction[4] }}
-                                {% if 'T' in transaction[4] %}
-                                    <br><span style="font-size: 0.75rem;">{{ transaction[4].split('T')[1].split('.')[0] }}</span>
-                                {% endif %}
-                            </td>
+                            <td class="applied-date">{{ transaction[4]|format_date }}</td>
                             <td>
                                 <form method="post" action="/remove-transaction/{{ transaction[0] }}" style="margin: 0;" onsubmit="return confirm('Are you sure you want to remove this transaction? This will reduce the repaid amount on the loan.');">
                                     <button type="submit" class="btn-remove">Remove</button>

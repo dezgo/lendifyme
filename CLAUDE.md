@@ -68,6 +68,17 @@ pip install -r requirements.txt
 - `/delete/<loan_id>` (POST) - Delete a loan (with confirmation)
 - `/repay/<loan_id>` (POST) - Add a manual repayment to a loan
 
+### Borrower Self-Service Portal Routes
+- `/borrower/<token>` (GET) - Read-only borrower portal showing loan status and payment history
+- `/loan/<loan_id>/send-invite` (GET, POST) - Send email invitation to borrower with portal access link
+
+**Borrower Portal Features:**
+- Each loan has a unique, secure access token (generated automatically on creation)
+- Borrowers can view their loan balance, payment history, and schedule via `/borrower/<token>`
+- No authentication required - security through unguessable URL token
+- Lender can copy portal link or send email invitation from loan management interface
+- Email notifications sent automatically when payments are applied (if borrower email is configured)
+
 ### Transaction Matching Routes
 - `/match` (GET, POST) - Upload CSV or select API connector, fetch transactions
 - `/match/review` (GET) - Review pending matches from session
@@ -98,6 +109,8 @@ The `loans` table schema is defined across migrations in `services/migrations.py
 - `amount_repaid`: Running total of repayments received (added in v2)
 - `repayment_amount`: Expected repayment amount per schedule (added in v3)
 - `repayment_frequency`: Frequency of repayments - 'weekly', 'fortnightly', 'monthly', or NULL (added in v3)
+- `borrower_access_token`: Unique secure token for borrower portal access (added in v12)
+- `borrower_email`: Email address for sending invitations and notifications (added in v12)
 - `bank_name`: Name as it appears in bank statements (optional, added in v5) - used for transaction matching when different from borrower's actual name
 
 **Applied Transactions Table** (`applied_transactions` - added in v4):

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Your Loan Details – LendifyMe</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: sans-serif;
+            max-width: 900px;
+            margin: auto;
+            padding: 1rem;
+            line-height: 1.5;
+            background: #f8f9fa;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        h1 {
+            font-size: 1.75rem;
+            margin-bottom: 0.5rem;
+            color: #212529;
+        }
+        .subtitle {
+            color: #6c757d;
+            margin-bottom: 2rem;
+            font-size: 0.95rem;
+        }
+        h2 {
+            font-size: 1.25rem;
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 0.5rem;
+        }
+        .loan-summary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+        }
+        .loan-summary h2 {
+            margin-top: 0;
+            font-size: 1.1rem;
+            border: none;
+            padding-bottom: 0;
+            color: white;
+        }
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+        .summary-item strong {
+            color: rgba(255,255,255,0.9);
+            display: block;
+            font-size: 0.85rem;
+            margin-bottom: 0.25rem;
+        }
+        .summary-item .value {
+            font-size: 1.5rem;
+            font-weight: bold;
+        }
+        .outstanding-badge {
+            background: rgba(255,255,255,0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        .fully-paid-badge {
+            background: rgba(72, 187, 120, 0.3);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            margin-top: 1rem;
+            font-size: 0.9rem;
+        }
+        .info-section {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 6px;
+            margin-bottom: 1rem;
+        }
+        .info-section p {
+            margin: 0.5rem 0;
+        }
+        .info-label {
+            color: #6c757d;
+            font-size: 0.85rem;
+            font-weight: bold;
+        }
+        .table-container {
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 600px;
+        }
+        th, td {
+            padding: 0.75rem;
+            border: 1px solid #ddd;
+            text-align: left;
+        }
+        th {
+            background: #f0f0f0;
+            font-weight: bold;
+        }
+        tr:hover {
+            background: #f8f9fa;
+        }
+        .no-transactions {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: #6c757d;
+            background: #f8f9fa;
+            border-radius: 6px;
+        }
+        .no-transactions h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+        .transaction-date {
+            white-space: nowrap;
+        }
+        .amount {
+            color: #198754;
+            font-weight: bold;
+        }
+        .applied-date {
+            font-size: 0.85rem;
+            color: #6c757d;
+        }
+        .footer {
+            margin-top: 3rem;
+            padding-top: 1.5rem;
+            border-top: 1px solid #e9ecef;
+            text-align: center;
+            color: #6c757d;
+            font-size: 0.85rem;
+        }
+        .footer p {
+            margin: 0.25rem 0;
+        }
+        @media print {
+            body {
+                background: white;
+            }
+            .container {
+                box-shadow: none;
+                padding: 0;
+            }
+            .footer {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Your Loan Status</h1>
+        <p class="subtitle">Track your loan balance and view payment history</p>
+
+        <div class="loan-summary">
+            <h2>Current Balance</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <strong>Original Loan</strong>
+                    <div class="value">${{ '%.2f'|format(loan.amount) }}</div>
+                </div>
+                <div class="summary-item">
+                    <strong>Total Paid</strong>
+                    <div class="value">${{ '%.2f'|format(loan.amount_repaid) }}</div>
+                </div>
+                <div class="summary-item">
+                    <strong>Still Owed</strong>
+                    <div class="value">${{ '%.2f'|format(loan.outstanding) }}</div>
+                </div>
+            </div>
+            {% if loan.outstanding > 0 %}
+                <div class="outstanding-badge">
+                    Outstanding balance: ${{ '%.2f'|format(loan.outstanding) }}
+                </div>
+            {% else %}
+                <div class="fully-paid-badge">
+                    ✓ This loan has been fully repaid!
+                </div>
+            {% endif %}
+        </div>
+
+        <h2>Loan Details</h2>
+        <div class="info-section">
+            <p><span class="info-label">Borrower:</span> {{ loan.borrower }}</p>
+            <p><span class="info-label">Date Borrowed:</span> {{ loan.date_borrowed|format_date }}</p>
+            {% if loan.date_due %}
+                <p><span class="info-label">Due Date:</span> {{ loan.date_due|format_date }}</p>
+            {% endif %}
+            {% if loan.repayment_amount and loan.repayment_frequency %}
+                <p><span class="info-label">Repayment Schedule:</span> ${{ '%.2f'|format(loan.repayment_amount) }} / {{ loan.repayment_frequency }}</p>
+            {% endif %}
+            {% if loan.note %}
+                <p><span class="info-label">Notes:</span> {{ loan.note }}</p>
+            {% endif %}
+        </div>
+
+        {% if transactions %}
+            <h2>Payment History ({{ transactions|length }} payments recorded)</h2>
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Description</th>
+                            <th>Amount</th>
+                            <th>Recorded On</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for transaction in transactions %}
+                            <tr>
+                                <td class="transaction-date">{{ transaction[1]|format_date }}</td>
+                                <td>{{ transaction[2] }}</td>
+                                <td class="amount">${{ '%.2f'|format(transaction[3]) }}</td>
+                                <td class="applied-date">{{ transaction[4]|format_date }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot>
+                        <tr style="font-weight: bold; background: #f8f9fa;">
+                            <td colspan="2" style="text-align: right;">Total Paid:</td>
+                            <td class="amount">${{ '%.2f'|format(loan.amount_repaid) }}</td>
+                            <td></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        {% else %}
+            <div class="no-transactions">
+                <h3>No Payments Recorded Yet</h3>
+                <p>When payments are made, they will appear here automatically.</p>
+            </div>
+        {% endif %}
+
+        <div class="footer">
+            <p>This is your private loan status page. Keep this link secure.</p>
+            <p>Questions? Contact the person who sent you this link.</p>
+        </div>
+    </div>
+</body>
+</html>

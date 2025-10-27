@@ -2,6 +2,7 @@ import sqlite3
 import os
 import json
 import logging
+import secrets
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from services import migrations
@@ -86,6 +87,41 @@ if mailgun_configured:
     print(f"📧 Mailgun domain: {os.getenv('MAILGUN_DOMAIN')}")
 
 
+# Custom Jinja2 filter for human-friendly date formatting
+@app.template_filter('format_date')
+def format_date_filter(date_string):
+    """
+    Convert ISO date string (YYYY-MM-DD) to human-friendly format (e.g., '1 Oct 2024').
+    Handles None and empty strings gracefully.
+    Platform-independent (works on Windows, Linux, macOS).
+    """
+    if not date_string:
+        return '—'
+
+    try:
+        # Parse ISO date string
+        if isinstance(date_string, str):
+            # Handle datetime strings with time component
+            if 'T' in date_string:
+                date_obj = datetime.fromisoformat(date_string.split('.')[0])
+            else:
+                date_obj = datetime.strptime(date_string, '%Y-%m-%d')
+        else:
+            # Already a datetime object
+            date_obj = date_string
+
+        # Format as "1 Oct 2024" (platform-independent)
+        # Use lstrip to remove leading zero from day
+        day = str(date_obj.day)  # No leading zero
+        month = date_obj.strftime('%b')  # Short month name
+        year = date_obj.strftime('%Y')  # Full year
+
+        return f"{day} {month} {year}"
+    except (ValueError, AttributeError):
+        # If parsing fails, return original string
+        return date_string
+
+
 def get_db_path():
     """Get database path from config (allows tests to override)."""
     return app.config.get('DATABASE', 'lendifyme.db')
@@ -139,6 +175,11 @@ def login_required(f):
 def get_current_user_id():
     """Get the current logged-in user's ID from session."""
     return session.get('user_id')
+
+
+def generate_borrower_access_token():
+    """Generate a secure random token for borrower access."""
+    return secrets.token_urlsafe(32)
 
 
 @app.before_request
@@ -459,6 +500,135 @@ def health():
     return output, 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 
+@app.route("/borrower/<token>")
+def borrower_portal(token):
+    """Borrower self-service portal - view loan details and transaction history."""
+    if not token:
+        flash("Invalid access link", "error")
+        return redirect("/")
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Find loan by access token
+    c.execute("""
+        SELECT l.id, l.borrower, l.amount, l.date_borrowed, l.date_due,
+               l.note, l.repayment_amount, l.repayment_frequency,
+               l.bank_name, l.borrower_email,
+               COALESCE(SUM(at.amount), 0) as amount_repaid
+        FROM loans l
+        LEFT JOIN applied_transactions at ON l.id = at.loan_id
+        WHERE l.borrower_access_token = ?
+        GROUP BY l.id
+    """, (token,))
+    loan_data = c.fetchone()
+
+    if not loan_data:
+        conn.close()
+        flash("Invalid or expired access link", "error")
+        return render_template("borrower_portal_error.html"), 404
+
+    # Unpack loan data
+    loan_id, borrower, amount, date_borrowed, date_due, note, repayment_amount, repayment_frequency, bank_name, borrower_email, amount_repaid = loan_data
+
+    # Calculate outstanding balance
+    outstanding = amount - amount_repaid
+
+    # Get all applied transactions for this loan
+    c.execute("""
+        SELECT id, date, description, amount, applied_at
+        FROM applied_transactions
+        WHERE loan_id = ?
+        ORDER BY date DESC
+    """, (loan_id,))
+    transactions = c.fetchall()
+
+    conn.close()
+
+    # Prepare loan dict for template
+    loan = {
+        'id': loan_id,
+        'borrower': borrower,
+        'amount': amount,
+        'date_borrowed': date_borrowed,
+        'date_due': date_due,
+        'note': note,
+        'repayment_amount': repayment_amount,
+        'repayment_frequency': repayment_frequency,
+        'bank_name': bank_name,
+        'borrower_email': borrower_email,
+        'amount_repaid': amount_repaid,
+        'outstanding': outstanding
+    }
+
+    return render_template("borrower_portal.html", loan=loan, transactions=transactions)
+
+
+@app.route("/loan/<int:loan_id>/send-invite", methods=["GET", "POST"])
+@login_required
+def send_borrower_invite(loan_id):
+    """Send invitation email to borrower with portal access link."""
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Verify loan ownership and get loan details
+    c.execute("""
+        SELECT id, borrower, borrower_access_token, borrower_email, amount,
+               COALESCE(SUM(at.amount), 0) as amount_repaid
+        FROM loans l
+        LEFT JOIN applied_transactions at ON l.id = at.loan_id
+        WHERE l.id = ? AND l.user_id = ?
+        GROUP BY l.id
+    """, (loan_id, get_current_user_id()))
+    loan = c.fetchone()
+
+    if not loan:
+        conn.close()
+        flash("Loan not found", "error")
+        return redirect("/")
+
+    loan_id, borrower, access_token, borrower_email, amount, amount_repaid = loan
+
+    if not access_token:
+        conn.close()
+        flash("This loan doesn't have an access token. Please edit the loan to generate one.", "error")
+        return redirect("/")
+
+    if request.method == "POST":
+        email = request.form.get("borrower_email")
+
+        if not email:
+            conn.close()
+            flash("Email address is required", "error")
+            return render_template("send_invite.html", loan=loan)
+
+        # Save email address to loan
+        c.execute("UPDATE loans SET borrower_email = ? WHERE id = ?", (email, loan_id))
+        conn.commit()
+        conn.close()
+
+        # Send invitation email
+        portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
+
+        try:
+            from services.email_sender import send_borrower_invite_email
+            send_borrower_invite_email(
+                to_email=email,
+                borrower_name=borrower,
+                portal_link=portal_link,
+                lender_name=session.get('user_name') or session.get('user_email')
+            )
+            flash(f"Invitation sent to {email}!", "success")
+        except Exception as e:
+            app.logger.error(f"Failed to send invitation email: {e}")
+            flash(f"Failed to send email. You can share this link manually: {portal_link}", "error")
+
+        return redirect("/")
+
+    conn.close()
+    return render_template("send_invite.html", loan=loan)
+
+
 @app.route("/", methods=["GET", "POST"])
 @login_required
 def index():
@@ -474,15 +644,18 @@ def index():
         if borrower and amount:
             conn = sqlite3.connect(get_db_path())
             c = conn.cursor()
+            # Generate unique access token for borrower
+            access_token = generate_borrower_access_token()
             c.execute("""
-                INSERT INTO loans (borrower, bank_name, amount, note, date_borrowed, repayment_amount, repayment_frequency, user_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO loans (borrower, bank_name, amount, note, date_borrowed, repayment_amount, repayment_frequency, user_id, borrower_access_token)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (borrower,
                   bank_name if bank_name else None,
                   float(amount), note, date_borrowed,
                   float(repayment_amount) if repayment_amount else None,
                   repayment_frequency if repayment_frequency else None,
-                  get_current_user_id()))
+                  get_current_user_id(),
+                  access_token))
             conn.commit()
             conn.close()
         return redirect("/")
@@ -492,7 +665,8 @@ def index():
     c.execute("""
         SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
                COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.repayment_amount, l.repayment_frequency, l.bank_name, l.created_at
+               l.repayment_amount, l.repayment_frequency, l.bank_name, l.created_at,
+               l.borrower_access_token, l.borrower_email
         FROM loans l
         LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.user_id = ?
@@ -503,7 +677,7 @@ def index():
     loans = c.fetchall()
     conn.close()
 
-    return render_template("index.html", loans=loans)
+    return render_template("index.html", loans=loans, app_url=app.config['APP_URL'])
 
 
 @app.route("/repay/<int:loan_id>", methods=["POST"])
@@ -512,17 +686,59 @@ def repay(loan_id):
     repayment_amount = request.form.get("repayment_amount")
 
     if repayment_amount:
-        # Verify loan ownership
         conn = sqlite3.connect(get_db_path())
         c = conn.cursor()
-        c.execute("SELECT id FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
-        if c.fetchone():
+
+        # Get loan details with current repaid amount
+        c.execute("""
+            SELECT l.id, l.borrower, l.borrower_email, l.borrower_access_token, l.amount,
+                   COALESCE(SUM(at.amount), 0) as current_repaid
+            FROM loans l
+            LEFT JOIN applied_transactions at ON l.id = at.loan_id
+            WHERE l.id = ? AND l.user_id = ?
+            GROUP BY l.id
+        """, (loan_id, get_current_user_id()))
+        loan_details = c.fetchone()
+
+        if loan_details:
+            loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid = loan_details
+            payment_amount = float(repayment_amount)
+
             # Record manual repayment as applied transaction
             c.execute("""
                 INSERT INTO applied_transactions (date, description, amount, loan_id)
                 VALUES (date('now'), 'Manual repayment', ?, ?)
-            """, (float(repayment_amount), loan_id))
+            """, (payment_amount, loan_id))
             conn.commit()
+
+            # Calculate new balance
+            new_balance = loan_amount - (current_repaid + payment_amount)
+
+            # Send email notification if borrower has email and access token
+            if borrower_email and access_token:
+                portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
+                lender_name = session.get('user_name') or session.get('user_email', 'Your lender')
+
+                try:
+                    from services.email_sender import send_payment_notification_email
+                    from datetime import date
+                    success, message = send_payment_notification_email(
+                        to_email=borrower_email,
+                        borrower_name=borrower_name,
+                        portal_link=portal_link,
+                        lender_name=lender_name,
+                        payment_amount=payment_amount,
+                        payment_date=date.today().isoformat(),
+                        payment_description='Manual repayment',
+                        new_balance=new_balance,
+                        original_amount=loan_amount
+                    )
+
+                    if success:
+                        app.logger.info(f"Payment notification sent to {borrower_email}")
+                except Exception as e:
+                    app.logger.error(f"Error sending payment notification: {e}")
+
         conn.close()
 
     return redirect("/")
@@ -951,9 +1167,20 @@ def apply_match():
                 amount = match['transaction']['amount']
                 transaction = match['transaction']
 
-                # Verify loan ownership
-                c.execute("SELECT id FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
-                if c.fetchone():
+                # Verify loan ownership and get loan details
+                c.execute("""
+                    SELECT l.id, l.borrower, l.borrower_email, l.borrower_access_token, l.amount,
+                           COALESCE(SUM(at.amount), 0) as current_repaid
+                    FROM loans l
+                    LEFT JOIN applied_transactions at ON l.id = at.loan_id
+                    WHERE l.id = ? AND l.user_id = ?
+                    GROUP BY l.id
+                """, (loan_id, get_current_user_id()))
+                loan_details = c.fetchone()
+
+                if loan_details:
+                    loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid = loan_details
+
                     # Record the applied transaction
                     c.execute("""
                         INSERT INTO applied_transactions (date, description, amount, loan_id)
@@ -970,7 +1197,37 @@ def apply_match():
                     """, (json.dumps(matches), db_id))
 
                     conn.commit()
-                    flash(f"Applied ${amount:.2f} payment to {match['loan']['borrower']}", "success")
+
+                    # Calculate new balance after this payment
+                    new_balance = loan_amount - (current_repaid + amount)
+
+                    # Send email notification if borrower has email and access token
+                    if borrower_email and access_token:
+                        portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
+                        lender_name = session.get('user_name') or session.get('user_email', 'Your lender')
+
+                        try:
+                            from services.email_sender import send_payment_notification_email
+                            success, message = send_payment_notification_email(
+                                to_email=borrower_email,
+                                borrower_name=borrower_name,
+                                portal_link=portal_link,
+                                lender_name=lender_name,
+                                payment_amount=amount,
+                                payment_date=transaction['date'],
+                                payment_description=transaction['description'],
+                                new_balance=new_balance,
+                                original_amount=loan_amount
+                            )
+
+                            if success:
+                                app.logger.info(f"Payment notification sent to {borrower_email}")
+                            else:
+                                app.logger.warning(f"Failed to send payment notification: {message}")
+                        except Exception as e:
+                            app.logger.error(f"Error sending payment notification: {e}")
+
+                    flash(f"Applied ${amount:.2f} payment to {borrower_name}", "success")
 
         conn.close()
 

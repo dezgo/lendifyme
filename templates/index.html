@@ -53,7 +53,7 @@
         table {
             width: 100%;
             border-collapse: collapse;
-            min-width: 900px;
+            min-width: 1100px;
         }
         th, td {
             padding: 0.75rem 0.5rem;
@@ -167,6 +167,37 @@
         .btn-delete:hover {
             background: #bb2d3b;
         }
+        .btn-invite {
+            background: #198754;
+            color: white;
+        }
+        .btn-invite:hover {
+            background: #157347;
+        }
+        .borrower-link {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            font-size: 0.8rem;
+        }
+        .copy-link {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.75rem;
+            background: #6c757d;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        .copy-link:hover {
+            background: #5a6268;
+        }
+        .link-display {
+            font-size: 0.7rem;
+            color: #6c757d;
+            word-break: break-all;
+            max-width: 200px;
+        }
         .user-info {
             display: flex;
             justify-content: space-between;
@@ -265,6 +296,7 @@
                     <th>Note</th>
                     <th>Date</th>
                     <th>Add Repayment</th>
+                    <th>Borrower Access</th>
                     <th>Actions</th>
                 </tr>
                 {% for loan in loans %}
@@ -284,7 +316,7 @@
                             {% endif %}
                         </td>
                         <td>{{ loan[3] or '—' }}</td>
-                        <td>{{ loan[4] or '—' }}</td>
+                        <td>{{ loan[4]|format_date }}</td>
                         <td>
                             {% if remaining > 0 %}
                                 <form method="post" action="/repay/{{ loan[0] }}" class="repayment-form">
@@ -294,6 +326,16 @@
                             {% else %}
                                 <span class="fully-paid">✓ Paid</span>
                             {% endif %}
+                        </td>
+                        <td>
+                            <div class="borrower-link">
+                                {% if loan[10] %}
+                                    <button class="copy-link" onclick="copyLink('{{ app_url }}/borrower/{{ loan[10] }}')">📋 Copy Link</button>
+                                    <a href="/loan/{{ loan[0] }}/send-invite" class="btn-invite" style="text-align: center;">✉️ Send Invite</a>
+                                {% else %}
+                                    <span style="color: #6c757d; font-size: 0.75rem;">No token</span>
+                                {% endif %}
+                            </div>
                         </td>
                         <td>
                             <div class="action-buttons">
@@ -309,5 +351,15 @@
             </table>
         </div>
     {% endif %}
+
+    <script>
+        function copyLink(link) {
+            navigator.clipboard.writeText(link).then(() => {
+                alert('Borrower portal link copied to clipboard!');
+            }).catch(err => {
+                alert('Failed to copy link: ' + err);
+            });
+        }
+    </script>
 </body>
 </html>
