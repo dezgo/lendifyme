@@ -255,12 +255,11 @@ def register():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    """User login - send magic link or use recovery code."""
+    """User login - send magic link to email."""
     if request.method == "POST":
         app.logger.info("Login POST request received")
         email = request.form.get("email")
-        recovery_code = request.form.get("recovery_code")
-        app.logger.info(f"Login attempt for email: {email}, has_recovery_code: {bool(recovery_code)}")
+        app.logger.info(f"Login attempt for email: {email}")
 
         if not email:
             flash("Email is required", "error")
@@ -269,7 +268,7 @@ def login():
         conn = sqlite3.connect(get_db_path())
         c = conn.cursor()
 
-        c.execute("SELECT id, email, name, recovery_codes FROM users WHERE email = ?", (email,))
+        c.execute("SELECT id, email, name FROM users WHERE email = ?", (email,))
         user = c.fetchone()
 
         if not user:
@@ -279,29 +278,8 @@ def login():
             conn.close()
             return render_template("login.html")
 
-        user_id, user_email, user_name, recovery_codes_json = user
+        user_id, user_email, user_name = user
         app.logger.info(f"User found: {user_id} - {user_email}")
-
-        # If recovery code provided, try that first
-        if recovery_code:
-            is_valid, updated_codes = verify_recovery_code(recovery_code, recovery_codes_json)
-            if is_valid:
-                # Update recovery codes (remove used one)
-                c.execute("UPDATE users SET recovery_codes = ? WHERE id = ?", (updated_codes, user_id))
-                conn.commit()
-                conn.close()
-
-                # Log them in
-                session['user_id'] = user_id
-                session['user_email'] = user_email
-                session['user_name'] = user_name
-
-                flash(f"Welcome back, {user_name or user_email}! Recovery code used.", "success")
-                return redirect(url_for('index'))
-            else:
-                flash("Invalid recovery code", "error")
-                conn.close()
-                return render_template("login.html")
 
         # Send magic link
         app.logger.info(f"Generating magic link for user {user_id}")
@@ -372,6 +350,54 @@ LendifyMe
         return render_template("login.html")
 
     return render_template("login.html")
+
+
+@app.route("/auth/recover", methods=["GET", "POST"])
+def recover():
+    """Recovery code login for users who lost email access."""
+    if request.method == "POST":
+        email = request.form.get("email")
+        recovery_code = request.form.get("recovery_code")
+
+        if not email or not recovery_code:
+            flash("Both email and recovery code are required", "error")
+            return render_template("recover.html")
+
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+
+        c.execute("SELECT id, email, name, recovery_codes FROM users WHERE email = ?", (email,))
+        user = c.fetchone()
+
+        if not user:
+            # Don't reveal if email exists or not for security
+            flash("Invalid email or recovery code", "error")
+            conn.close()
+            return render_template("recover.html")
+
+        user_id, user_email, user_name, recovery_codes_json = user
+
+        # Verify recovery code
+        is_valid, updated_codes = verify_recovery_code(recovery_code, recovery_codes_json)
+        if is_valid:
+            # Update recovery codes (remove used one)
+            c.execute("UPDATE users SET recovery_codes = ? WHERE id = ?", (updated_codes, user_id))
+            conn.commit()
+            conn.close()
+
+            # Log them in
+            session['user_id'] = user_id
+            session['user_email'] = user_email
+            session['user_name'] = user_name
+
+            flash(f"Welcome back, {user_name or user_email}! Recovery code accepted.", "success")
+            return redirect(url_for('index'))
+        else:
+            flash("Invalid email or recovery code", "error")
+            conn.close()
+            return render_template("recover.html")
+
+    return render_template("recover.html")
 
 
 @app.route("/auth/magic/<token>")
