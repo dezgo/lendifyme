@@ -36,7 +36,8 @@ class TestTransaction:
         assert result == {
             'date': '2025-10-15',
             'description': 'Test payment',
-            'amount': 50.00
+            'amount': 50.00,
+            'raw_data': {"id": "123"}
         }
 
 
@@ -127,7 +128,8 @@ class TestUpBankConnector:
     @patch('services.connectors.up_bank.requests.get')
     def test_test_connection_failure(self, mock_get):
         """Test failed connection test."""
-        mock_get.side_effect = Exception("Connection failed")
+        import requests
+        mock_get.side_effect = requests.RequestException("Connection failed")
 
         connector = UpBankConnector(api_key="test-key")
         result = connector.test_connection()
@@ -189,10 +191,13 @@ class TestUpBankConnector:
         transactions = connector.get_transactions()
 
         assert len(transactions) == 2
-        assert transactions[0].amount == 50.00
-        assert transactions[0].description == "Payment from Alice"
-        assert transactions[0].date == "2025-10-15"
-        assert transactions[1].amount == -25.00
+        # Transactions are sorted by date (newest first)
+        assert transactions[0].amount == -25.00
+        assert transactions[0].description == "Transfer from Bob"
+        assert transactions[0].date == "2025-10-16"
+        assert transactions[1].amount == 50.00
+        assert transactions[1].description == "Payment from Alice"
+        assert transactions[1].date == "2025-10-15"
 
     @patch('services.connectors.up_bank.requests.get')
     def test_get_incoming_transactions(self, mock_get):

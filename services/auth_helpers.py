@@ -36,6 +36,19 @@ def generate_recovery_codes(count: int = 10) -> Tuple[List[str], str]:
     return plain_codes, json.dumps(hashed_codes)
 
 
+def hash_recovery_code(code: str) -> str:
+    """
+    Hash a single recovery code using SHA256.
+
+    Args:
+        code: The plain recovery code to hash
+
+    Returns:
+        Hexadecimal string of the SHA256 hash
+    """
+    return hashlib.sha256(code.encode()).hexdigest()
+
+
 def verify_recovery_code(code: str, hashed_codes_json: str) -> Tuple[bool, Optional[str]]:
     """
     Verify a recovery code and return updated list without the used code.
@@ -53,7 +66,7 @@ def verify_recovery_code(code: str, hashed_codes_json: str) -> Tuple[bool, Optio
         return False, None
 
     hashed_codes = json.loads(hashed_codes_json)
-    code_hash = hashlib.sha256(code.encode()).hexdigest()
+    code_hash = hash_recovery_code(code)
 
     if code_hash in hashed_codes:
         # Remove the used code

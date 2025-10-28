@@ -449,6 +449,7 @@ def magic_link_auth(token):
 
 
 @app.route("/auth/recovery-codes")
+@login_required
 def show_recovery_codes():
     """Show recovery codes after registration (one-time view)."""
     if 'show_recovery_codes' not in session:
@@ -483,7 +484,7 @@ def logout():
     """User logout."""
     session.clear()
     flash("You have been logged out", "success")
-    return redirect(url_for('login'))
+    return redirect(url_for('index'))
 
 
 @app.route("/health")
@@ -610,7 +611,7 @@ def send_borrower_invite(loan_id):
 
     # Verify loan ownership and get loan details
     c.execute("""
-        SELECT id, borrower, borrower_access_token, borrower_email, amount,
+        SELECT l.id, borrower, borrower_access_token, borrower_email, l.amount,
                COALESCE(SUM(at.amount), 0) as amount_repaid
         FROM loans l
         LEFT JOIN applied_transactions at ON l.id = at.loan_id
@@ -986,6 +987,7 @@ def match_transactions():
 
                 connector = CSVConnector(csv_content=csv_content)
                 transactions = connector.get_transactions()
+                all_transactions = transactions  # For CSV, all and filtered transactions are the same
 
             else:
                 # API Connector (e.g., Up Bank)
