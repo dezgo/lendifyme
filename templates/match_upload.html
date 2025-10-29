@@ -140,25 +140,37 @@ label {
     <h2>Choose Import Method</h2>
 
     <div class="connector-options">
-        <!-- API Connectors -->
-        {% if available_connectors %}
-            {% for connector_id, connector_name in available_connectors.items() %}
-                <div class="connector-option" data-connector="{{ connector_id }}">
+        <!-- User's Bank Connections -->
+        {% if user_connections %}
+            {% for connection in user_connections %}
+                <div class="connector-option" data-connector="{{ connection.id }}">
                     <label class="connector-label">
-                        <input type="radio" name="connector_type" value="{{ connector_id }}" required>
-                        {{ connector_name }}
+                        <input type="radio" name="import_source" value="{{ connection.id }}" required>
+                        {{ connection.display_name or connection.connector_name }}
                     </label>
                     <div class="connector-description">
-                        Automatically fetch transactions from {{ connector_name }}
+                        {{ connection.connector_name }}
+                        {% if connection.last_synced_at %}
+                            • Last synced: {{ connection.last_synced_at }}
+                        {% endif %}
                     </div>
                 </div>
             {% endfor %}
+        {% else %}
+            <div class="connector-option" style="border-color: #ffc107; background: #fff3cd; cursor: default;">
+                <div style="color: #856404;">
+                    <strong>No bank connections configured</strong>
+                    <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">
+                        <a href="/settings/banks/add" style="color: #007bff;">Add a bank connection</a> to automatically import transactions.
+                    </p>
+                </div>
+            </div>
         {% endif %}
 
         <!-- CSV Upload Option -->
         <div class="connector-option" data-connector="csv">
             <label class="connector-label">
-                <input type="radio" name="connector_type" value="csv" required>
+                <input type="radio" name="import_source" value="csv" required>
                 Manual CSV Upload
             </label>
             <div class="connector-description">

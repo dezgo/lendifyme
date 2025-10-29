@@ -42,6 +42,24 @@ class BankConnector(ABC):
         """
         self.api_key = api_key
 
+    @classmethod
+    @abstractmethod
+    def get_credential_schema(cls) -> dict:
+        """
+        Get the credential fields required by this connector.
+
+        Returns:
+            Dictionary describing required credentials with format:
+            {
+                'auth_type': 'api_key' or 'oauth',
+                'fields': [
+                    {'name': 'api_key', 'type': 'password', 'label': 'API Key', 'required': True},
+                    ...
+                ]
+            }
+        """
+        pass
+
     @abstractmethod
     def get_transactions(self, since_date: Optional[str] = None, limit: Optional[int] = None) -> List[Transaction]:
         """

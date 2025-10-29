@@ -17,6 +17,23 @@ class UpBankConnector(BankConnector):
     def connector_name(self) -> str:
         return "Up Bank"
 
+    @classmethod
+    def get_credential_schema(cls) -> dict:
+        """Get credential schema for Up Bank."""
+        return {
+            'auth_type': 'api_key',
+            'fields': [
+                {
+                    'name': 'api_key',
+                    'type': 'password',
+                    'label': 'API Key',
+                    'placeholder': 'up:yeah:...',
+                    'required': True,
+                    'help_text': 'Get your API key from https://api.up.com.au'
+                }
+            ]
+        }
+
     def _get_headers(self) -> dict:
         """Get authorization headers for API requests."""
         return {

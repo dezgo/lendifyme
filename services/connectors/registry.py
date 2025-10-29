@@ -1,9 +1,11 @@
 # services/connectors/registry.py
 import os
-from typing import Dict, Type, Optional
+import sqlite3
+from typing import Dict, Type, Optional, List
 from .base import BankConnector
 from .up_bank import UpBankConnector
 from .csv_connector import CSVConnector
+from ..encryption import encrypt_credentials, decrypt_credentials
 
 
 class ConnectorRegistry:
@@ -106,3 +108,130 @@ class ConnectorRegistry:
         #     ...
 
         return None
+
+    @classmethod
+    def get_all_connector_info(cls) -> Dict[str, dict]:
+        """
+        Get information about all available connectors for UI display.
+
+        Returns:
+            Dict mapping connector_id to info dict with:
+            {
+                'name': 'Up Bank',
+                'auth_type': 'api_key',
+                'fields': [...]
+            }
+        """
+        info = {}
+        for connector_id, connector_class in cls._connectors.items():
+            # Skip CSV as it's not a "bank connection"
+            if connector_id == 'csv':
+                continue
+
+            try:
+                instance = connector_class(api_key="dummy")
+                schema = connector_class.get_credential_schema()
+                info[connector_id] = {
+                    'name': instance.connector_name,
+                    'auth_type': schema['auth_type'],
+                    'fields': schema['fields']
+                }
+            except Exception:
+                pass
+
+        return info
+
+    @classmethod
+    def create_from_connection(cls, db_path: str, connection_id: int, user_id: int) -> Optional[BankConnector]:
+        """
+        Create a connector instance from a stored bank connection.
+
+        Args:
+            db_path: Path to database
+            connection_id: Bank connection ID
+            user_id: User ID (for security check)
+
+        Returns:
+            Connector instance or None if not found/unauthorized
+        """
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+
+        c.execute("""
+            SELECT connector_type, credentials_encrypted, is_active
+            FROM bank_connections
+            WHERE id = ? AND user_id = ?
+        """, (connection_id, user_id))
+
+        result = c.fetchone()
+        conn.close()
+
+        if not result or not result[2]:  # Check exists and is_active
+            return None
+
+        connector_type, encrypted_creds, _ = result
+
+        try:
+            # Decrypt credentials
+            credentials = decrypt_credentials(encrypted_creds)
+
+            # Create connector instance
+            if connector_type == 'up_bank':
+                return UpBankConnector(api_key=credentials['api_key'])
+            # Add more connector types here
+            # elif connector_type == 'plaid':
+            #     return PlaidConnector(access_token=credentials['access_token'])
+
+        except Exception:
+            return None
+
+        return None
+
+    @classmethod
+    def get_user_connections(cls, db_path: str, user_id: int) -> List[dict]:
+        """
+        Get all active bank connections for a user.
+
+        Args:
+            db_path: Path to database
+            user_id: User ID
+
+        Returns:
+            List of connection dicts with id, display_name, connector_type, etc.
+        """
+        conn = sqlite3.connect(db_path)
+        c = conn.cursor()
+
+        c.execute("""
+            SELECT id, connector_type, display_name, last_synced_at, created_at
+            FROM bank_connections
+            WHERE user_id = ? AND is_active = 1
+            ORDER BY created_at DESC
+        """, (user_id,))
+
+        rows = c.fetchall()
+        conn.close()
+
+        connections = []
+        for row in rows:
+            # Get connector display name
+            connector_class = cls.get_connector_class(row[1])
+            if connector_class:
+                try:
+                    instance = connector_class(api_key="dummy")
+                    connector_display_name = instance.connector_name
+                except:
+                    connector_display_name = row[1]
+            else:
+                connector_display_name = row[1]
+
+            connections.append({
+                'id': row[0],
+                'connector_type': row[1],
+                'display_name': row[2],
+                'connector_name': connector_display_name,
+                'last_synced_at': row[3],
+                'created_at': row[4]
+            })
+
+        return connections

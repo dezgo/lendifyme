@@ -150,6 +150,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 15:
+        try:
+            migrate_v15_create_bank_connections(conn)
+            _set_user_version(conn, 15)
+            conn.commit()
+            print("✅ Migration v15 applied.")
+        except Exception as e:
+            print(f"❌ Migration v15 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -582,3 +595,31 @@ def migrate_v14_fix_negative_amounts(conn):
         print(f"  Fixed {len(negative_rejected)} negative amounts in rejected_matches.")
     else:
         print("  No negative amounts found in rejected_matches.")
+
+
+def migrate_v15_create_bank_connections(conn):
+    """
+    Create bank_connections table for storing user bank API credentials.
+    Enables multi-user, multi-bank support with encrypted credential storage.
+    """
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS bank_connections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            connector_type TEXT NOT NULL,
+            display_name TEXT,
+            credentials_encrypted TEXT NOT NULL,
+            is_active BOOLEAN DEFAULT 1,
+            last_synced_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )
+    """)
+
+    c.execute("CREATE INDEX IF NOT EXISTS idx_bank_connections_user ON bank_connections(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_bank_connections_active ON bank_connections(user_id, is_active)")
+
+    conn.commit()
+    print("  Bank connections table created successfully.")

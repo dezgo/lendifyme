@@ -22,6 +22,14 @@ class CSVConnector(BankConnector):
     def connector_name(self) -> str:
         return "CSV Upload"
 
+    @classmethod
+    def get_credential_schema(cls) -> dict:
+        """Get credential schema for CSV (no credentials needed)."""
+        return {
+            'auth_type': 'none',
+            'fields': []
+        }
+
     def test_connection(self) -> bool:
         """CSV always 'connects' successfully if content is provided."""
         return bool(self.csv_content)

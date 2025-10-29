@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+
+{% block title %}Add Bank Connection – LendifyMe{% endblock %}
+
+{% block extra_css %}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1rem;
+    color: #007bff;
+    text-decoration: none;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+h1 {
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #666;
+    margin-bottom: 2rem;
+}
+.connectors-grid {
+    display: grid;
+    gap: 1rem;
+}
+.connector-card {
+    background: white;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    padding: 1.5rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+}
+.connector-card:hover {
+    border-color: #007bff;
+    background: #f8f9fa;
+}
+.connector-card h3 {
+    margin: 0 0 0.5rem 0;
+    color: #333;
+}
+.connector-card p {
+    margin: 0;
+    color: #666;
+    font-size: 0.9rem;
+}
+.auth-badge {
+    display: inline-block;
+    background: #e7f3ff;
+    color: #007bff;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+}
+{% endblock %}
+
+{% block content %}
+<a href="/settings/banks" class="back-link">← Back to Bank Connections</a>
+
+<h1>Add Bank Connection</h1>
+<p class="subtitle">Select your bank to get started</p>
+
+<div class="connectors-grid">
+    {% for connector_id, info in connectors.items() %}
+    <a href="/settings/banks/add/{{ connector_id }}" class="connector-card">
+        <h3>{{ info.name }}</h3>
+        <p>Connect your {{ info.name }} account to automatically import transactions.</p>
+        <span class="auth-badge">{{ info.auth_type | upper }}</span>
+    </a>
+    {% endfor %}
+
+    {% if not connectors %}
+    <p style="text-align: center; color: #666; padding: 2rem;">
+        No bank connectors available. Contact support to add your bank.
+    </p>
+    {% endif %}
+</div>
+{% endblock %}

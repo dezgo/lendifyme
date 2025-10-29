@@ -968,41 +968,210 @@ def export_loan_transactions(loan_id):
     return response
 
 
+@app.route("/settings/banks")
+@login_required
+def settings_banks():
+    """List user's bank connections."""
+    from services.connectors.registry import ConnectorRegistry
+
+    connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+
+    return render_template("settings_banks.html", connections=connections)
+
+
+@app.route("/settings/banks/add")
+@login_required
+def settings_banks_add():
+    """Show available bank connectors to add."""
+    from services.connectors.registry import ConnectorRegistry
+
+    connectors = ConnectorRegistry.get_all_connector_info()
+
+    return render_template("settings_banks_add.html", connectors=connectors)
+
+
+@app.route("/settings/banks/add/<connector_type>", methods=["GET", "POST"])
+@login_required
+def settings_banks_configure(connector_type):
+    """Configure credentials for a specific connector."""
+    from services.connectors.registry import ConnectorRegistry
+    from services.encryption import encrypt_credentials
+
+    # Get connector info
+    connector_class = ConnectorRegistry.get_connector_class(connector_type)
+    if not connector_class:
+        flash("Invalid bank connector", "error")
+        return redirect("/settings/banks/add")
+
+    # Get connector info for form
+    try:
+        instance = connector_class(api_key="dummy")
+        schema = connector_class.get_credential_schema()
+        connector_info = {
+            'name': instance.connector_name,
+            'auth_type': schema['auth_type'],
+            'fields': schema['fields']
+        }
+    except Exception as e:
+        flash(f"Error loading connector: {str(e)}", "error")
+        return redirect("/settings/banks/add")
+
+    if request.method == "POST":
+        display_name = request.form.get("display_name", "").strip()
+
+        # Collect credentials from form
+        credentials = {}
+        for field in connector_info['fields']:
+            field_name = field['name']
+            field_value = request.form.get(field_name, "").strip()
+
+            if field.get('required') and not field_value:
+                flash(f"{field['label']} is required", "error")
+                return render_template("settings_banks_configure.html",
+                                     connector_type=connector_type,
+                                     connector_info=connector_info)
+
+            credentials[field_name] = field_value
+
+        # Test the connection
+        try:
+            connector = ConnectorRegistry.create_connector(connector_type, **credentials)
+            if not connector or not connector.test_connection():
+                flash("Connection test failed. Please check your credentials.", "error")
+                return render_template("settings_banks_configure.html",
+                                     connector_type=connector_type,
+                                     connector_info=connector_info)
+        except Exception as e:
+            flash(f"Connection test failed: {str(e)}", "error")
+            return render_template("settings_banks_configure.html",
+                                 connector_type=connector_type,
+                                 connector_info=connector_info)
+
+        # Encrypt credentials
+        try:
+            encrypted_creds = encrypt_credentials(credentials)
+        except Exception as e:
+            flash(f"Failed to encrypt credentials: {str(e)}", "error")
+            return redirect("/settings/banks/add")
+
+        # Save to database
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+
+        c.execute("""
+            INSERT INTO bank_connections (user_id, connector_type, display_name, credentials_encrypted)
+            VALUES (?, ?, ?, ?)
+        """, (get_current_user_id(), connector_type, display_name, encrypted_creds))
+
+        conn.commit()
+        conn.close()
+
+        flash(f"Successfully connected to {connector_info['name']}!", "success")
+        return redirect("/settings/banks")
+
+    return render_template("settings_banks_configure.html",
+                         connector_type=connector_type,
+                         connector_info=connector_info)
+
+
+@app.route("/settings/banks/<int:connection_id>/test", methods=["POST"])
+@login_required
+def settings_banks_test(connection_id):
+    """Test a bank connection."""
+    from services.connectors.registry import ConnectorRegistry
+
+    connector = ConnectorRegistry.create_from_connection(
+        get_db_path(),
+        connection_id,
+        get_current_user_id()
+    )
+
+    if not connector:
+        flash("Connection not found", "error")
+        return redirect("/settings/banks")
+
+    try:
+        if connector.test_connection():
+            flash(f"Connection to {connector.connector_name} successful!", "success")
+        else:
+            flash(f"Connection to {connector.connector_name} failed", "error")
+    except Exception as e:
+        flash(f"Connection test failed: {str(e)}", "error")
+
+    return redirect("/settings/banks")
+
+
+@app.route("/settings/banks/<int:connection_id>/delete", methods=["POST"])
+@login_required
+def settings_banks_delete(connection_id):
+    """Delete a bank connection."""
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Verify ownership before deleting
+    c.execute("""
+        UPDATE bank_connections
+        SET is_active = 0
+        WHERE id = ? AND user_id = ?
+    """, (connection_id, get_current_user_id()))
+
+    if c.rowcount > 0:
+        flash("Bank connection removed", "success")
+    else:
+        flash("Connection not found", "error")
+
+    conn.commit()
+    conn.close()
+
+    return redirect("/settings/banks")
+
+
 @app.route("/match", methods=["GET", "POST"])
 @login_required
 def match_transactions():
     if request.method == "POST":
-        connector_type = request.form.get("connector_type", "csv")
+        import_source = request.form.get("import_source", "csv")
         connector = None
         transactions = []
 
         try:
-            if connector_type == "csv":
+            if import_source == "csv":
                 # CSV Upload
                 csv_content = request.form.get("transactions_csv")
                 if not csv_content:
                     flash("Please provide CSV data", "error")
-                    return render_template("match_upload.html",
-                                         available_connectors=ConnectorRegistry.get_available_connectors())
+                    user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+                    return render_template("match_upload.html", user_connections=user_connections)
 
                 connector = CSVConnector(csv_content=csv_content)
                 transactions = connector.get_transactions()
                 all_transactions = transactions  # For CSV, all and filtered transactions are the same
 
             else:
-                # API Connector (e.g., Up Bank)
-                connector = ConnectorRegistry.create_from_env(connector_type)
+                # Bank Connection - import_source is the connection_id
+                try:
+                    connection_id = int(import_source)
+                except ValueError:
+                    flash("Invalid bank connection", "error")
+                    user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+                    return render_template("match_upload.html", user_connections=user_connections)
+
+                connector = ConnectorRegistry.create_from_connection(
+                    get_db_path(),
+                    connection_id,
+                    get_current_user_id()
+                )
 
                 if not connector:
-                    flash(f"Unable to connect to your bank. Please contact support to set up automatic imports.", "error")
-                    return render_template("match_upload.html",
-                                         available_connectors=ConnectorRegistry.get_available_connectors())
+                    flash(f"Unable to connect to your bank. Please check your connection settings.", "error")
+                    user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+                    return render_template("match_upload.html", user_connections=user_connections)
 
                 # Test connection first
                 if not connector.test_connection():
-                    flash(f"Unable to connect to {connector.connector_name}. Please try again or contact support if the issue persists.", "error")
-                    return render_template("match_upload.html",
-                                         available_connectors=ConnectorRegistry.get_available_connectors())
+                    flash(f"Unable to connect to {connector.connector_name}. Please try again or check your connection settings.", "error")
+                    user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+                    return render_template("match_upload.html", user_connections=user_connections)
 
                 # Calculate since_date from date_range parameter
                 since_date = None
@@ -1136,20 +1305,20 @@ def match_transactions():
 
         except ConnectionError as e:
             flash(f"Connection error: {str(e)}", "error")
-            return render_template("match_upload.html",
-                                 available_connectors=ConnectorRegistry.get_available_connectors())
+            user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+            return render_template("match_upload.html", user_connections=user_connections)
         except ValueError as e:
             flash(f"Authentication error: {str(e)}", "error")
-            return render_template("match_upload.html",
-                                 available_connectors=ConnectorRegistry.get_available_connectors())
+            user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+            return render_template("match_upload.html", user_connections=user_connections)
         except Exception as e:
             flash(f"Error: {str(e)}", "error")
-            return render_template("match_upload.html",
-                                 available_connectors=ConnectorRegistry.get_available_connectors())
+            user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+            return render_template("match_upload.html", user_connections=user_connections)
 
     # GET request - show upload form
-    return render_template("match_upload.html",
-                         available_connectors=ConnectorRegistry.get_available_connectors())
+    user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
+    return render_template("match_upload.html", user_connections=user_connections)
 
 
 @app.route("/match/review")
