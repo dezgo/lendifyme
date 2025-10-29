@@ -1209,7 +1209,7 @@ def loan_transactions(loan_id):
     c.execute("""
         SELECT l.id, l.borrower, l.amount, l.date_borrowed,
                COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.bank_name
+               l.bank_name, l.note
         FROM loans l
         LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.id = ? AND l.user_id = ?
@@ -1246,7 +1246,7 @@ def export_loan_transactions(loan_id):
     c.execute("""
         SELECT l.id, l.borrower, l.amount, l.date_borrowed,
                COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.bank_name
+               l.bank_name, l.note
         FROM loans l
         LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.id = ? AND l.user_id = ?

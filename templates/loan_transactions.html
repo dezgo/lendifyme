@@ -189,6 +189,9 @@ tr:hover {
 <div class="loan-summary">
     <h2>Loan Details</h2>
     <p><strong>Borrower:</strong> {{ loan[1] }}{% if loan[5] %} ({{ loan[5] }}){% endif %}</p>
+    {% if loan[6] %}
+    <p><strong>Note:</strong> {{ loan[6] }}</p>
+    {% endif %}
 
     <div class="summary-grid">
         <div class="summary-item">
