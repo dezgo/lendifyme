@@ -6,3 +6,4 @@ requests
 webauthn
 flask-mail
 cryptography
+stripe

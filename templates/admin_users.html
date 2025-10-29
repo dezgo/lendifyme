@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+
+{% block title %}User Management – LendifyMe{% endblock %}
+
+{% block extra_css %}
+.admin-container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+h1 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #6c757d;
+    margin-bottom: 2rem;
+}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1.5rem;
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 600;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+.users-table-container {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    overflow-x: auto;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 900px;
+}
+th, td {
+    padding: 1rem;
+    text-align: left;
+    border-bottom: 1px solid #e9ecef;
+}
+th {
+    font-weight: 600;
+    color: #495057;
+    background: #f8f9fa;
+    text-transform: uppercase;
+    font-size: 0.85rem;
+    letter-spacing: 0.5px;
+}
+tr:hover {
+    background: #f8f9fa;
+}
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.badge-free {
+    background: #e9ecef;
+    color: #6c757d;
+}
+.badge-basic {
+    background: #cfe2ff;
+    color: #084298;
+}
+.badge-pro {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+.badge-manual {
+    background: #fff3cd;
+    color: #856404;
+}
+.badge-verified {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+.badge-unverified {
+    background: #f8d7da;
+    color: #842029;
+}
+.tier-form {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+}
+.tier-form select {
+    padding: 0.5rem;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    background: white;
+    cursor: pointer;
+}
+.tier-form button {
+    padding: 0.5rem 1rem;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tier-form button:hover {
+    background: #5568d3;
+}
+.user-email {
+    font-weight: 600;
+    color: #212529;
+}
+.user-name {
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+.stat-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.stat-label {
+    font-size: 0.85rem;
+    color: #6c757d;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+}
+.stat-value {
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: #667eea;
+}
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <a href="/" class="back-link">← Back to Dashboard</a>
+
+    <h1>User Management</h1>
+    <p class="subtitle">View and manage all user accounts and subscriptions</p>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-label">Total Users</div>
+            <div class="stat-value">{{ users|length }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Free Tier</div>
+            <div class="stat-value">{{ users|selectattr('tier', 'equalto', 'free')|list|length }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Basic Tier</div>
+            <div class="stat-value">{{ users|selectattr('tier', 'equalto', 'basic')|list|length }}</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-label">Pro Tier</div>
+            <div class="stat-value">{{ users|selectattr('tier', 'equalto', 'pro')|list|length }}</div>
+        </div>
+    </div>
+
+    <div class="users-table-container">
+        <table>
+            <thead>
+                <tr>
+                    <th>User</th>
+                    <th>Email Verified</th>
+                    <th>Current Tier</th>
+                    <th>Status</th>
+                    <th>Loans</th>
+                    <th>Joined</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for user in users %}
+                    <tr>
+                        <td>
+                            <div class="user-email">{{ user.email }}</div>
+                            {% if user.name %}
+                                <div class="user-name">{{ user.name }}</div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if user.email_verified %}
+                                <span class="badge badge-verified">✓ Verified</span>
+                            {% else %}
+                                <span class="badge badge-unverified">✗ Unverified</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ user.tier }}">{{ user.tier.upper() }}</span>
+                            {% if user.manual_override %}
+                                <br>
+                                <span class="badge badge-manual" style="margin-top: 0.25rem;">Manual Override</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if user.subscription_status %}
+                                {{ user.subscription_status.replace('_', ' ').title() }}
+                                {% if user.period_end %}
+                                    <br>
+                                    <span style="font-size: 0.85rem; color: #6c757d;">Until {{ user.period_end }}</span>
+                                {% endif %}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>{{ user.loan_count }}</td>
+                        <td style="font-size: 0.85rem; color: #6c757d;">
+                            {{ user.created_at[:10] }}
+                        </td>
+                        <td>
+                            <form method="post" action="/admin/user/{{ user.id }}/upgrade" class="tier-form">
+                                <select name="tier" required>
+                                    <option value="free" {% if user.tier == 'free' %}selected{% endif %}>Free</option>
+                                    <option value="basic" {% if user.tier == 'basic' %}selected{% endif %}>Basic</option>
+                                    <option value="pro" {% if user.tier == 'pro' %}selected{% endif %}>Pro</option>
+                                </select>
+                                <button type="submit">Update</button>
+                            </form>
+                        </td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

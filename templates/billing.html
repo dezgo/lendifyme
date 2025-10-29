@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+
+{% block title %}Billing & Subscription – LendifyMe{% endblock %}
+
+{% block extra_css %}
+.billing-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+h1 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #6c757d;
+    margin-bottom: 2rem;
+}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1.5rem;
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 600;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+.subscription-card {
+    background: white;
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    margin-bottom: 2rem;
+}
+.subscription-card h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1.5rem;
+    color: #212529;
+}
+.plan-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 2px solid #e9ecef;
+}
+.plan-name {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #667eea;
+}
+.plan-badge {
+    padding: 0.5rem 1rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    text-transform: uppercase;
+}
+.plan-badge.active {
+    background: #d4edda;
+    color: #198754;
+}
+.plan-badge.trialing {
+    background: #cfe2ff;
+    color: #0d6efd;
+}
+.plan-badge.past_due {
+    background: #f8d7da;
+    color: #dc3545;
+}
+.plan-badge.complimentary {
+    background: #fff3cd;
+    color: #856404;
+}
+.info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+.info-item {
+    display: flex;
+    flex-direction: column;
+}
+.info-label {
+    font-size: 0.85rem;
+    color: #6c757d;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+}
+.info-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #212529;
+}
+.features-list {
+    list-style: none;
+    padding: 0;
+    margin: 1.5rem 0;
+}
+.features-list li {
+    padding: 0.75rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border-bottom: 1px solid #e9ecef;
+}
+.features-list li:last-child {
+    border-bottom: none;
+}
+.features-list li::before {
+    content: "✓";
+    color: #198754;
+    font-weight: bold;
+    font-size: 1.2rem;
+}
+.btn {
+    display: inline-block;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    text-align: center;
+    transition: all 0.2s;
+}
+.btn-primary {
+    background: #667eea;
+    color: white;
+}
+.btn-primary:hover {
+    background: #5568d3;
+}
+.btn-secondary {
+    background: white;
+    color: #667eea;
+    border: 2px solid #667eea;
+}
+.btn-secondary:hover {
+    background: #f8f9fa;
+}
+.btn-danger {
+    background: white;
+    color: #dc3545;
+    border: 2px solid #dc3545;
+}
+.btn-danger:hover {
+    background: #f8f9fa;
+}
+.actions {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+}
+.alert {
+    padding: 1rem 1.25rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+}
+.alert-warning {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid #ffeeba;
+}
+.alert-info {
+    background: #cfe2ff;
+    color: #084298;
+    border: 1px solid #b6d4fe;
+}
+.alert-success {
+    background: #d4edda;
+    color: #0f5132;
+    border: 1px solid #badbcc;
+}
+{% endblock %}
+
+{% block content %}
+<div class="billing-container">
+    <a href="/" class="back-link">← Back to Dashboard</a>
+
+    <h1>Billing & Subscription</h1>
+    <p class="subtitle">Manage your subscription and billing settings</p>
+
+    {% if subscription.manual_override %}
+        <div class="alert alert-success">
+            🎁 You have a complimentary {{ subscription.tier_name }} plan! This plan has been granted by an administrator and won't be charged.
+        </div>
+    {% elif subscription.cancel_at_period_end %}
+        <div class="alert alert-warning">
+            ⚠️ Your subscription is set to cancel at the end of the current billing period ({{ subscription.period_end }}).
+        </div>
+    {% elif subscription.status == 'trialing' %}
+        <div class="alert alert-info">
+            🎉 You're currently on a free trial! Your trial ends on {{ subscription.period_end }}, after which you'll be charged.
+        </div>
+    {% elif subscription.status == 'past_due' %}
+        <div class="alert alert-warning">
+            ⚠️ Your payment is past due. Please update your payment method to continue using {{ subscription.tier_name }} features.
+        </div>
+    {% endif %}
+
+    <div class="subscription-card">
+        <h2>Current Plan</h2>
+
+        <div class="plan-header">
+            <div class="plan-name">{{ subscription.tier_name }}</div>
+            <div class="plan-badge {% if subscription.manual_override %}complimentary{% else %}{{ subscription.status or 'active' }}{% endif %}">
+                {% if subscription.manual_override %}
+                    Complimentary
+                {% elif subscription.status %}
+                    {{ subscription.status.replace('_', ' ').title() }}
+                {% else %}
+                    Active
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="info-grid">
+            <div class="info-item">
+                <div class="info-label">Usage</div>
+                <div class="info-value">
+                    {{ subscription.current_loans }}{% if subscription.max_loans %}/{{ subscription.max_loans }}{% endif %}
+                </div>
+            </div>
+
+            {% if subscription.price_monthly > 0 and not subscription.manual_override %}
+                <div class="info-item">
+                    <div class="info-label">Price</div>
+                    <div class="info-value">${{ '%.0f'|format(subscription.price_monthly) }}/mo</div>
+                </div>
+            {% endif %}
+
+            {% if subscription.period_end and not subscription.manual_override %}
+                <div class="info-item">
+                    <div class="info-label">Next Billing Date</div>
+                    <div class="info-value" style="font-size: 1.1rem;">{{ subscription.period_end }}</div>
+                </div>
+            {% endif %}
+        </div>
+
+        <h3 style="font-size: 1.1rem; margin-top: 2rem; margin-bottom: 1rem;">Plan Features</h3>
+        <ul class="features-list">
+            <li>{{ subscription.max_loans if subscription.max_loans else 'Unlimited' }} active loans</li>
+            <li>Manual repayment tracking</li>
+            <li>CSV transaction import</li>
+            <li>Borrower self-service portal</li>
+            {% if subscription.features.email_notifications %}
+                <li>Email notifications</li>
+            {% endif %}
+            {% if subscription.features.transaction_export %}
+                <li>Transaction export (CSV/PDF)</li>
+            {% endif %}
+            {% if subscription.features.bank_api %}
+                <li>Bank API connectors</li>
+                <li>Automatic transaction matching</li>
+            {% endif %}
+        </ul>
+
+        <div class="actions">
+            {% if subscription.tier == 'free' %}
+                <a href="/pricing" class="btn btn-primary">Upgrade Plan</a>
+            {% elif subscription.manual_override %}
+                <p style="color: #6c757d; margin: 0;">This is a complimentary plan granted by an administrator.</p>
+            {% elif portal_url %}
+                <a href="{{ portal_url }}" class="btn btn-primary">Manage Subscription</a>
+                <a href="/pricing" class="btn btn-secondary">View All Plans</a>
+            {% else %}
+                <a href="/pricing" class="btn btn-secondary">View All Plans</a>
+            {% endif %}
+        </div>
+    </div>
+
+    {% if not subscription.manual_override and subscription.tier != 'free' %}
+        <div class="subscription-card">
+            <h2>Need Help?</h2>
+            <p>You can manage your subscription, update payment methods, view invoices, and cancel your plan using the Stripe Customer Portal.</p>
+            {% if portal_url %}
+                <a href="{{ portal_url }}" class="btn btn-secondary">Open Customer Portal</a>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

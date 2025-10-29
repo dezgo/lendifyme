@@ -195,6 +195,7 @@
                 <span class="user-email">{{ session.user_name or session.user_email }}</span>
                 {% if session.is_admin %}
                 <a href="/analytics" class="settings-link">📊 Analytics</a>
+                <a href="/admin/users" class="settings-link">👥 Users</a>
                 {% endif %}
                 <a href="/settings" class="settings-link">⚙️ Settings</a>
                 <a href="/logout" class="logout-link">Logout</a>

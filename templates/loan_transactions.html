@@ -183,7 +183,11 @@ tr:hover {
 
 <div class="action-toolbar">
     <button onclick="window.print()" class="btn-print">🖨️ Print / Save as PDF</button>
-    <a href="/loan/{{ loan[0] }}/transactions/export" class="btn-export">📥 Export CSV</a>
+    {% if has_export %}
+        <a href="/loan/{{ loan[0] }}/transactions/export" class="btn-export">📥 Export CSV</a>
+    {% else %}
+        <a href="/pricing" class="btn-export" style="background: #6c757d;">📥 Export CSV (Upgrade)</a>
+    {% endif %}
 </div>
 
 <div class="loan-summary">

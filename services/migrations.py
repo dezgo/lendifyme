@@ -241,6 +241,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 22:
+        try:
+            migrate_v22_add_subscriptions(conn)
+            _set_user_version(conn, 22)
+            conn.commit()
+            print("✅ Migration v22 applied.")
+        except Exception as e:
+            print(f"❌ Migration v22 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -842,3 +855,171 @@ def migrate_v21_add_user_roles(conn):
         # Make the first user an admin (usually the person deploying)
         c.execute("UPDATE users SET role = 'admin' WHERE id = 1")
         print("  Added role column to users table. First user set as admin.")
+
+
+def migrate_v22_add_subscriptions(conn):
+    """
+    Add subscription system with Stripe integration.
+    - Add subscription fields to users table
+    - Create subscription_plans table (free, basic, pro)
+    - Create user_subscriptions table for Stripe subscription tracking
+    - Grandfather all existing users to Pro tier (lifetime free)
+    """
+    import json
+    c = conn.cursor()
+
+    # 1. Add subscription columns to users table
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'subscription_tier' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN subscription_tier TEXT DEFAULT 'free'")
+        print("  Added subscription_tier column to users table.")
+
+    if 'stripe_customer_id' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN stripe_customer_id TEXT")
+        print("  Added stripe_customer_id column to users table.")
+
+    if 'manual_override' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN manual_override BOOLEAN DEFAULT 0")
+        print("  Added manual_override column to users table.")
+
+    if 'trial_ends_at' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN trial_ends_at TEXT")
+        print("  Added trial_ends_at column to users table.")
+
+    # 2. Create subscription_plans table
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS subscription_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tier TEXT UNIQUE NOT NULL,
+            name TEXT NOT NULL,
+            price_monthly INTEGER,
+            price_yearly INTEGER,
+            stripe_price_id_monthly TEXT,
+            stripe_price_id_yearly TEXT,
+            max_loans INTEGER,
+            features_json TEXT NOT NULL,
+            active BOOLEAN DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    print("  Created subscription_plans table.")
+
+    # 3. Create user_subscriptions table
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS user_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            stripe_subscription_id TEXT UNIQUE,
+            stripe_customer_id TEXT,
+            tier TEXT NOT NULL,
+            status TEXT NOT NULL,
+            current_period_start TEXT,
+            current_period_end TEXT,
+            cancel_at_period_end BOOLEAN DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    """)
+    print("  Created user_subscriptions table.")
+
+    # Create indexes
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_subscriptions_user_id ON user_subscriptions(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_user_subscriptions_status ON user_subscriptions(status)")
+    print("  Created indexes on user_subscriptions.")
+
+    # 4. Seed subscription_plans with our 3 tiers
+    plans = [
+        {
+            'tier': 'free',
+            'name': 'Free',
+            'price_monthly': 0,
+            'price_yearly': 0,
+            'stripe_price_id_monthly': None,
+            'stripe_price_id_yearly': None,
+            'max_loans': 3,
+            'features': {
+                'max_loans': 3,
+                'manual_repayment': True,
+                'csv_import': True,
+                'borrower_portal': True,
+                'email_notifications': False,
+                'transaction_export': False,
+                'bank_api': False,
+                'analytics': False
+            }
+        },
+        {
+            'tier': 'basic',
+            'name': 'Basic',
+            'price_monthly': 900,  # $9.00 in cents
+            'price_yearly': 9000,  # $90.00 in cents
+            'stripe_price_id_monthly': None,  # Set via env vars later
+            'stripe_price_id_yearly': None,
+            'max_loans': 25,
+            'features': {
+                'max_loans': 25,
+                'manual_repayment': True,
+                'csv_import': True,
+                'borrower_portal': True,
+                'email_notifications': True,
+                'transaction_export': True,
+                'bank_api': False,
+                'analytics': False
+            }
+        },
+        {
+            'tier': 'pro',
+            'name': 'Pro',
+            'price_monthly': 1900,  # $19.00 in cents
+            'price_yearly': 19000,  # $190.00 in cents
+            'stripe_price_id_monthly': None,  # Set via env vars later
+            'stripe_price_id_yearly': None,
+            'max_loans': None,  # Unlimited
+            'features': {
+                'max_loans': None,  # Unlimited
+                'manual_repayment': True,
+                'csv_import': True,
+                'borrower_portal': True,
+                'email_notifications': True,
+                'transaction_export': True,
+                'bank_api': True,
+                'analytics': True,
+                'advanced_matching': True
+            }
+        }
+    ]
+
+    for plan in plans:
+        c.execute("""
+            INSERT OR IGNORE INTO subscription_plans
+            (tier, name, price_monthly, price_yearly, stripe_price_id_monthly,
+             stripe_price_id_yearly, max_loans, features_json, active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+        """, (
+            plan['tier'],
+            plan['name'],
+            plan['price_monthly'],
+            plan['price_yearly'],
+            plan['stripe_price_id_monthly'],
+            plan['stripe_price_id_yearly'],
+            plan['max_loans'],
+            json.dumps(plan['features'])
+        ))
+
+    print("  Seeded subscription_plans with free, basic, and pro tiers.")
+
+    # 5. Grandfather all existing users to Pro tier (lifetime)
+    c.execute("SELECT COUNT(*) FROM users")
+    user_count = c.fetchone()[0]
+
+    if user_count > 0:
+        c.execute("""
+            UPDATE users
+            SET subscription_tier = 'pro',
+                manual_override = 1
+            WHERE id IN (SELECT id FROM users)
+        """)
+        print(f"  Grandfathered {user_count} existing user(s) to Pro tier (lifetime free).")

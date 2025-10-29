@@ -141,27 +141,42 @@ label {
 
     <div class="connector-options">
         <!-- User's Bank Connections -->
-        {% if user_connections %}
-            {% for connection in user_connections %}
-                <div class="connector-option" data-connector="{{ connection.id }}">
-                    <label class="connector-label">
-                        <input type="radio" name="import_source" value="{{ connection.id }}" required>
-                        {{ connection.display_name or connection.connector_name }}
-                    </label>
-                    <div class="connector-description">
-                        {{ connection.connector_name }}
-                        {% if connection.last_synced_at %}
-                            • Last synced: {{ connection.last_synced_at }}
-                        {% endif %}
+        {% if has_bank_api %}
+            {% if user_connections %}
+                {% for connection in user_connections %}
+                    <div class="connector-option" data-connector="{{ connection.id }}">
+                        <label class="connector-label">
+                            <input type="radio" name="import_source" value="{{ connection.id }}" required>
+                            {{ connection.display_name or connection.connector_name }}
+                        </label>
+                        <div class="connector-description">
+                            {{ connection.connector_name }}
+                            {% if connection.last_synced_at %}
+                                • Last synced: {{ connection.last_synced_at }}
+                            {% endif %}
+                        </div>
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="connector-option" style="border-color: #ffc107; background: #fff3cd; cursor: default;">
+                    <div style="color: #856404;">
+                        <strong>No bank connections configured</strong>
+                        <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">
+                            <a href="/settings/banks/add" style="color: #007bff;">Add a bank connection</a> to automatically import transactions.
+                        </p>
                     </div>
                 </div>
-            {% endfor %}
+            {% endif %}
         {% else %}
-            <div class="connector-option" style="border-color: #ffc107; background: #fff3cd; cursor: default;">
-                <div style="color: #856404;">
-                    <strong>No bank connections configured</strong>
+            <!-- Upgrade CTA for non-Pro users -->
+            <div class="connector-option" style="border-color: #667eea; background: #f0f1ff; cursor: default;">
+                <div style="color: #4c51bf;">
+                    <strong>🚀 Bank API Connections</strong>
                     <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">
-                        <a href="/settings/banks/add" style="color: #007bff;">Add a bank connection</a> to automatically import transactions.
+                        Automatically import transactions from your bank with Pro!
+                    </p>
+                    <p style="margin: 0.5rem 0 0 0;">
+                        <a href="/pricing" style="color: #667eea; font-weight: bold;">Upgrade to Pro →</a>
                     </p>
                 </div>
             </div>

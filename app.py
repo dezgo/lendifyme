@@ -250,6 +250,164 @@ def get_unverified_loan_count():
     return count
 
 
+# ============================================================================
+# SUBSCRIPTION HELPER FUNCTIONS
+# ============================================================================
+
+def get_user_subscription_tier(user_id=None):
+    """
+    Get user's current subscription tier (free/basic/pro).
+
+    Args:
+        user_id: User ID (defaults to current user)
+
+    Returns:
+        str: 'free', 'basic', or 'pro'
+    """
+    if user_id is None:
+        user_id = get_current_user_id()
+
+    if not user_id:
+        return 'free'
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT subscription_tier FROM users WHERE id = ?", (user_id,))
+    result = c.fetchone()
+    conn.close()
+
+    return result[0] if result else 'free'
+
+
+def get_subscription_limits(tier):
+    """
+    Get subscription limits and features for a tier.
+
+    Args:
+        tier: 'free', 'basic', or 'pro'
+
+    Returns:
+        dict: Features and limits for the tier
+    """
+    import json
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("""
+        SELECT max_loans, features_json
+        FROM subscription_plans
+        WHERE tier = ? AND active = 1
+    """, (tier,))
+    result = c.fetchone()
+    conn.close()
+
+    if not result:
+        # Fallback defaults
+        return {
+            'max_loans': 3,
+            'manual_repayment': True,
+            'csv_import': True,
+            'borrower_portal': True,
+            'email_notifications': False,
+            'transaction_export': False,
+            'bank_api': False,
+            'analytics': False
+        }
+
+    max_loans, features_json = result
+    features = json.loads(features_json)
+    features['max_loans'] = max_loans  # Ensure max_loans is in the dict
+
+    return features
+
+
+def check_loan_limit(user_id=None):
+    """
+    Check if user can create more loans.
+
+    Args:
+        user_id: User ID (defaults to current user)
+
+    Returns:
+        tuple: (current_count, max_allowed, can_create)
+    """
+    if user_id is None:
+        user_id = get_current_user_id()
+
+    if not user_id:
+        return (0, 3, False)
+
+    # Get user's tier
+    tier = get_user_subscription_tier(user_id)
+    limits = get_subscription_limits(tier)
+    max_loans = limits.get('max_loans')
+
+    # Count current active loans
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (user_id,))
+    current_count = c.fetchone()[0]
+    conn.close()
+
+    # None means unlimited
+    if max_loans is None:
+        return (current_count, None, True)
+
+    can_create = current_count < max_loans
+    return (current_count, max_loans, can_create)
+
+
+def has_feature(user_id, feature_name):
+    """
+    Check if user has access to a specific feature.
+
+    Args:
+        user_id: User ID
+        feature_name: Feature key (e.g., 'bank_api', 'email_notifications', 'transaction_export')
+
+    Returns:
+        bool: True if user has access to the feature
+    """
+    if not user_id:
+        return False
+
+    tier = get_user_subscription_tier(user_id)
+    limits = get_subscription_limits(tier)
+
+    return limits.get(feature_name, False)
+
+
+def is_trial_active(user_id=None):
+    """
+    Check if user is currently in a trial period.
+
+    Args:
+        user_id: User ID (defaults to current user)
+
+    Returns:
+        bool: True if trial is active
+    """
+    from datetime import datetime
+
+    if user_id is None:
+        user_id = get_current_user_id()
+
+    if not user_id:
+        return False
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT trial_ends_at FROM users WHERE id = ?", (user_id,))
+    result = c.fetchone()
+    conn.close()
+
+    if not result or not result[0]:
+        return False
+
+    trial_ends_at = datetime.fromisoformat(result[0])
+    return datetime.now() < trial_ends_at
+
+
 def generate_borrower_access_token():
     """Generate a secure random token for borrower access."""
     return secrets.token_urlsafe(32)
@@ -1005,6 +1163,15 @@ def index():
                 flash("Please verify your email to create more loans. Check your inbox for the verification link.", "error")
                 return redirect("/")
 
+        # Check subscription loan limit
+        current_loans, max_loans, can_create = check_loan_limit()
+        if not can_create:
+            tier = get_user_subscription_tier()
+            tier_name = tier.title()
+            if max_loans is not None:
+                flash(f"You've reached the limit of {max_loans} loans on the {tier_name} plan. Upgrade to create more!", "error")
+            return redirect("/pricing")
+
         if borrower and amount:
             conn = sqlite3.connect(get_db_path())
             c = conn.cursor()
@@ -1094,8 +1261,9 @@ def repay(loan_id):
             # Log analytics event
             log_event('payment_recorded', event_data={'loan_id': loan_id, 'amount': payment_amount})
 
-            # Send email notification if borrower has email, access token, and notifications enabled
-            if borrower_email and access_token and notifications_enabled:
+            # Send email notification if borrower has email, access token, notifications enabled, AND lender has email feature
+            user_id = get_current_user_id()
+            if borrower_email and access_token and notifications_enabled and has_feature(user_id, 'email_notifications'):
                 portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
                 lender_name = session.get('user_name') or session.get('user_email', 'Your lender')
 
@@ -1232,13 +1400,19 @@ def loan_transactions(loan_id):
 
     conn.close()
 
-    return render_template("loan_transactions.html", loan=loan, transactions=transactions)
+    has_export = has_feature(get_current_user_id(), 'transaction_export')
+    return render_template("loan_transactions.html", loan=loan, transactions=transactions, has_export=has_export)
 
 
 @app.route("/loan/<int:loan_id>/transactions/export")
 @login_required
 def export_loan_transactions(loan_id):
     """Export loan transactions as CSV."""
+    # Check if user has transaction export feature
+    if not has_feature(get_current_user_id(), 'transaction_export'):
+        flash("Transaction export is available on Basic and Pro plans. Upgrade to export your transactions!", "error")
+        return redirect("/pricing")
+
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
 
@@ -1384,6 +1558,517 @@ def onboarding_update_email():
 
     flash("Email updated!", "success")
     return redirect("/onboarding?step=1")
+
+
+@app.route("/pricing")
+def pricing():
+    """Display pricing tiers and subscription options."""
+    import json
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Get all subscription plans
+    c.execute("""
+        SELECT tier, name, price_monthly, price_yearly, max_loans, features_json
+        FROM subscription_plans
+        WHERE active = 1
+        ORDER BY price_monthly ASC
+    """)
+    plan_rows = c.fetchall()
+    conn.close()
+
+    # Convert to dicts
+    plans = []
+    for row in plan_rows:
+        tier, name, price_monthly, price_yearly, max_loans, features_json = row
+        features = json.loads(features_json)
+        plans.append({
+            'tier': tier,
+            'name': name,
+            'price_monthly': price_monthly / 100 if price_monthly else 0,  # Convert cents to dollars
+            'price_yearly': price_yearly / 100 if price_yearly else 0,
+            'max_loans': max_loans,
+            'features': features
+        })
+
+    # Get current user's tier if logged in
+    current_tier = None
+    current_loans = 0
+    manual_override = False
+    if 'user_id' in session:
+        current_tier = get_user_subscription_tier()
+        current_loans, _, _ = check_loan_limit()
+
+        # Check if user has manual override (admin-granted)
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+        c.execute("SELECT manual_override FROM users WHERE id = ?", (get_current_user_id(),))
+        result = c.fetchone()
+        manual_override = result[0] if result else False
+        conn.close()
+
+    return render_template("pricing.html",
+                         plans=plans,
+                         current_tier=current_tier,
+                         current_loans=current_loans,
+                         manual_override=manual_override)
+
+
+@app.route("/subscribe/<tier>")
+@login_required
+def subscribe(tier):
+    """Create Stripe checkout session for subscription."""
+    import stripe
+    import os
+    from datetime import datetime, timedelta
+
+    # Validate tier
+    if tier not in ['basic', 'pro']:
+        flash("Invalid subscription tier", "error")
+        return redirect("/pricing")
+
+    # Get billing cycle (monthly or yearly)
+    billing_cycle = request.args.get('billing', 'monthly')
+    if billing_cycle not in ['monthly', 'yearly']:
+        billing_cycle = 'monthly'
+
+    # Check if user already has this tier or higher
+    current_tier = get_user_subscription_tier()
+    tier_hierarchy = {'free': 0, 'basic': 1, 'pro': 2}
+    if tier_hierarchy.get(current_tier, 0) >= tier_hierarchy.get(tier, 0):
+        flash(f"You already have {current_tier.title()} plan access", "error")
+        return redirect("/pricing")
+
+    # Get or create Stripe customer
+    user_id = get_current_user_id()
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    c.execute("SELECT stripe_customer_id, email FROM users WHERE id = ?", (user_id,))
+    result = c.fetchone()
+    stripe_customer_id, user_email = result
+
+    # Initialize Stripe
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+
+    if not stripe.api_key:
+        flash("Stripe is not configured. Please contact support.", "error")
+        conn.close()
+        return redirect("/pricing")
+
+    try:
+        # Create or retrieve Stripe customer
+        if not stripe_customer_id:
+            customer = stripe.Customer.create(
+                email=user_email,
+                metadata={'user_id': user_id}
+            )
+            stripe_customer_id = customer.id
+
+            # Save customer ID
+            c.execute("UPDATE users SET stripe_customer_id = ? WHERE id = ?",
+                     (stripe_customer_id, user_id))
+            conn.commit()
+
+        # Get price ID from environment based on billing cycle
+        price_id_key = f'STRIPE_PRICE_ID_{tier.upper()}_{billing_cycle.upper()}'
+        price_id = os.getenv(price_id_key)
+
+        if not price_id:
+            flash(f"Pricing not configured for {tier.title()} plan ({billing_cycle}). Please contact support.", "error")
+            conn.close()
+            return redirect("/pricing")
+
+        # Set trial end date (14 days from now)
+        trial_end = int((datetime.now() + timedelta(days=14)).timestamp())
+
+        # Create checkout session
+        checkout_session = stripe.checkout.Session.create(
+            customer=stripe_customer_id,
+            line_items=[{
+                'price': price_id,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=f"{app.config['APP_URL']}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{app.config['APP_URL']}/pricing",
+            subscription_data={
+                'trial_period_days': 14,
+                'metadata': {
+                    'user_id': user_id,
+                    'tier': tier,
+                    'billing_cycle': billing_cycle
+                }
+            },
+            metadata={
+                'user_id': user_id,
+                'tier': tier,
+                'billing_cycle': billing_cycle
+            }
+        )
+
+        # Store trial start in database
+        trial_ends_at = (datetime.now() + timedelta(days=14)).isoformat()
+        c.execute("UPDATE users SET trial_ends_at = ? WHERE id = ?",
+                 (trial_ends_at, user_id))
+        conn.commit()
+        conn.close()
+
+        # Log analytics event
+        log_event('subscription_checkout_started', event_data={'tier': tier, 'billing_cycle': billing_cycle})
+
+        # Redirect to Stripe Checkout
+        return redirect(checkout_session.url, code=303)
+
+    except stripe.StripeError as e:
+        flash(f"Payment error: {str(e)}", "error")
+        conn.close()
+        return redirect("/pricing")
+    except Exception as e:
+        app.logger.error(f"Subscription error: {e}")
+        flash("An error occurred. Please try again.", "error")
+        conn.close()
+        return redirect("/pricing")
+
+
+@app.route("/checkout/success")
+@login_required
+def checkout_success():
+    """Handle successful checkout."""
+    session_id = request.args.get('session_id')
+
+    if not session_id:
+        flash("Invalid checkout session", "error")
+        return redirect("/")
+
+    flash("Subscription activated! Welcome to your new plan.", "success")
+    log_event('subscription_activated')
+
+    return redirect("/")
+
+
+@app.route("/checkout/cancel")
+@login_required
+def checkout_cancel():
+    """Handle cancelled checkout."""
+    flash("Checkout cancelled. You can subscribe anytime from the pricing page.", "error")
+    return redirect("/pricing")
+
+
+@app.route("/webhooks/stripe", methods=["POST"])
+def stripe_webhook():
+    """Handle Stripe webhook events."""
+    import stripe
+    import os
+    from datetime import datetime
+
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
+    webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+
+    if not webhook_secret:
+        app.logger.error("Stripe webhook secret not configured")
+        return ('Webhook secret not configured', 400)
+
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, webhook_secret
+        )
+    except ValueError:
+        app.logger.error("Invalid webhook payload")
+        return ('Invalid payload', 400)
+    except stripe.SignatureVerificationError:
+        app.logger.error("Invalid webhook signature")
+        return ('Invalid signature', 400)
+
+    # Handle the event
+    event_type = event['type']
+    data_object = event['data']['object']
+
+    app.logger.info(f"Received Stripe webhook: {event_type}")
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    try:
+        if event_type == 'checkout.session.completed':
+            # Payment successful, subscription created
+            session = data_object
+            customer_id = session.get('customer')
+            subscription_id = session.get('subscription')
+            metadata = session.get('metadata', {})
+            user_id = metadata.get('user_id')
+            tier = metadata.get('tier')
+
+            if user_id and tier:
+                # Update user's subscription tier
+                c.execute("""
+                    UPDATE users
+                    SET subscription_tier = ?, stripe_customer_id = ?
+                    WHERE id = ?
+                """, (tier, customer_id, user_id))
+
+                # Create subscription record
+                c.execute("""
+                    INSERT INTO user_subscriptions
+                    (user_id, stripe_subscription_id, stripe_customer_id, tier, status, created_at)
+                    VALUES (?, ?, ?, ?, 'trialing', CURRENT_TIMESTAMP)
+                """, (user_id, subscription_id, customer_id, tier))
+
+                conn.commit()
+                app.logger.info(f"Subscription created for user {user_id}: {tier}")
+
+        elif event_type == 'customer.subscription.updated':
+            # Subscription status changed
+            subscription = data_object
+            subscription_id = subscription['id']
+            status = subscription['status']
+            current_period_start = datetime.fromtimestamp(subscription['current_period_start']).isoformat()
+            current_period_end = datetime.fromtimestamp(subscription['current_period_end']).isoformat()
+            cancel_at_period_end = subscription.get('cancel_at_period_end', False)
+
+            # Update subscription record
+            c.execute("""
+                UPDATE user_subscriptions
+                SET status = ?,
+                    current_period_start = ?,
+                    current_period_end = ?,
+                    cancel_at_period_end = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE stripe_subscription_id = ?
+            """, (status, current_period_start, current_period_end, cancel_at_period_end, subscription_id))
+
+            # If subscription becomes active, update user tier
+            if status == 'active':
+                c.execute("""
+                    UPDATE users
+                    SET subscription_tier = (
+                        SELECT tier FROM user_subscriptions
+                        WHERE stripe_subscription_id = ?
+                    )
+                    WHERE id = (
+                        SELECT user_id FROM user_subscriptions
+                        WHERE stripe_subscription_id = ?
+                    )
+                """, (subscription_id, subscription_id))
+
+            conn.commit()
+            app.logger.info(f"Subscription {subscription_id} updated: {status}")
+
+        elif event_type == 'customer.subscription.deleted':
+            # Subscription cancelled or ended
+            subscription = data_object
+            subscription_id = subscription['id']
+
+            # Get user_id before deleting
+            c.execute("SELECT user_id FROM user_subscriptions WHERE stripe_subscription_id = ?", (subscription_id,))
+            result = c.fetchone()
+
+            if result:
+                user_id = result[0]
+
+                # Downgrade user to free tier
+                c.execute("UPDATE users SET subscription_tier = 'free' WHERE id = ?", (user_id,))
+
+                # Update subscription status
+                c.execute("""
+                    UPDATE user_subscriptions
+                    SET status = 'canceled',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE stripe_subscription_id = ?
+                """, (subscription_id,))
+
+                conn.commit()
+                app.logger.info(f"Subscription {subscription_id} cancelled, user {user_id} downgraded to free")
+
+        elif event_type == 'invoice.payment_succeeded':
+            # Successful payment
+            invoice = data_object
+            subscription_id = invoice.get('subscription')
+
+            if subscription_id:
+                c.execute("""
+                    UPDATE user_subscriptions
+                    SET status = 'active',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE stripe_subscription_id = ?
+                """, (subscription_id,))
+                conn.commit()
+                app.logger.info(f"Payment succeeded for subscription {subscription_id}")
+
+        elif event_type == 'invoice.payment_failed':
+            # Failed payment
+            invoice = data_object
+            subscription_id = invoice.get('subscription')
+
+            if subscription_id:
+                c.execute("""
+                    UPDATE user_subscriptions
+                    SET status = 'past_due',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE stripe_subscription_id = ?
+                """, (subscription_id,))
+                conn.commit()
+                app.logger.warning(f"Payment failed for subscription {subscription_id}")
+
+        conn.close()
+        return ('Success', 200)
+
+    except Exception as e:
+        app.logger.error(f"Error processing webhook: {e}")
+        conn.rollback()
+        conn.close()
+        return ('Error processing webhook', 500)
+
+
+@app.route("/billing")
+@login_required
+def billing():
+    """Manage subscription and billing."""
+    import stripe
+    import os
+    from datetime import datetime
+    import json
+
+    user_id = get_current_user_id()
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Get user's subscription info
+    c.execute("""
+        SELECT u.subscription_tier, u.stripe_customer_id, u.manual_override,
+               us.stripe_subscription_id, us.status, us.current_period_end,
+               us.cancel_at_period_end, sp.price_monthly, sp.price_yearly, sp.features_json
+        FROM users u
+        LEFT JOIN user_subscriptions us ON u.id = us.user_id AND us.status IN ('active', 'trialing', 'past_due')
+        LEFT JOIN subscription_plans sp ON u.subscription_tier = sp.tier
+        WHERE u.id = ?
+    """, (user_id,))
+    result = c.fetchone()
+
+    if not result:
+        conn.close()
+        flash("User not found", "error")
+        return redirect("/")
+
+    tier, stripe_customer_id, manual_override, subscription_id, status, period_end, cancel_at_period_end, price_monthly, price_yearly, features_json = result
+
+    # Get usage stats
+    current_loans, max_loans, can_create = check_loan_limit()
+
+    subscription_data = {
+        'tier': tier,
+        'tier_name': tier.title(),
+        'status': status,
+        'price_monthly': price_monthly / 100 if price_monthly else 0,
+        'price_yearly': price_yearly / 100 if price_yearly else 0,
+        'manual_override': manual_override,
+        'subscription_id': subscription_id,
+        'cancel_at_period_end': cancel_at_period_end,
+        'period_end': period_end,
+        'current_loans': current_loans,
+        'max_loans': max_loans,
+        'features': json.loads(features_json) if features_json else {}
+    }
+
+    # Create Stripe portal session for managing subscription
+    portal_url = None
+    if stripe_customer_id and not manual_override:
+        stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+        try:
+            portal_session = stripe.billing_portal.Session.create(
+                customer=stripe_customer_id,
+                return_url=f"{app.config['APP_URL']}/billing"
+            )
+            portal_url = portal_session.url
+        except Exception as e:
+            app.logger.error(f"Error creating portal session: {e}")
+
+    conn.close()
+
+    return render_template("billing.html",
+                         subscription=subscription_data,
+                         portal_url=portal_url)
+
+
+@app.route("/admin/users")
+@admin_required
+def admin_users():
+    """Admin page to manage all users and their subscriptions."""
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Get all users with their subscription info and usage stats
+    c.execute("""
+        SELECT u.id, u.email, u.name, u.subscription_tier, u.manual_override,
+               u.created_at, u.email_verified,
+               us.status, us.current_period_end,
+               COUNT(DISTINCT l.id) as loan_count
+        FROM users u
+        LEFT JOIN user_subscriptions us ON u.id = us.user_id AND us.status IN ('active', 'trialing', 'past_due')
+        LEFT JOIN loans l ON u.id = l.user_id
+        GROUP BY u.id
+        ORDER BY u.created_at DESC
+    """)
+    user_rows = c.fetchall()
+
+    users = []
+    for row in user_rows:
+        users.append({
+            'id': row[0],
+            'email': row[1],
+            'name': row[2],
+            'tier': row[3],
+            'manual_override': row[4],
+            'created_at': row[5],
+            'email_verified': row[6],
+            'subscription_status': row[7],
+            'period_end': row[8],
+            'loan_count': row[9]
+        })
+
+    conn.close()
+
+    return render_template("admin_users.html", users=users)
+
+
+@app.route("/admin/user/<int:user_id>/upgrade", methods=["POST"])
+@admin_required
+def admin_upgrade_user(user_id):
+    """Manually upgrade a user's subscription tier."""
+    new_tier = request.form.get("tier")
+
+    if new_tier not in ['free', 'basic', 'pro']:
+        flash("Invalid tier", "error")
+        return redirect("/admin/users")
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Update user's tier and set manual override
+    c.execute("""
+        UPDATE users
+        SET subscription_tier = ?,
+            manual_override = 1,
+            trial_ends_at = NULL
+        WHERE id = ?
+    """, (new_tier, user_id))
+
+    # Get user email for flash message
+    c.execute("SELECT email FROM users WHERE id = ?", (user_id,))
+    result = c.fetchone()
+    user_email = result[0] if result else f"User {user_id}"
+
+    conn.commit()
+    conn.close()
+
+    log_event('admin_user_upgrade', event_data={'target_user_id': user_id, 'new_tier': new_tier})
+    flash(f"Successfully updated {user_email} to {new_tier.title()} (manual override)", "success")
+
+    return redirect("/admin/users")
 
 
 @app.route("/settings")
@@ -1790,6 +2475,11 @@ def match_transactions():
         connector = None
         transactions = []
 
+        # Check if trying to use bank API without access
+        if import_source != "csv" and not has_feature(get_current_user_id(), 'bank_api'):
+            flash("Bank API connections are only available on the Pro plan. Upgrade to access this feature!", "error")
+            return redirect("/pricing")
+
         try:
             if import_source == "csv":
                 # CSV Upload
@@ -1973,8 +2663,15 @@ def match_transactions():
             return render_template("match_upload.html", user_connections=user_connections)
 
     # GET request - show upload form
-    user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
-    return render_template("match_upload.html", user_connections=user_connections)
+    user_id = get_current_user_id()
+    has_bank_api_access = has_feature(user_id, 'bank_api')
+    user_connections = ConnectorRegistry.get_user_connections(get_db_path(), user_id) if has_bank_api_access else []
+    tier = get_user_subscription_tier(user_id)
+
+    return render_template("match_upload.html",
+                         user_connections=user_connections,
+                         has_bank_api=has_bank_api_access,
+                         current_tier=tier)
 
 
 @app.route("/match/review")
@@ -2093,8 +2790,8 @@ def apply_match():
                     # Log analytics event
                     log_event('transaction_matched', event_data={'loan_id': loan_id, 'amount': amount_to_store})
 
-                    # Send email notification if borrower has email, access token, and notifications enabled
-                    if borrower_email and access_token and notifications_enabled:
+                    # Send email notification if borrower has email, access token, notifications enabled, AND lender has email feature
+                    if borrower_email and access_token and notifications_enabled and has_feature(get_current_user_id(), 'email_notifications'):
                         portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
                         lender_name = session.get('user_name') or session.get('user_email', 'Your lender')
 
