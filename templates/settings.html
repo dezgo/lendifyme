@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+
+{% block title %}Settings – LendifyMe{% endblock %}
+
+{% block extra_css %}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1rem;
+    color: #007bff;
+    text-decoration: none;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+h1 {
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #666;
+    margin-bottom: 2rem;
+}
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    max-width: 1000px;
+}
+.setting-card {
+    background: white;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: all 0.2s;
+}
+.setting-card:hover {
+    border-color: #007bff;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,123,255,0.15);
+}
+.setting-icon {
+    font-size: 2rem;
+    margin-bottom: 0.75rem;
+}
+.setting-card h2 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.25rem;
+    color: #333;
+}
+.setting-card p {
+    margin: 0;
+    color: #666;
+    font-size: 0.95rem;
+    line-height: 1.5;
+}
+.setting-badge {
+    display: inline-block;
+    background: #e7f3ff;
+    color: #007bff;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    margin-top: 0.5rem;
+    font-weight: 600;
+}
+{% endblock %}
+
+{% block content %}
+<a href="/" class="back-link">← Back to Dashboard</a>
+
+<h1>Settings</h1>
+<p class="subtitle">Manage your account and preferences</p>
+
+<div class="settings-grid">
+    <a href="/settings/password" class="setting-card">
+        <div class="setting-icon">🔐</div>
+        <h2>Password</h2>
+        <p>Add, change, or remove your password. Choose between password login or magic links.</p>
+        <span class="setting-badge">Account Security</span>
+    </a>
+
+    <a href="/settings/banks" class="setting-card">
+        <div class="setting-icon">🏦</div>
+        <h2>Bank Connections</h2>
+        <p>Connect your bank accounts to automatically import transactions and match loan repayments.</p>
+        <span class="setting-badge">Integrations</span>
+    </a>
+
+    <a href="/settings/recovery-codes" class="setting-card">
+        <div class="setting-icon">🔑</div>
+        <h2>Recovery Codes</h2>
+        <p>View and regenerate your account recovery codes in case you lose access to your email.</p>
+        <span class="setting-badge">Account Security</span>
+    </a>
+</div>
+{% endblock %}

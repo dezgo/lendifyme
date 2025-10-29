@@ -49,12 +49,17 @@
             color: #6c757d;
             font-size: 0.9rem;
         }
-        .logout-link {
-            color: #dc3545;
+        .logout-link, .settings-link {
             text-decoration: none;
             font-size: 0.9rem;
         }
-        .logout-link:hover {
+        .logout-link {
+            color: #dc3545;
+        }
+        .settings-link {
+            color: #007bff;
+        }
+        .logout-link:hover, .settings-link:hover {
             text-decoration: underline;
         }
 
@@ -188,6 +193,7 @@
             {% if session.user_id %}
             <div class="header-actions">
                 <span class="user-email">{{ session.user_name or session.user_email }}</span>
+                <a href="/settings" class="settings-link">⚙️ Settings</a>
                 <a href="/logout" class="logout-link">Logout</a>
             </div>
             {% endif %}

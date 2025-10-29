@@ -188,6 +188,36 @@ def get_current_user_id():
     return session.get('user_id')
 
 
+def is_email_verified():
+    """Check if current user has verified their email."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return False
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT email_verified FROM users WHERE id = ?", (user_id,))
+    result = c.fetchone()
+    conn.close()
+
+    return result and result[0] == 1
+
+
+def get_unverified_loan_count():
+    """Get the number of loans an unverified user has created."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return 0
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (user_id,))
+    count = c.fetchone()[0]
+    conn.close()
+
+    return count
+
+
 def generate_borrower_access_token():
     """Generate a secure random token for borrower access."""
     return secrets.token_urlsafe(32)
@@ -211,10 +241,9 @@ init_db()
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    """User registration - passwordless."""
+    """User registration - super simple, just email."""
     if request.method == "POST":
-        email = request.form.get("email")
-        name = request.form.get("name")
+        email = request.form.get("email", "").strip()
 
         if not email:
             flash("Email is required", "error")
@@ -225,40 +254,63 @@ def register():
 
         # Check if email already exists
         c.execute("SELECT id FROM users WHERE email = ?", (email,))
-        if c.fetchone():
+        existing = c.fetchone()
+        if existing:
             flash("Email already registered. Use 'Login' to sign in.", "error")
             conn.close()
             return redirect(url_for('login'))
 
-        # Generate recovery codes
+        # Generate recovery codes (for account recovery)
         plain_codes, hashed_codes_json = generate_recovery_codes()
 
-        # Create user
+        # Generate verification token
+        from services.auth_helpers import generate_verification_token, get_verification_expiry
+        verification_token = generate_verification_token()
+        verification_sent_at = get_verification_expiry(hours=0)  # Current time
+
+        # Create user - no name, no password required initially
         c.execute("""
-            INSERT INTO users (email, name, recovery_codes, auth_provider)
-            VALUES (?, ?, ?, 'magic_link')
-        """, (email, name, hashed_codes_json))
+            INSERT INTO users (email, recovery_codes, auth_provider, onboarding_completed, email_verified, verification_token, verification_sent_at)
+            VALUES (?, ?, 'magic_link', 0, 0, ?, ?)
+        """, (email, hashed_codes_json, verification_token, verification_sent_at))
         conn.commit()
 
         user_id = c.lastrowid
         conn.close()
 
-        # Store recovery codes in session to show user once
-        session['show_recovery_codes'] = plain_codes
-        session['recovery_codes_for_user'] = user_id
+        # Send verification email
+        verification_link = f"{app.config['APP_URL']}/auth/verify/{verification_token}"
+        from services.email_sender import send_verification_email
+        try:
+            success, message = send_verification_email(email, None, verification_link)
+            if success:
+                app.logger.info(f"Verification email sent to {email}")
+            else:
+                app.logger.warning(f"Failed to send verification email: {message}")
+        except Exception as e:
+            app.logger.error(f"Error sending verification email: {e}")
 
-        flash("Account created! Save your recovery codes below.", "success")
-        return redirect(url_for('show_recovery_codes'))
+        # Log them in immediately (even though unverified - they can still use basic features)
+        session['user_id'] = user_id
+        session['user_email'] = email
+        session['user_name'] = None
+
+        # Store recovery codes for later (they'll see them during onboarding)
+        session['recovery_codes'] = plain_codes
+
+        # Redirect to onboarding
+        return redirect("/onboarding")
 
     return render_template("register.html")
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
-    """User login - send magic link to email."""
+    """User login - supports both password and magic link."""
     if request.method == "POST":
         app.logger.info("Login POST request received")
         email = request.form.get("email")
+        password = request.form.get("password")
         app.logger.info(f"Login attempt for email: {email}")
 
         if not email:
@@ -268,18 +320,49 @@ def login():
         conn = sqlite3.connect(get_db_path())
         c = conn.cursor()
 
-        c.execute("SELECT id, email, name FROM users WHERE email = ?", (email,))
+        c.execute("SELECT id, email, name, password_hash, auth_provider FROM users WHERE email = ?", (email,))
         user = c.fetchone()
 
         if not user:
             # Don't reveal if email exists or not for security
             app.logger.info(f"User not found for email: {email}")
-            flash("If that email is registered, you'll receive a magic link shortly.", "success")
+            if password:
+                flash("Invalid email or password", "error")
+            else:
+                flash("If that email is registered, you'll receive a magic link shortly.", "success")
             conn.close()
             return render_template("login.html")
 
-        user_id, user_email, user_name = user
+        user_id, user_email, user_name, password_hash, auth_provider = user
         app.logger.info(f"User found: {user_id} - {user_email}")
+
+        # If password provided, try password auth
+        if password:
+            if not password_hash:
+                flash("This account uses magic link authentication. Leave password blank to receive a magic link.", "error")
+                conn.close()
+                return render_template("login.html")
+
+            from werkzeug.security import check_password_hash
+            if check_password_hash(password_hash, password):
+                # Password correct - log in
+                session['user_id'] = user_id
+                session['user_email'] = user_email
+                session['user_name'] = user_name
+                conn.close()
+                app.logger.info(f"Password login successful for {user_email}")
+                flash("Welcome back!", "success")
+                return redirect("/")
+            else:
+                # Password incorrect
+                conn.close()
+                app.logger.warning(f"Invalid password for {user_email}")
+                flash("Invalid email or password", "error")
+                return render_template("login.html")
+
+        # No password provided - send magic link
+        user_id, user_email, user_name = user_id, user_email, user_name
+        app.logger.info(f"User requested magic link for {user_id}")
 
         # Send magic link
         app.logger.info(f"Generating magic link for user {user_id}")
@@ -448,6 +531,118 @@ def magic_link_auth(token):
     return redirect(url_for('index'))
 
 
+@app.route("/auth/verify/<token>")
+def verify_email(token):
+    """Verify user's email address via verification token."""
+    from services.auth_helpers import is_verification_expired
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Find user by verification token
+    c.execute("""
+        SELECT id, email, name, verification_sent_at, email_verified
+        FROM users
+        WHERE verification_token = ?
+    """, (token,))
+
+    result = c.fetchone()
+
+    if not result:
+        flash("Invalid or expired verification link", "error")
+        conn.close()
+        return redirect(url_for('login'))
+
+    user_id, user_email, user_name, verification_sent_at, email_verified = result
+
+    # Check if already verified
+    if email_verified:
+        flash("Your email is already verified!", "success")
+        conn.close()
+        return redirect(url_for('login'))
+
+    # Check if expired (24 hours)
+    if verification_sent_at and is_verification_expired(verification_sent_at, hours=24):
+        flash("This verification link has expired. Request a new one from your account settings.", "error")
+        conn.close()
+        return redirect(url_for('login'))
+
+    # Mark as verified and clear token
+    c.execute("""
+        UPDATE users
+        SET email_verified = 1, verification_token = NULL, verification_sent_at = NULL
+        WHERE id = ?
+    """, (user_id,))
+    conn.commit()
+    conn.close()
+
+    # Log them in if not already logged in
+    if session.get('user_id') != user_id:
+        session['user_id'] = user_id
+        session['user_email'] = user_email
+        session['user_name'] = user_name
+
+    flash("Email verified successfully! 🎉", "success")
+    return redirect(url_for('index'))
+
+
+@app.route("/resend-verification", methods=["POST"])
+@login_required
+def resend_verification():
+    """Resend verification email to current user."""
+    from services.auth_helpers import generate_verification_token, get_verification_expiry
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Get user details
+    c.execute("SELECT email, name, email_verified FROM users WHERE id = ?", (get_current_user_id(),))
+    user = c.fetchone()
+
+    if not user:
+        flash("User not found", "error")
+        conn.close()
+        return redirect("/")
+
+    email, name, email_verified = user
+
+    # Check if already verified
+    if email_verified:
+        flash("Your email is already verified!", "success")
+        conn.close()
+        return redirect("/")
+
+    # Generate new verification token
+    verification_token = generate_verification_token()
+    verification_sent_at = get_verification_expiry(hours=0)  # Current time
+
+    # Update user with new token
+    c.execute("""
+        UPDATE users
+        SET verification_token = ?, verification_sent_at = ?
+        WHERE id = ?
+    """, (verification_token, verification_sent_at, get_current_user_id()))
+    conn.commit()
+    conn.close()
+
+    # Send verification email
+    verification_link = f"{app.config['APP_URL']}/auth/verify/{verification_token}"
+    from services.email_sender import send_verification_email
+    try:
+        success, message = send_verification_email(email, name, verification_link)
+        if success:
+            app.logger.info(f"Verification email resent to {email}")
+            flash("Verification email sent! Check your inbox.", "success")
+        else:
+            app.logger.warning(f"Failed to resend verification email: {message}")
+            flash("Failed to send email. Please try again later.", "error")
+    except Exception as e:
+        app.logger.error(f"Error sending verification email: {e}")
+        flash("Failed to send email. Please try again later.", "error")
+
+    return redirect("/")
+
+
 @app.route("/auth/recovery-codes")
 @login_required
 def show_recovery_codes():
@@ -553,7 +748,8 @@ def borrower_portal(token):
         SELECT l.id, l.borrower, l.amount, l.date_borrowed, l.date_due,
                l.note, l.repayment_amount, l.repayment_frequency,
                l.bank_name, l.borrower_email,
-               COALESCE(SUM(at.amount), 0) as amount_repaid
+               COALESCE(SUM(at.amount), 0) as amount_repaid,
+               l.borrower_notifications_enabled
         FROM loans l
         LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.borrower_access_token = ?
@@ -567,7 +763,7 @@ def borrower_portal(token):
         return render_template("borrower_portal_error.html"), 404
 
     # Unpack loan data
-    loan_id, borrower, amount, date_borrowed, date_due, note, repayment_amount, repayment_frequency, bank_name, borrower_email, amount_repaid = loan_data
+    loan_id, borrower, amount, date_borrowed, date_due, note, repayment_amount, repayment_frequency, bank_name, borrower_email, amount_repaid, notifications_enabled = loan_data
 
     # Calculate outstanding balance
     outstanding = amount - amount_repaid
@@ -596,10 +792,48 @@ def borrower_portal(token):
         'bank_name': bank_name,
         'borrower_email': borrower_email,
         'amount_repaid': amount_repaid,
-        'outstanding': outstanding
+        'outstanding': outstanding,
+        'notifications_enabled': notifications_enabled
     }
 
-    return render_template("borrower_portal.html", loan=loan, transactions=transactions)
+    return render_template("borrower_portal.html", loan=loan, transactions=transactions, token=token)
+
+
+@app.route("/borrower/<token>/notifications", methods=["POST"])
+def borrower_toggle_notifications(token):
+    """Toggle email notifications for borrower."""
+    if not token:
+        flash("Invalid access link", "error")
+        return redirect("/")
+
+    action = request.form.get("action")  # 'enable' or 'disable'
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Find loan by access token
+    c.execute("SELECT id, borrower FROM loans WHERE borrower_access_token = ?", (token,))
+    loan_data = c.fetchone()
+
+    if not loan_data:
+        conn.close()
+        flash("Invalid or expired access link", "error")
+        return redirect("/")
+
+    loan_id, borrower = loan_data
+
+    # Update notification preference
+    if action == "disable":
+        c.execute("UPDATE loans SET borrower_notifications_enabled = 0 WHERE id = ?", (loan_id,))
+        flash("Email notifications disabled. You can still view your loan anytime via this portal.", "success")
+    elif action == "enable":
+        c.execute("UPDATE loans SET borrower_notifications_enabled = 1 WHERE id = ?", (loan_id,))
+        flash("Email notifications enabled. You'll receive updates when payments are recorded.", "success")
+
+    conn.commit()
+    conn.close()
+
+    return redirect(f"/borrower/{token}")
 
 
 @app.route("/loan/<int:loan_id>/send-invite", methods=["GET", "POST"])
@@ -682,6 +916,14 @@ def index():
         repayment_amount = request.form.get("repayment_amount")
         repayment_frequency = request.form.get("repayment_frequency")
         loan_type = request.form.get("loan_type", "lending")  # Default to lending
+        onboarding = request.form.get("onboarding")  # Check if this is during onboarding
+
+        # Check if user needs to verify email before creating more loans
+        if not is_email_verified():
+            loan_count = get_unverified_loan_count()
+            if loan_count >= 2:
+                flash("Please verify your email to create more loans. Check your inbox for the verification link.", "error")
+                return redirect("/")
 
         if borrower and amount:
             conn = sqlite3.connect(get_db_path())
@@ -701,6 +943,11 @@ def index():
                   loan_type))
             conn.commit()
             conn.close()
+
+        # If this was during onboarding, redirect to complete onboarding
+        if onboarding == "1":
+            return redirect("/onboarding?step=complete")
+
         return redirect("/")
 
     conn = sqlite3.connect(get_db_path())
@@ -718,9 +965,12 @@ def index():
     """, (get_current_user_id(),))
 
     loans = c.fetchall()
+
+    # Get email verification status
+    email_verified = is_email_verified()
     conn.close()
 
-    return render_template("index.html", loans=loans, app_url=app.config['APP_URL'])
+    return render_template("index.html", loans=loans, app_url=app.config['APP_URL'], email_verified=email_verified)
 
 
 @app.route("/repay/<int:loan_id>", methods=["POST"])
@@ -735,7 +985,7 @@ def repay(loan_id):
         # Get loan details with current repaid amount
         c.execute("""
             SELECT l.id, l.borrower, l.borrower_email, l.borrower_access_token, l.amount,
-                   COALESCE(SUM(at.amount), 0) as current_repaid
+                   COALESCE(SUM(at.amount), 0) as current_repaid, l.borrower_notifications_enabled
             FROM loans l
             LEFT JOIN applied_transactions at ON l.id = at.loan_id
             WHERE l.id = ? AND l.user_id = ?
@@ -744,7 +994,7 @@ def repay(loan_id):
         loan_details = c.fetchone()
 
         if loan_details:
-            loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid = loan_details
+            loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid, notifications_enabled = loan_details
             payment_amount = float(repayment_amount)
 
             # Record manual repayment as applied transaction
@@ -757,8 +1007,8 @@ def repay(loan_id):
             # Calculate new balance
             new_balance = loan_amount - (current_repaid + payment_amount)
 
-            # Send email notification if borrower has email and access token
-            if borrower_email and access_token:
+            # Send email notification if borrower has email, access token, and notifications enabled
+            if borrower_email and access_token and notifications_enabled:
                 portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
                 lender_name = session.get('user_name') or session.get('user_email', 'Your lender')
 
@@ -968,6 +1218,301 @@ def export_loan_transactions(loan_id):
     return response
 
 
+@app.route("/onboarding")
+@login_required
+def onboarding():
+    """Onboarding flow for new users."""
+    # Check if already completed
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT onboarding_completed FROM users WHERE id = ?", (get_current_user_id(),))
+    user = c.fetchone()
+    conn.close()
+
+    if user and user[0]:
+        # Already completed onboarding
+        return redirect("/")
+
+    # Get current step from query param
+    step = request.args.get('step', '1')
+
+    if step == '1':
+        # Step 1: Welcome + verify email
+        return render_template("onboarding_step1.html",
+                             email=session.get('user_email'))
+    elif step == '2':
+        # Step 2: Create first loan
+        return render_template("onboarding_step2.html")
+    elif step == 'complete':
+        # Mark onboarding as complete
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+        c.execute("UPDATE users SET onboarding_completed = 1 WHERE id = ?",
+                 (get_current_user_id(),))
+        conn.commit()
+        conn.close()
+
+        flash("Welcome to LendifyMe! 🎉", "success")
+        return redirect("/")
+
+    return redirect("/onboarding?step=1")
+
+
+@app.route("/onboarding/update-email", methods=["POST"])
+@login_required
+def onboarding_update_email():
+    """Update email during onboarding."""
+    new_email = request.form.get("email", "").strip()
+
+    if not new_email:
+        flash("Email is required", "error")
+        return redirect("/onboarding?step=1")
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Check if new email is already taken
+    c.execute("SELECT id FROM users WHERE email = ? AND id != ?",
+             (new_email, get_current_user_id()))
+    if c.fetchone():
+        flash("That email is already in use", "error")
+        conn.close()
+        return redirect("/onboarding?step=1")
+
+    # Update email
+    c.execute("UPDATE users SET email = ? WHERE id = ?",
+             (new_email, get_current_user_id()))
+    conn.commit()
+    conn.close()
+
+    # Update session
+    session['user_email'] = new_email
+
+    flash("Email updated!", "success")
+    return redirect("/onboarding?step=1")
+
+
+@app.route("/settings")
+@login_required
+def settings():
+    """Settings hub page."""
+    return render_template("settings.html")
+
+
+@app.route("/settings/recovery-codes", methods=["GET", "POST"])
+@login_required
+def settings_recovery_codes():
+    """View and manage recovery codes."""
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    c.execute("SELECT recovery_codes, password_hash FROM users WHERE id = ?", (get_current_user_id(),))
+    user = c.fetchone()
+    conn.close()
+
+    if not user:
+        flash("User not found", "error")
+        return redirect("/")
+
+    recovery_codes_json, password_hash = user
+    has_codes = recovery_codes_json and recovery_codes_json != '[]'
+    has_password = password_hash is not None
+
+    if request.method == "POST":
+        action = request.form.get("action")
+
+        if action == "generate":
+            # Generate new recovery codes
+            password = request.form.get("password", "").strip() if has_password else None
+
+            # Verify password if user has one
+            if has_password:
+                if not password:
+                    flash("Password is required to generate new recovery codes", "error")
+                    return render_template("settings_recovery_codes.html",
+                                         has_codes=has_codes, has_password=has_password)
+
+                from werkzeug.security import check_password_hash
+                if not check_password_hash(password_hash, password):
+                    flash("Incorrect password", "error")
+                    return render_template("settings_recovery_codes.html",
+                                         has_codes=has_codes, has_password=has_password)
+
+            # Generate new codes
+            from services.auth_helpers import generate_recovery_codes
+            plain_codes, hashed_codes_json = generate_recovery_codes()
+
+            # Save to database
+            conn = sqlite3.connect(get_db_path())
+            c = conn.cursor()
+            c.execute("UPDATE users SET recovery_codes = ? WHERE id = ?",
+                     (hashed_codes_json, get_current_user_id()))
+            conn.commit()
+            conn.close()
+
+            flash("New recovery codes generated! Save them in a secure place.", "success")
+            return render_template("settings_recovery_codes.html",
+                                 has_codes=True,
+                                 has_password=has_password,
+                                 new_codes=plain_codes)
+
+    # GET request
+    return render_template("settings_recovery_codes.html",
+                         has_codes=has_codes,
+                         has_password=has_password)
+
+
+@app.route("/settings/password", methods=["GET", "POST"])
+@login_required
+def settings_password():
+    """Manage account password - add, change, or remove."""
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "").strip()
+        new_password = request.form.get("new_password", "").strip()
+        confirm_password = request.form.get("confirm_password", "").strip()
+        action = request.form.get("action")  # 'add', 'change', or 'remove'
+
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+
+        c.execute("SELECT password_hash FROM users WHERE id = ?", (get_current_user_id(),))
+        user = c.fetchone()
+
+        if not user:
+            flash("User not found", "error")
+            conn.close()
+            return redirect("/")
+
+        has_password = user[0] is not None
+
+        if action == "add":
+            # Adding password for the first time
+            if has_password:
+                flash("You already have a password. Use 'Change Password' instead.", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            if not new_password:
+                flash("Password is required", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            if len(new_password) < 8:
+                flash("Password must be at least 8 characters", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            if new_password != confirm_password:
+                flash("Passwords do not match", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            from werkzeug.security import generate_password_hash
+            password_hash = generate_password_hash(new_password)
+
+            c.execute("""
+                UPDATE users
+                SET password_hash = ?, auth_provider = 'password'
+                WHERE id = ?
+            """, (password_hash, get_current_user_id()))
+            conn.commit()
+            conn.close()
+
+            flash("Password added successfully! You can now use it to sign in.", "success")
+            return redirect("/settings/password")
+
+        elif action == "change":
+            # Changing existing password
+            if not has_password:
+                flash("You don't have a password yet. Use 'Add Password' instead.", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            if not current_password:
+                flash("Current password is required", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            # Verify current password
+            from werkzeug.security import check_password_hash
+            if not check_password_hash(user[0], current_password):
+                flash("Current password is incorrect", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            if not new_password:
+                flash("New password is required", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            if len(new_password) < 8:
+                flash("New password must be at least 8 characters", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            if new_password != confirm_password:
+                flash("New passwords do not match", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            from werkzeug.security import generate_password_hash
+            password_hash = generate_password_hash(new_password)
+
+            c.execute("""
+                UPDATE users
+                SET password_hash = ?
+                WHERE id = ?
+            """, (password_hash, get_current_user_id()))
+            conn.commit()
+            conn.close()
+
+            flash("Password changed successfully!", "success")
+            return redirect("/settings/password")
+
+        elif action == "remove":
+            # Remove password (go back to magic link only)
+            if not has_password:
+                flash("You don't have a password to remove.", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            if not current_password:
+                flash("Current password is required to remove it", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            # Verify current password
+            from werkzeug.security import check_password_hash
+            if not check_password_hash(user[0], current_password):
+                flash("Current password is incorrect", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password)
+
+            c.execute("""
+                UPDATE users
+                SET password_hash = NULL, auth_provider = 'magic_link'
+                WHERE id = ?
+            """, (get_current_user_id(),))
+            conn.commit()
+            conn.close()
+
+            flash("Password removed. You'll now use magic links to sign in.", "success")
+            return redirect("/settings/password")
+
+        conn.close()
+
+    # GET request - show form
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT password_hash FROM users WHERE id = ?", (get_current_user_id(),))
+    user = c.fetchone()
+    conn.close()
+
+    has_password = user and user[0] is not None
+
+    return render_template("settings_password.html", has_password=has_password)
+
+
 @app.route("/settings/banks")
 @login_required
 def settings_banks():
@@ -983,6 +1528,11 @@ def settings_banks():
 @login_required
 def settings_banks_add():
     """Show available bank connectors to add."""
+    # Require email verification for bank connections
+    if not is_email_verified():
+        flash("Please verify your email to connect bank accounts. Check your inbox for the verification link.", "error")
+        return redirect("/settings/banks")
+
     from services.connectors.registry import ConnectorRegistry
 
     connectors = ConnectorRegistry.get_all_connector_info()
@@ -1129,6 +1679,11 @@ def settings_banks_delete(connection_id):
 @app.route("/match", methods=["GET", "POST"])
 @login_required
 def match_transactions():
+    # Require email verification for transaction matching
+    if not is_email_verified():
+        flash("Please verify your email to use transaction matching. Check your inbox for the verification link.", "error")
+        return redirect("/")
+
     if request.method == "POST":
         import_source = request.form.get("import_source", "csv")
         connector = None
@@ -1399,7 +1954,7 @@ def apply_match():
                 # Verify loan ownership and get loan details
                 c.execute("""
                     SELECT l.id, l.borrower, l.borrower_email, l.borrower_access_token, l.amount,
-                           COALESCE(SUM(at.amount), 0) as current_repaid, l.loan_type
+                           COALESCE(SUM(at.amount), 0) as current_repaid, l.loan_type, l.borrower_notifications_enabled
                     FROM loans l
                     LEFT JOIN applied_transactions at ON l.id = at.loan_id
                     WHERE l.id = ? AND l.user_id = ?
@@ -1408,7 +1963,7 @@ def apply_match():
                 loan_details = c.fetchone()
 
                 if loan_details:
-                    loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid, loan_type = loan_details
+                    loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid, loan_type, notifications_enabled = loan_details
 
                     # For borrowing loans, transactions are negative (outgoing), but we store as positive repayments
                     # For lending loans, transactions are already positive (incoming)
@@ -1434,8 +1989,8 @@ def apply_match():
                     # Calculate new balance after this payment (using absolute value)
                     new_balance = loan_amount - (current_repaid + amount_to_store)
 
-                    # Send email notification if borrower has email and access token
-                    if borrower_email and access_token:
+                    # Send email notification if borrower has email, access token, and notifications enabled
+                    if borrower_email and access_token and notifications_enabled:
                         portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
                         lender_name = session.get('user_name') or session.get('user_email', 'Your lender')
 

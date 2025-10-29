@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome to LendifyMe</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            margin: 0;
+        }
+        .onboarding-container {
+            background: white;
+            padding: 3rem;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            max-width: 600px;
+            width: 100%;
+        }
+        .progress-bar {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+        }
+        .progress-step {
+            flex: 1;
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+        }
+        .progress-step.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+        .logo h1 {
+            font-size: 2.5rem;
+            margin: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        h2 {
+            font-size: 1.75rem;
+            margin: 0 0 0.5rem 0;
+            color: #333;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+        .email-display {
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .email-text {
+            font-size: 1.1rem;
+            color: #333;
+            font-weight: 500;
+        }
+        .email-icon {
+            font-size: 1.5rem;
+        }
+        .edit-email-link {
+            color: #007bff;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        .edit-email-link:hover {
+            text-decoration: underline;
+        }
+        .edit-form {
+            display: none;
+            margin-top: 1rem;
+        }
+        .edit-form.active {
+            display: block;
+        }
+        input[type="email"] {
+            width: 100%;
+            padding: 0.875rem;
+            font-size: 1rem;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
+        }
+        input[type="email"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+        }
+        .btn {
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 100%;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+            font-size: 0.9rem;
+            padding: 0.5rem 1rem;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
+        }
+        .info-box p {
+            margin: 0;
+            color: #004085;
+            font-size: 0.95rem;
+        }
+        .form-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="onboarding-container">
+        <div class="progress-bar">
+            <div class="progress-step active"></div>
+            <div class="progress-step"></div>
+        </div>
+
+        <div class="logo">
+            <h1>👋</h1>
+        </div>
+
+        <h2>Welcome to LendifyMe!</h2>
+        <p class="subtitle">Let's make sure we have your email right</p>
+
+        <div class="info-box">
+            <p>📧 We'll use this email to send you important updates about your loans</p>
+        </div>
+
+        <div class="email-display">
+            <div>
+                <div style="color: #666; font-size: 0.85rem; margin-bottom: 0.25rem;">Your Email</div>
+                <div class="email-text" id="email-display">{{ email }}</div>
+            </div>
+            <a href="#" class="edit-email-link" onclick="toggleEdit(); return false;">Edit</a>
+        </div>
+
+        <div class="edit-form" id="edit-form">
+            <form method="post" action="/onboarding/update-email">
+                <input type="email" name="email" value="{{ email }}" required autofocus>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-secondary">Save</button>
+                    <button type="button" class="btn btn-secondary" onclick="toggleEdit()">Cancel</button>
+                </div>
+            </form>
+        </div>
+
+        <a href="/onboarding?step=2" class="btn btn-primary">
+            Looks Good! Continue →
+        </a>
+    </div>
+
+    <script>
+        function toggleEdit() {
+            const form = document.getElementById('edit-form');
+            form.classList.toggle('active');
+        }
+    </script>
+</body>
+</html>

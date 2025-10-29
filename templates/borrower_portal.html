@@ -234,6 +234,29 @@ tr:hover {
         </div>
     {% endif %}
 
+    <h2>Notification Preferences</h2>
+    <div class="info-section">
+        {% if loan.notifications_enabled %}
+            <p><span class="info-label">Email Notifications:</span> <strong style="color: #28a745;">Enabled</strong></p>
+            <p style="color: #6c757d; font-size: 0.9rem; margin-bottom: 1rem;">You'll receive email updates when payments are recorded on this loan.</p>
+            <form method="post" action="/borrower/{{ token }}/notifications" style="margin: 0;">
+                <input type="hidden" name="action" value="disable">
+                <button type="submit" style="background: #dc3545; color: white; padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    🔕 Disable Email Notifications
+                </button>
+            </form>
+        {% else %}
+            <p><span class="info-label">Email Notifications:</span> <strong style="color: #6c757d;">Disabled</strong></p>
+            <p style="color: #6c757d; font-size: 0.9rem; margin-bottom: 1rem;">You can still view your loan anytime via this portal, but you won't receive email updates.</p>
+            <form method="post" action="/borrower/{{ token }}/notifications" style="margin: 0;">
+                <input type="hidden" name="action" value="enable">
+                <button type="submit" style="background: #28a745; color: white; padding: 0.5rem 1rem; border: none; border-radius: 6px; cursor: pointer; font-weight: 600;">
+                    🔔 Enable Email Notifications
+                </button>
+            </form>
+        {% endif %}
+    </div>
+
     <div class="footer">
         <p>This is your private loan status page. Keep this link secure.</p>
         <p>Questions? Contact the person who sent you this link.</p>

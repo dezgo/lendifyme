@@ -96,3 +96,21 @@ def is_magic_link_expired(expires_at: str) -> bool:
     """Check if magic link has expired."""
     expiry = datetime.fromisoformat(expires_at)
     return datetime.now() > expiry
+
+
+def generate_verification_token() -> str:
+    """Generate a secure token for email verification."""
+    return secrets.token_urlsafe(32)
+
+
+def get_verification_expiry(hours: int = 24) -> str:
+    """Get expiry timestamp for verification token (24 hours default)."""
+    expiry = datetime.now() + timedelta(hours=hours)
+    return expiry.isoformat()
+
+
+def is_verification_expired(sent_at: str, hours: int = 24) -> bool:
+    """Check if verification token has expired."""
+    sent = datetime.fromisoformat(sent_at)
+    expiry = sent + timedelta(hours=hours)
+    return datetime.now() > expiry

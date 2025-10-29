@@ -146,12 +146,16 @@
         <form method="post">
             <label>Email Address</label>
             <input type="email" name="email" placeholder="your@email.com" required autofocus>
-            <button type="submit">Send Magic Link</button>
+
+            <label>Password (Optional)</label>
+            <input type="password" name="password" placeholder="Leave blank for magic link">
+
+            <button type="submit">Sign In</button>
         </form>
 
         <div class="magic-info">
-            🔐 We'll send a secure link to your email<br>
-            No password needed - just click the link!
+            🔐 <strong>Two ways to sign in:</strong><br>
+            Enter your password for instant access, or leave it blank to receive a magic link by email
         </div>
 
         <div class="recovery-link">

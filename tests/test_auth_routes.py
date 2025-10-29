@@ -153,7 +153,7 @@ class TestLoginRoute:
 
         assert response.status_code == 200
         assert b'Welcome back!' in response.data
-        assert b'Send Magic Link' in response.data
+        assert b'Password (Optional)' in response.data
 
     def test_login_page_has_links(self, client):
         """Test that login page has all necessary links."""

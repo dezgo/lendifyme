@@ -303,9 +303,14 @@ Loan Summary:
 View your full payment history and loan details:
 {portal_link}
 
+To stop receiving these email notifications, visit your portal and update your preferences.
+
 ---
 LendifyMe - Simple Loan Tracking
 """
+
+    # Extract token from portal_link for unsubscribe functionality
+    token = portal_link.split('/borrower/')[-1] if '/borrower/' in portal_link else ''
 
     # Calculate percentage paid
     percent_paid = ((original_amount - new_balance) / original_amount) * 100 if original_amount > 0 else 0
@@ -381,8 +386,12 @@ LendifyMe - Simple Loan Tracking
 
         <hr style="border: none; border-top: 1px solid #dee2e6; margin: 20px 0;">
 
-        <p style="color: #6c757d; font-size: 12px; margin-bottom: 0;">
+        <p style="color: #6c757d; font-size: 12px; margin-bottom: 10px;">
             Questions about this payment? Contact {lender_name} directly.
+        </p>
+
+        <p style="color: #999; font-size: 11px; text-align: center; margin: 10px 0 0 0;">
+            Don't want these emails? <a href="{portal_link}" style="color: #667eea; text-decoration: none;">Visit your portal</a> to disable notifications.
         </p>
     </div>
 </body>
@@ -440,6 +449,125 @@ LendifyMe - Simple Loan Tracking
         current_app.extensions['mail'].send(msg)
         logger.info(f"✅ Payment notification sent via SMTP to {to_email}")
         return True, "Payment notification sent successfully via SMTP"
+
+    except Exception as e:
+        logger.error(f"Failed to send email via SMTP: {str(e)}")
+        return False, f"Failed to send email: {str(e)}"
+
+
+def send_verification_email(recipient_email: str, recipient_name: Optional[str], verification_link: str) -> tuple[bool, str]:
+    """
+    Send an email verification link to confirm the user's email address.
+
+    Returns:
+        tuple: (success: bool, message: str)
+    """
+    mailgun_api_key = os.getenv('MAILGUN_API_KEY')
+    mailgun_domain = os.getenv('MAILGUN_DOMAIN')
+    sender_email = os.getenv('MAIL_DEFAULT_SENDER', f'postmaster@{mailgun_domain}')
+    sender_name = os.getenv('MAIL_SENDER_NAME', 'LendifyMe')
+
+    subject = "Verify Your Email - LendifyMe"
+
+    text_body = f"""Hi {recipient_name or 'there'},
+
+Welcome to LendifyMe! Please verify your email address by clicking the link below:
+
+{verification_link}
+
+This link will expire in 24 hours.
+
+Verifying your email helps us ensure account security and allows you to use all features of LendifyMe.
+
+If you didn't create an account with LendifyMe, you can safely ignore this email.
+
+---
+LendifyMe
+"""
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6;">
+    <div style="background: #f8f9fa; padding: 30px; border-radius: 8px;">
+        <h1 style="color: #667eea; margin-top: 0;">Welcome to LendifyMe!</h1>
+        <p>Hi {recipient_name or 'there'},</p>
+        <p>Thanks for signing up! Please verify your email address to unlock all features and keep your account secure.</p>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{verification_link}" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 14px 32px; text-decoration: none; border-radius: 8px; display: inline-block; font-weight: bold;">
+                Verify Email Address
+            </a>
+        </div>
+
+        <p style="color: #6c757d; font-size: 14px;">This link will expire in 24 hours.</p>
+        <p style="color: #6c757d; font-size: 14px;">If you didn't create an account with LendifyMe, you can safely ignore this email.</p>
+
+        <hr style="border: none; border-top: 1px solid #dee2e6; margin: 20px 0;">
+        <p style="color: #6c757d; font-size: 12px; margin-bottom: 0;">
+            If the button doesn't work, copy and paste this link into your browser:<br>
+            <a href="{verification_link}" style="color: #667eea; word-break: break-all;">{verification_link}</a>
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+    # Try Mailgun first
+    if mailgun_api_key and mailgun_domain:
+        logger.info(f"📧 Sending verification email via Mailgun API to {recipient_email}")
+
+        try:
+            response = requests.post(
+                f"https://api.mailgun.net/v3/{mailgun_domain}/messages",
+                auth=("api", mailgun_api_key),
+                data={
+                    "from": f"{sender_name} <{sender_email}>",
+                    "to": f"{recipient_name or recipient_email} <{recipient_email}>",
+                    "subject": subject,
+                    "text": text_body,
+                    "html": html_body
+                },
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                logger.info(f"✅ Verification email sent to {recipient_email}")
+                return True, "Verification email sent successfully"
+            else:
+                error_msg = f"Mailgun API error: {response.status_code} - {response.text}"
+                logger.error(f"❌ Mailgun error: {error_msg}")
+                return False, error_msg
+
+        except requests.exceptions.Timeout:
+            logger.error("Email request timed out")
+            return False, "Email request timed out"
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Mailgun request exception: {str(e)}")
+            return False, f"Failed to send email: {str(e)}"
+
+    # Fallback to SMTP
+    logger.info("Mailgun not configured, attempting SMTP...")
+
+    try:
+        from flask import current_app
+        from flask_mail import Message
+
+        msg = Message(
+            subject=subject,
+            sender=(sender_name, sender_email),
+            recipients=[recipient_email],
+            body=text_body,
+            html=html_body
+        )
+
+        current_app.extensions['mail'].send(msg)
+        logger.info(f"✅ Verification email sent via SMTP to {recipient_email}")
+        return True, "Verification email sent successfully via SMTP"
 
     except Exception as e:
         logger.error(f"Failed to send email via SMTP: {str(e)}")

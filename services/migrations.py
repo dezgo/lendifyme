@@ -163,6 +163,58 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 16:
+        try:
+            migrate_v16_add_password_hash(conn)
+            _set_user_version(conn, 16)
+            conn.commit()
+            print("✅ Migration v16 applied.")
+        except Exception as e:
+            print(f"❌ Migration v16 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
+    if current < 17:
+        try:
+            migrate_v17_add_onboarding_completed(conn)
+            _set_user_version(conn, 17)
+            conn.commit()
+            print("✅ Migration v17 applied.")
+        except Exception as e:
+            print(f"❌ Migration v17 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
+    if current < 18:
+        try:
+            migrate_v18_add_email_verification(conn)
+            _set_user_version(conn, 18)
+            conn.commit()
+            print("✅ Migration v18 applied.")
+        except Exception as e:
+            print(f"❌ Migration v18 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
+    if current < 19:
+        try:
+            migrate_v19_add_borrower_notification_preference(conn)
+            _set_user_version(conn, 19)
+            conn.commit()
+            print("✅ Migration v19 applied.")
+        except Exception as e:
+            print(f"❌ Migration v19 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -623,3 +675,83 @@ def migrate_v15_create_bank_connections(conn):
 
     conn.commit()
     print("  Bank connections table created successfully.")
+
+
+def migrate_v16_add_password_hash(conn):
+    """
+    Add password_hash column to users table for optional password authentication.
+    Allows users to choose between magic link (passwordless) or password auth.
+    """
+    c = conn.cursor()
+
+    # Check if password_hash column already exists
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'password_hash' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN password_hash TEXT")
+        print("  Added password_hash column to users table.")
+    else:
+        print("  password_hash column already exists.")
+
+    conn.commit()
+
+
+def migrate_v17_add_onboarding_completed(conn):
+    """
+    Add onboarding_completed column to track if user has completed initial setup.
+    Enables streamlined onboarding flow for new users.
+    """
+    c = conn.cursor()
+
+    # Check if column already exists
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'onboarding_completed' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN onboarding_completed BOOLEAN DEFAULT 0")
+        # Mark existing users as having completed onboarding
+        c.execute("UPDATE users SET onboarding_completed = 1")
+        print("  Added onboarding_completed column to users table.")
+
+
+def migrate_v18_add_email_verification(conn):
+    """
+    Add email verification columns to prevent spam accounts.
+    Unverified users will have restricted functionality until they verify their email.
+    """
+    c = conn.cursor()
+
+    # Check which columns already exist
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'email_verified' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT 0")
+        # Mark existing users as verified (grandfather them in)
+        c.execute("UPDATE users SET email_verified = 1")
+        print("  Added email_verified column to users table.")
+
+    if 'verification_token' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN verification_token TEXT")
+        print("  Added verification_token column to users table.")
+
+    if 'verification_sent_at' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN verification_sent_at TEXT")
+        print("  Added verification_sent_at column to users table.")
+
+
+def migrate_v19_add_borrower_notification_preference(conn):
+    """
+    Add borrower notification preference to allow borrowers to opt out of email notifications.
+    They can still access the borrower portal even if notifications are disabled.
+    """
+    c = conn.cursor()
+
+    # Check if column already exists
+    c.execute("PRAGMA table_info(loans)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'borrower_notifications_enabled' not in columns:
+        c.execute("ALTER TABLE loans ADD COLUMN borrower_notifications_enabled BOOLEAN DEFAULT 1")
+        print("  Added borrower_notifications_enabled column to loans table.")

@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Your First Loan – LendifyMe</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            margin: 0;
+        }
+        .onboarding-container {
+            background: white;
+            padding: 3rem;
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+            max-width: 600px;
+            width: 100%;
+        }
+        .progress-bar {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+        }
+        .progress-step {
+            flex: 1;
+            height: 4px;
+            background: #e9ecef;
+            border-radius: 2px;
+        }
+        .progress-step.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+        .logo h1 {
+            font-size: 2.5rem;
+            margin: 0;
+        }
+        h2 {
+            font-size: 1.75rem;
+            margin: 0 0 0.5rem 0;
+            color: #333;
+        }
+        .subtitle {
+            color: #666;
+            margin-bottom: 2rem;
+            font-size: 1.1rem;
+        }
+        .info-box {
+            background: #e7f3ff;
+            border-left: 4px solid #007bff;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
+        }
+        .info-box p {
+            margin: 0;
+            color: #004085;
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+        form {
+            margin-bottom: 1.5rem;
+        }
+        .form-group {
+            margin-bottom: 1.25rem;
+        }
+        label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: #333;
+        }
+        input[type="text"],
+        input[type="number"],
+        input[type="date"] {
+            width: 100%;
+            padding: 0.875rem;
+            font-size: 1rem;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+        }
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+        }
+        .helper-text {
+            font-size: 0.85rem;
+            color: #666;
+            margin-top: 0.25rem;
+        }
+        .btn {
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-block;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 100%;
+        }
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        }
+        .skip-link {
+            text-align: center;
+            margin-top: 1rem;
+        }
+        .skip-link a {
+            color: #666;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        .skip-link a:hover {
+            color: #333;
+            text-decoration: underline;
+        }
+        .example-box {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+        }
+        .example-box h4 {
+            margin: 0 0 0.5rem 0;
+            color: #666;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .example-box p {
+            margin: 0.25rem 0;
+            color: #333;
+            font-size: 0.95rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="onboarding-container">
+        <div class="progress-bar">
+            <div class="progress-step active"></div>
+            <div class="progress-step active"></div>
+        </div>
+
+        <div class="logo">
+            <h1>💰</h1>
+        </div>
+
+        <h2>Track Your First Loan</h2>
+        <p class="subtitle">Let's add a loan so you can see how easy it is</p>
+
+        <div class="info-box">
+            <p><strong>Example:</strong> "I lent my friend Alice $50 on Jan 15th, and she'll pay me back $25 every week."</p>
+        </div>
+
+        <form method="post" action="/">
+            <div class="form-group">
+                <label for="borrower">Who borrowed money?</label>
+                <input type="text" id="borrower" name="borrower" placeholder="e.g., Alice, Bob, Friend's name" required autofocus>
+            </div>
+
+            <div class="form-group">
+                <label for="amount">How much? ($)</label>
+                <input type="number" id="amount" name="amount" step="0.01" placeholder="e.g., 50.00" required>
+            </div>
+
+            <div class="form-group">
+                <label for="date_borrowed">When did you lend it?</label>
+                <input type="date" id="date_borrowed" name="date_borrowed" required>
+            </div>
+
+            <div class="form-group">
+                <label for="repayment_amount">Expected repayment amount (Optional)</label>
+                <input type="number" id="repayment_amount" name="repayment_amount" step="0.01" placeholder="e.g., 25.00">
+                <p class="helper-text">How much do you expect to receive each time?</p>
+            </div>
+
+            <input type="hidden" name="onboarding" value="1">
+
+            <button type="submit" class="btn btn-primary">
+                Create My First Loan 🎉
+            </button>
+        </form>
+
+        <div class="skip-link">
+            <a href="/onboarding?step=complete">Skip for now - I'll add loans later</a>
+        </div>
+    </div>
+
+    <script>
+        // Set today's date as default
+        document.getElementById('date_borrowed').valueAsDate = new Date();
+    </script>
+</body>
+</html>
