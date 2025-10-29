@@ -215,6 +215,32 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 20:
+        try:
+            migrate_v20_create_events_table(conn)
+            _set_user_version(conn, 20)
+            conn.commit()
+            print("✅ Migration v20 applied.")
+        except Exception as e:
+            print(f"❌ Migration v20 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
+    if current < 21:
+        try:
+            migrate_v21_add_user_roles(conn)
+            _set_user_version(conn, 21)
+            conn.commit()
+            print("✅ Migration v21 applied.")
+        except Exception as e:
+            print(f"❌ Migration v21 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -755,3 +781,64 @@ def migrate_v19_add_borrower_notification_preference(conn):
     if 'borrower_notifications_enabled' not in columns:
         c.execute("ALTER TABLE loans ADD COLUMN borrower_notifications_enabled BOOLEAN DEFAULT 1")
         print("  Added borrower_notifications_enabled column to loans table.")
+
+
+def migrate_v20_create_events_table(conn):
+    """
+    Create events table for analytics and usage tracking.
+    Tracks key user actions for metrics like DAU/WAU/MAU, retention, and conversion funnels.
+    """
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_name TEXT NOT NULL,
+            user_id INTEGER,
+            session_id TEXT,
+            event_data TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    """)
+
+    # Create indexes for fast analytics queries
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_events_event_name
+        ON events(event_name)
+    """)
+
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_events_user_id
+        ON events(user_id)
+    """)
+
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_events_created_at
+        ON events(created_at)
+    """)
+
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_events_user_date
+        ON events(user_id, created_at)
+    """)
+
+    print("  Created events table with indexes for analytics.")
+
+
+def migrate_v21_add_user_roles(conn):
+    """
+    Add role column to users table for role-based access control.
+    Roles: 'user' (default), 'admin' (full access including analytics).
+    """
+    c = conn.cursor()
+
+    # Check if column already exists
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'role' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+        # Make the first user an admin (usually the person deploying)
+        c.execute("UPDATE users SET role = 'admin' WHERE id = 1")
+        print("  Added role column to users table. First user set as admin.")

@@ -183,9 +183,41 @@ def login_required(f):
     return decorated_function
 
 
+def admin_required(f):
+    """Decorator to require admin role for routes."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            flash("Please log in to access this page.", "error")
+            return redirect(url_for('login', next=request.url))
+
+        # Check if user is admin
+        if not is_user_admin():
+            flash("Access denied. Admin privileges required.", "error")
+            return redirect(url_for('index'))
+
+        return f(*args, **kwargs)
+    return decorated_function
+
+
 def get_current_user_id():
     """Get the current logged-in user's ID from session."""
     return session.get('user_id')
+
+
+def is_user_admin():
+    """Check if current user has admin role."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return False
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+    result = c.fetchone()
+    conn.close()
+
+    return result and result[0] == 'admin'
 
 
 def is_email_verified():
@@ -221,6 +253,41 @@ def get_unverified_loan_count():
 def generate_borrower_access_token():
     """Generate a secure random token for borrower access."""
     return secrets.token_urlsafe(32)
+
+
+def log_event(event_name, user_id=None, event_data=None):
+    """
+    Log an analytics event to the database.
+
+    Args:
+        event_name: Name of the event (e.g., 'user_signed_up', 'loan_created')
+        user_id: Optional user ID (defaults to current user if logged in)
+        event_data: Optional dict with additional context (stored as JSON)
+    """
+    try:
+        import json
+
+        # Use current user if not specified
+        if user_id is None:
+            user_id = get_current_user_id()
+
+        # Get session ID if available
+        session_id = session.get('_id', None)
+
+        # Convert event_data to JSON if provided
+        event_data_json = json.dumps(event_data) if event_data else None
+
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+        c.execute("""
+            INSERT INTO events (event_name, user_id, session_id, event_data)
+            VALUES (?, ?, ?, ?)
+        """, (event_name, user_id, session_id, event_data_json))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        # Don't let analytics failures break the app
+        app.logger.error(f"Failed to log event {event_name}: {e}")
 
 
 @app.before_request
@@ -277,6 +344,9 @@ def register():
 
         user_id = c.lastrowid
         conn.close()
+
+        # Log analytics event
+        log_event('user_signed_up', user_id=user_id, event_data={'email': email})
 
         # Send verification email
         verification_link = f"{app.config['APP_URL']}/auth/verify/{verification_token}"
@@ -346,11 +416,18 @@ def login():
             from werkzeug.security import check_password_hash
             if check_password_hash(password_hash, password):
                 # Password correct - log in
+                # Get user role
+                c.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+                role_row = c.fetchone()
+                user_role = role_row[0] if role_row else 'user'
+
                 session['user_id'] = user_id
                 session['user_email'] = user_email
                 session['user_name'] = user_name
+                session['is_admin'] = (user_role == 'admin')
                 conn.close()
                 app.logger.info(f"Password login successful for {user_email}")
+                log_event('login_success', user_id=user_id, event_data={'method': 'password'})
                 flash("Welcome back!", "success")
                 return redirect("/")
             else:
@@ -490,7 +567,7 @@ def magic_link_auth(token):
     c = conn.cursor()
 
     c.execute("""
-        SELECT ml.id, ml.user_id, ml.expires_at, ml.used, u.email, u.name
+        SELECT ml.id, ml.user_id, ml.expires_at, ml.used, u.email, u.name, u.role
         FROM magic_links ml
         JOIN users u ON ml.user_id = u.id
         WHERE ml.token = ?
@@ -503,7 +580,7 @@ def magic_link_auth(token):
         conn.close()
         return redirect(url_for('login'))
 
-    link_id, user_id, expires_at, used, user_email, user_name = result
+    link_id, user_id, expires_at, used, user_email, user_name, user_role = result
 
     # Check if already used
     if used:
@@ -526,6 +603,9 @@ def magic_link_auth(token):
     session['user_id'] = user_id
     session['user_email'] = user_email
     session['user_name'] = user_name
+    session['is_admin'] = (user_role == 'admin')
+
+    log_event('login_success', user_id=user_id, event_data={'method': 'magic_link'})
 
     flash(f"Welcome back, {user_name or user_email}!", "success")
     return redirect(url_for('index'))
@@ -941,8 +1021,12 @@ def index():
                   get_current_user_id(),
                   access_token,
                   loan_type))
+            loan_id = c.lastrowid
             conn.commit()
             conn.close()
+
+            # Log analytics event
+            log_event('loan_created', event_data={'loan_type': loan_type, 'amount': float(amount)})
 
         # If this was during onboarding, redirect to complete onboarding
         if onboarding == "1":
@@ -1007,6 +1091,9 @@ def repay(loan_id):
             # Calculate new balance
             new_balance = loan_amount - (current_repaid + payment_amount)
 
+            # Log analytics event
+            log_event('payment_recorded', event_data={'loan_id': loan_id, 'amount': payment_amount})
+
             # Send email notification if borrower has email, access token, and notifications enabled
             if borrower_email and access_token and notifications_enabled:
                 portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
@@ -1065,6 +1152,10 @@ def edit_loan(loan_id):
                   loan_id, get_current_user_id()))
             conn.commit()
             conn.close()
+
+            # Log analytics event
+            log_event('loan_updated', event_data={'loan_id': loan_id})
+
             flash("Loan updated successfully", "success")
 
         return redirect("/")
@@ -1099,6 +1190,9 @@ def delete_loan(loan_id):
     c.execute("DELETE FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
     conn.commit()
     conn.close()
+
+    # Log analytics event
+    log_event('loan_deleted', event_data={'loan_id': loan_id})
 
     flash("Loan deleted successfully", "success")
     return redirect("/")
@@ -1587,11 +1681,13 @@ def settings_banks_configure(connector_type):
         try:
             connector = ConnectorRegistry.create_connector(connector_type, **credentials)
             if not connector or not connector.test_connection():
+                log_event('bank_link_started', event_data={'connector_type': connector_type, 'success': False})
                 flash("Connection test failed. Please check your credentials.", "error")
                 return render_template("settings_banks_configure.html",
                                      connector_type=connector_type,
                                      connector_info=connector_info)
         except Exception as e:
+            log_event('bank_link_started', event_data={'connector_type': connector_type, 'success': False})
             flash(f"Connection test failed: {str(e)}", "error")
             return render_template("settings_banks_configure.html",
                                  connector_type=connector_type,
@@ -1615,6 +1711,9 @@ def settings_banks_configure(connector_type):
 
         conn.commit()
         conn.close()
+
+        # Log analytics event
+        log_event('bank_link_success', event_data={'connector_type': connector_type})
 
         flash(f"Successfully connected to {connector_info['name']}!", "success")
         return redirect("/settings/banks")
@@ -1685,6 +1784,8 @@ def match_transactions():
         return redirect("/")
 
     if request.method == "POST":
+        from datetime import datetime, timedelta
+
         import_source = request.form.get("import_source", "csv")
         connector = None
         transactions = []
@@ -1989,6 +2090,9 @@ def apply_match():
                     # Calculate new balance after this payment (using absolute value)
                     new_balance = loan_amount - (current_repaid + amount_to_store)
 
+                    # Log analytics event
+                    log_event('transaction_matched', event_data={'loan_id': loan_id, 'amount': amount_to_store})
+
                     # Send email notification if borrower has email, access token, and notifications enabled
                     if borrower_email and access_token and notifications_enabled:
                         portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
@@ -2122,6 +2226,140 @@ def remove_transaction(transaction_id):
         return redirect(f"/loan/{loan_id}/transactions")
     else:
         return redirect("/")
+
+
+@app.route("/analytics")
+@admin_required
+def analytics():
+    """Analytics dashboard showing usage metrics. Admin only."""
+    from datetime import datetime, timedelta
+    import json
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Date calculations
+    today = datetime.now().date()
+    week_ago = today - timedelta(days=7)
+    month_ago = today - timedelta(days=30)
+
+    metrics = {}
+
+    # Total users
+    c.execute("SELECT COUNT(*) FROM users")
+    metrics['total_users'] = c.fetchone()[0]
+
+    # New signups (last 7 days, last 30 days)
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'user_signed_up' AND created_at >= date('now', '-7 days')")
+    metrics['new_users_7d'] = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'user_signed_up' AND created_at >= date('now', '-30 days')")
+    metrics['new_users_30d'] = c.fetchone()[0]
+
+    # DAU (Daily Active Users) - users with any event today
+    c.execute("""
+        SELECT COUNT(DISTINCT user_id)
+        FROM events
+        WHERE date(created_at) = date('now')
+    """)
+    metrics['dau'] = c.fetchone()[0]
+
+    # WAU (Weekly Active Users)
+    c.execute("""
+        SELECT COUNT(DISTINCT user_id)
+        FROM events
+        WHERE created_at >= date('now', '-7 days')
+    """)
+    metrics['wau'] = c.fetchone()[0]
+
+    # MAU (Monthly Active Users)
+    c.execute("""
+        SELECT COUNT(DISTINCT user_id)
+        FROM events
+        WHERE created_at >= date('now', '-30 days')
+    """)
+    metrics['mau'] = c.fetchone()[0]
+
+    # Total loans created
+    c.execute("SELECT COUNT(*) FROM loans")
+    metrics['total_loans'] = c.fetchone()[0]
+
+    # Loans created (last 7 days, last 30 days)
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'loan_created' AND created_at >= date('now', '-7 days')")
+    metrics['loans_7d'] = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'loan_created' AND created_at >= date('now', '-30 days')")
+    metrics['loans_30d'] = c.fetchone()[0]
+
+    # Bank link funnel
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'bank_link_started' AND created_at >= date('now', '-30 days')")
+    bank_started = c.fetchone()[0]
+
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'bank_link_success' AND created_at >= date('now', '-30 days')")
+    bank_success = c.fetchone()[0]
+
+    metrics['bank_link_started'] = bank_started
+    metrics['bank_link_success'] = bank_success
+    metrics['bank_link_conversion'] = (bank_success / bank_started * 100) if bank_started > 0 else 0
+
+    # Retention: users active this week who were also active last week
+    c.execute("""
+        SELECT COUNT(DISTINCT e1.user_id)
+        FROM events e1
+        WHERE e1.created_at >= date('now', '-7 days')
+          AND e1.user_id IN (
+              SELECT DISTINCT user_id
+              FROM events
+              WHERE created_at >= date('now', '-14 days')
+                AND created_at < date('now', '-7 days')
+          )
+    """)
+    retained_users = c.fetchone()[0]
+
+    c.execute("""
+        SELECT COUNT(DISTINCT user_id)
+        FROM events
+        WHERE created_at >= date('now', '-14 days')
+          AND created_at < date('now', '-7 days')
+    """)
+    previous_week_users = c.fetchone()[0]
+
+    metrics['retention_rate'] = (retained_users / previous_week_users * 100) if previous_week_users > 0 else 0
+
+    # Recent events (last 20)
+    c.execute("""
+        SELECT e.event_name, e.created_at, u.email, e.event_data
+        FROM events e
+        LEFT JOIN users u ON e.user_id = u.id
+        ORDER BY e.created_at DESC
+        LIMIT 20
+    """)
+    recent_events = []
+    for row in c.fetchall():
+        event_name, created_at, email, event_data = row
+        recent_events.append({
+            'event_name': event_name,
+            'created_at': created_at,
+            'user_email': email if email else 'Anonymous',
+            'event_data': json.loads(event_data) if event_data else {}
+        })
+
+    # Event counts by type (last 30 days)
+    c.execute("""
+        SELECT event_name, COUNT(*) as count
+        FROM events
+        WHERE created_at >= date('now', '-30 days')
+        GROUP BY event_name
+        ORDER BY count DESC
+    """)
+    event_counts = c.fetchall()
+
+    conn.close()
+
+    return render_template("analytics.html",
+                         metrics=metrics,
+                         recent_events=recent_events,
+                         event_counts=event_counts)
 
 
 if __name__ == "__main__":
