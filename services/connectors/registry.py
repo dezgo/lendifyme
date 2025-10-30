@@ -5,7 +5,7 @@ from typing import Dict, Type, Optional, List
 from .base import BankConnector
 from .up_bank import UpBankConnector
 from .csv_connector import CSVConnector
-from ..encryption import encrypt_credentials, decrypt_credentials
+from ..encryption import encrypt_credentials, decrypt_credentials, decrypt_credentials_with_password
 
 
 class ConnectorRegistry:
@@ -142,7 +142,8 @@ class ConnectorRegistry:
         return info
 
     @classmethod
-    def create_from_connection(cls, db_path: str, connection_id: int, user_id: int) -> Optional[BankConnector]:
+    def create_from_connection(cls, db_path: str, connection_id: int, user_id: int,
+                              user_password: Optional[str] = None) -> Optional[BankConnector]:
         """
         Create a connector instance from a stored bank connection.
 
@@ -150,6 +151,7 @@ class ConnectorRegistry:
             db_path: Path to database
             connection_id: Bank connection ID
             user_id: User ID (for security check)
+            user_password: User's password for zero-knowledge decryption (required)
 
         Returns:
             Connector instance or None if not found/unauthorized
@@ -157,10 +159,12 @@ class ConnectorRegistry:
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
+        # Get connection and user's encryption salt
         c.execute("""
-            SELECT connector_type, credentials_encrypted, is_active
-            FROM bank_connections
-            WHERE id = ? AND user_id = ?
+            SELECT bc.connector_type, bc.credentials_encrypted, bc.is_active, u.encryption_salt
+            FROM bank_connections bc
+            JOIN users u ON u.id = bc.user_id
+            WHERE bc.id = ? AND bc.user_id = ?
         """, (connection_id, user_id))
 
         result = c.fetchone()
@@ -169,11 +173,15 @@ class ConnectorRegistry:
         if not result or not result[2]:  # Check exists and is_active
             return None
 
-        connector_type, encrypted_creds, _ = result
+        connector_type, encrypted_creds, _, encryption_salt = result
+
+        if not user_password or not encryption_salt:
+            # Cannot decrypt without password
+            return None
 
         try:
-            # Decrypt credentials
-            credentials = decrypt_credentials(encrypted_creds)
+            # Decrypt credentials using password-based zero-knowledge encryption
+            credentials = decrypt_credentials_with_password(encrypted_creds, user_password, encryption_salt)
 
             # Create connector instance
             if connector_type == 'up_bank':

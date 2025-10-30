@@ -105,17 +105,37 @@ tr:hover {
     font-size: 0.85rem;
     color: #6c757d;
 }
-.btn-remove {
+.btn-remove, .btn-undo {
     padding: 0.25rem 0.5rem;
     font-size: 0.8rem;
-    background: #dc3545;
     color: white;
     border: none;
     border-radius: 3px;
     cursor: pointer;
+    margin-right: 0.25rem;
+}
+.btn-remove {
+    background: #dc3545;
 }
 .btn-remove:hover {
     background: #bb2d3b;
+}
+.btn-undo {
+    background: #ffc107;
+    color: #212529;
+}
+.btn-undo:hover {
+    background: #e0a800;
+}
+.auto-badge {
+    display: inline-block;
+    background: #e7f3ff;
+    color: #0056b3;
+    padding: 0.25rem 0.5rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
 }
 .action-toolbar {
     display: flex;
@@ -233,11 +253,21 @@ tr:hover {
                 {% for transaction in transactions %}
                     <tr>
                         <td class="transaction-date">{{ transaction[1]|format_date }}</td>
-                        <td>{{ transaction[2] }}</td>
+                        <td>
+                            {{ transaction[2] }}
+                            {% if transaction[5] %}
+                                <span class="auto-badge">Auto ({{ transaction[6]|int }}%)</span>
+                            {% endif %}
+                        </td>
                         <td class="amount">${{ '%.2f'|format(transaction[3]) }}</td>
                         <td class="applied-date">{{ transaction[4]|format_date }}</td>
                         <td>
-                            <form method="post" action="/remove-transaction/{{ transaction[0] }}" style="margin: 0;" onsubmit="return confirm('Are you sure you want to remove this transaction? This will reduce the repaid amount on the loan.');">
+                            {% if transaction[5] %}
+                                <form method="post" action="/match/undo/{{ transaction[0] }}" style="display: inline; margin: 0;" onsubmit="return confirm('Undo this auto-applied match? The transaction will be available to re-match.');">
+                                    <button type="submit" class="btn-undo">Undo</button>
+                                </form>
+                            {% endif %}
+                            <form method="post" action="/remove-transaction/{{ transaction[0] }}" style="display: inline; margin: 0;" onsubmit="return confirm('Are you sure you want to remove this transaction? This will reduce the repaid amount on the loan.');">
                                 <button type="submit" class="btn-remove">Remove</button>
                             </form>
                         </td>

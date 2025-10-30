@@ -53,6 +53,10 @@
 .btn-success:hover {
     background: #218838;
 }
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
 
 /* Summary Cards */
 .summary-grid {
@@ -228,6 +232,62 @@
 }
 .btn-invite:hover {
     background: #157347;
+}
+
+/* Sync Summary */
+.sync-summary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+.sync-summary-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.sync-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+}
+.sync-stat {
+    background: rgba(255,255,255,0.15);
+    border-radius: 6px;
+    padding: 1rem;
+}
+.sync-stat-value {
+    font-size: 1.75rem;
+    font-weight: bold;
+    margin-bottom: 0.25rem;
+}
+.sync-stat-label {
+    font-size: 0.85rem;
+    opacity: 0.9;
+}
+.sync-actions {
+    margin-top: 1rem;
+    display: flex;
+    gap: 0.75rem;
+}
+.sync-btn {
+    background: rgba(255,255,255,0.2);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: white;
+    padding: 0.5rem 1rem;
+    border-radius: 6px;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 600;
+    transition: all 0.2s;
+}
+.sync-btn:hover {
+    background: rgba(255,255,255,0.3);
 }
 
 /* Empty State */
@@ -435,8 +495,74 @@
             <span>+</span> Add New Loan
         </button>
         <a href="/match" class="btn btn-secondary">📊 Match Transactions</a>
+        {% if session.user_password %}
+        <form method="post" action="/sync-banks" style="margin: 0;" id="sync-form">
+            <button type="submit" class="btn btn-success" id="sync-btn">
+                <span id="sync-icon">🔄</span>
+                <span id="sync-text">Sync Banks</span>
+            </button>
+        </form>
+        {% endif %}
     </div>
 </div>
+
+<!-- Auto-Sync Summary (shown after login) -->
+{% if session.sync_results %}
+<div class="sync-summary">
+    <div class="sync-summary-title">
+        <span>🔄</span>
+        <span>Auto-Sync Summary</span>
+        <span style="font-size: 0.85rem; opacity: 0.8; margin-left: auto;">
+            {% if session.sync_results.new_transactions_found > 0 %}
+                {{ session.sync_results.new_transactions_found }} new transaction(s) found
+            {% else %}
+                No new transactions
+            {% endif %}
+        </span>
+    </div>
+
+    {% if session.sync_results.new_transactions_found > 0 or session.sync_results.auto_applied_count > 0 or session.sync_results.pending_review_count > 0 %}
+    <div class="sync-summary-grid">
+        {% if session.sync_results.auto_applied_count > 0 %}
+        <div class="sync-stat">
+            <div class="sync-stat-value">{{ session.sync_results.auto_applied_count }}</div>
+            <div class="sync-stat-label">Auto-Applied</div>
+        </div>
+        {% endif %}
+        {% if session.sync_results.pending_review_count > 0 %}
+        <div class="sync-stat">
+            <div class="sync-stat-value">{{ session.sync_results.pending_review_count }}</div>
+            <div class="sync-stat-label">Need Review</div>
+        </div>
+        {% endif %}
+        {% if session.sync_results.already_applied_count > 0 %}
+        <div class="sync-stat">
+            <div class="sync-stat-value">{{ session.sync_results.already_applied_count }}</div>
+            <div class="sync-stat-label">Already Applied</div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div style="font-size: 0.85rem; opacity: 0.9; margin-top: 1rem;">
+        {% for conn in session.sync_results.connection_details %}
+            <div style="margin-bottom: 0.5rem;">
+                <strong>{{ conn.name }}:</strong>
+                {{ conn.transactions_fetched }} transaction(s) checked since {{ conn.date_range }}
+                {% if conn.incoming_transactions > 0 %}
+                    ({{ conn.incoming_transactions }} incoming)
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+
+    {% if session.sync_results.pending_review_count > 0 %}
+    <div class="sync-actions">
+        <a href="/match/review-pending" class="sync-btn">Review Pending Matches</a>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
 
 {% if loans %}
     <!-- Summary Cards -->
@@ -694,6 +820,20 @@ document.getElementById('addLoanModal').addEventListener('click', function(e) {
         closeModal();
     }
 });
+
+// Sync button loading state
+const syncForm = document.getElementById('sync-form');
+if (syncForm) {
+    syncForm.addEventListener('submit', function() {
+        const btn = document.getElementById('sync-btn');
+        const icon = document.getElementById('sync-icon');
+        const text = document.getElementById('sync-text');
+
+        btn.disabled = true;
+        icon.style.animation = 'spin 1s linear infinite';
+        text.textContent = 'Syncing...';
+    });
+}
 
 // Close modal on Escape key
 document.addEventListener('keydown', function(e) {

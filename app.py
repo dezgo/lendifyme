@@ -583,9 +583,15 @@ def login():
                 session['user_email'] = user_email
                 session['user_name'] = user_name
                 session['is_admin'] = (user_role == 'admin')
+                # Store password in session for zero-knowledge encryption of bank credentials
+                session['user_password'] = password
                 conn.close()
                 app.logger.info(f"Password login successful for {user_email}")
                 log_event('login_success', user_id=user_id, event_data={'method': 'password'})
+
+                # Clear any old sync results
+                session.pop('sync_results', None)
+
                 flash("Welcome back!", "success")
                 return redirect("/")
             else:
@@ -1391,7 +1397,7 @@ def loan_transactions(loan_id):
 
     # Get all applied transactions for this loan
     c.execute("""
-        SELECT id, date, description, amount, applied_at
+        SELECT id, date, description, amount, applied_at, auto_applied, confidence_score
         FROM applied_transactions
         WHERE loan_id = ?
         ORDER BY date DESC
@@ -2145,6 +2151,8 @@ def settings_recovery_codes():
 @login_required
 def settings_password():
     """Manage account password - add, change, or remove."""
+    redirect_from = request.args.get('redirect')
+
     if request.method == "POST":
         current_password = request.form.get("current_password", "").strip()
         new_password = request.form.get("new_password", "").strip()
@@ -2169,35 +2177,86 @@ def settings_password():
             if has_password:
                 flash("You already have a password. Use 'Change Password' instead.", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             if not new_password:
                 flash("Password is required", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             if len(new_password) < 8:
                 flash("Password must be at least 8 characters", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             if new_password != confirm_password:
                 flash("Passwords do not match", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             from werkzeug.security import generate_password_hash
+            from services.encryption import generate_encryption_salt
+
             password_hash = generate_password_hash(new_password)
+
+            # Generate encryption salt for zero-knowledge encryption of bank credentials
+            encryption_salt = generate_encryption_salt()
 
             c.execute("""
                 UPDATE users
-                SET password_hash = ?, auth_provider = 'password'
+                SET password_hash = ?, auth_provider = 'password', encryption_salt = ?
                 WHERE id = ?
-            """, (password_hash, get_current_user_id()))
+            """, (password_hash, encryption_salt, get_current_user_id()))
             conn.commit()
             conn.close()
 
-            flash("Password added successfully! You can now use it to sign in.", "success")
+            # Store password in session for immediate bank connection setup
+            session['user_password'] = new_password
+
+            flash("Password added successfully! You can now connect your bank accounts.", "success")
+            redirect_to = request.args.get('redirect')
+            if redirect_to == 'banks':
+                return redirect("/settings/banks/add")
+            return redirect("/settings/password")
+
+        elif action == "upgrade":
+            # Upgrade existing password to enable bank encryption
+            if not has_password:
+                flash("You don't have a password yet. Use 'Add Password' instead.", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password, needs_upgrade=False, redirect_from=redirect_from)
+
+            if not new_password:
+                flash("Password is required", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password, needs_upgrade=True, redirect_from=redirect_from)
+
+            # Verify current password
+            from werkzeug.security import check_password_hash
+            if not check_password_hash(user[0], new_password):
+                flash("Password is incorrect", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password, needs_upgrade=True, redirect_from=redirect_from)
+
+            # Generate encryption salt
+            from services.encryption import generate_encryption_salt
+            encryption_salt = generate_encryption_salt()
+
+            c.execute("""
+                UPDATE users
+                SET encryption_salt = ?
+                WHERE id = ?
+            """, (encryption_salt, get_current_user_id()))
+            conn.commit()
+            conn.close()
+
+            # Store password in session
+            session['user_password'] = new_password
+
+            flash("Account upgraded! You can now connect your bank accounts.", "success")
+            redirect_to = request.args.get('redirect')
+            if redirect_to == 'banks':
+                return redirect("/settings/banks/add")
             return redirect("/settings/password")
 
         elif action == "change":
@@ -2205,34 +2264,34 @@ def settings_password():
             if not has_password:
                 flash("You don't have a password yet. Use 'Add Password' instead.", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             if not current_password:
                 flash("Current password is required", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             # Verify current password
             from werkzeug.security import check_password_hash
             if not check_password_hash(user[0], current_password):
                 flash("Current password is incorrect", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             if not new_password:
                 flash("New password is required", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             if len(new_password) < 8:
                 flash("New password must be at least 8 characters", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             if new_password != confirm_password:
                 flash("New passwords do not match", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             from werkzeug.security import generate_password_hash
             password_hash = generate_password_hash(new_password)
@@ -2253,19 +2312,19 @@ def settings_password():
             if not has_password:
                 flash("You don't have a password to remove.", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             if not current_password:
                 flash("Current password is required to remove it", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             # Verify current password
             from werkzeug.security import check_password_hash
             if not check_password_hash(user[0], current_password):
                 flash("Current password is incorrect", "error")
                 conn.close()
-                return render_template("settings_password.html", has_password=has_password)
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             c.execute("""
                 UPDATE users
@@ -2283,13 +2342,19 @@ def settings_password():
     # GET request - show form
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
-    c.execute("SELECT password_hash FROM users WHERE id = ?", (get_current_user_id(),))
+    c.execute("SELECT password_hash, encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
     user = c.fetchone()
     conn.close()
 
     has_password = user and user[0] is not None
+    has_encryption_salt = user and user[1] is not None
+    needs_upgrade = has_password and not has_encryption_salt
+    redirect_from = request.args.get('redirect')
 
-    return render_template("settings_password.html", has_password=has_password)
+    return render_template("settings_password.html",
+                         has_password=has_password,
+                         needs_upgrade=needs_upgrade,
+                         redirect_from=redirect_from)
 
 
 @app.route("/settings/banks")
@@ -2311,6 +2376,21 @@ def settings_banks_add():
     if not is_email_verified():
         flash("Please verify your email to connect bank accounts. Check your inbox for the verification link.", "error")
         return redirect("/settings/banks")
+
+    # Require password for zero-knowledge encryption
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT password_hash, encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
+    user = c.fetchone()
+    conn.close()
+
+    if not user or not user[0]:
+        flash("For security, bank credentials require password-based encryption. Please set up a password first.", "error")
+        return redirect("/settings/password?redirect=banks")
+
+    if not user[1]:  # Has password but no encryption salt
+        flash("Please upgrade your account to enable bank connections.", "error")
+        return redirect("/settings/password?redirect=banks")
 
     from services.connectors.registry import ConnectorRegistry
 
@@ -2378,17 +2458,36 @@ def settings_banks_configure(connector_type):
                                  connector_type=connector_type,
                                  connector_info=connector_info)
 
-        # Encrypt credentials
+        # Encrypt credentials using password-based zero-knowledge encryption
         try:
-            encrypted_creds = encrypt_credentials(credentials)
+            from services.encryption import encrypt_credentials_with_password
+
+            # Get user's password from session and salt from database
+            user_password = session.get('user_password')
+            if not user_password:
+                flash("Please log in with your password to connect bank accounts.", "error")
+                return redirect("/login")
+
+            conn = sqlite3.connect(get_db_path())
+            c = conn.cursor()
+            c.execute("SELECT encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
+            user = c.fetchone()
+
+            if not user or not user[0]:
+                flash("Encryption not set up. Please contact support.", "error")
+                conn.close()
+                return redirect("/settings/banks")
+
+            encryption_salt = user[0]
+            encrypted_creds = encrypt_credentials_with_password(credentials, user_password, encryption_salt)
+
         except Exception as e:
             flash(f"Failed to encrypt credentials: {str(e)}", "error")
+            if 'conn' in locals():
+                conn.close()
             return redirect("/settings/banks/add")
 
         # Save to database
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
-
         c.execute("""
             INSERT INTO bank_connections (user_id, connector_type, display_name, credentials_encrypted)
             VALUES (?, ?, ?, ?)
@@ -2414,14 +2513,21 @@ def settings_banks_test(connection_id):
     """Test a bank connection."""
     from services.connectors.registry import ConnectorRegistry
 
+    # Get user password from session (required for decryption)
+    user_password = session.get('user_password')
+    if not user_password:
+        flash("Please log in with your password to test bank connections.", "error")
+        return redirect("/login")
+
     connector = ConnectorRegistry.create_from_connection(
         get_db_path(),
         connection_id,
-        get_current_user_id()
+        get_current_user_id(),
+        user_password
     )
 
     if not connector:
-        flash("Connection not found", "error")
+        flash("Connection not found or credentials could not be decrypted", "error")
         return redirect("/settings/banks")
 
     try:
@@ -2432,6 +2538,40 @@ def settings_banks_test(connection_id):
     except Exception as e:
         flash(f"Connection test failed: {str(e)}", "error")
 
+    return redirect("/settings/banks")
+
+
+@app.route("/settings/banks/<int:connection_id>/reset-sync", methods=["POST"])
+@login_required
+def settings_banks_reset_sync(connection_id):
+    """Reset last_synced_at to force full re-sync on next login."""
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Verify ownership before resetting
+    c.execute("""
+        SELECT user_id FROM bank_connections
+        WHERE id = ?
+    """, (connection_id,))
+
+    result = c.fetchone()
+
+    if not result or result[0] != get_current_user_id():
+        flash("Connection not found", "error")
+        conn.close()
+        return redirect("/settings/banks")
+
+    # Reset last_synced_at
+    c.execute("""
+        UPDATE bank_connections
+        SET last_synced_at = NULL
+        WHERE id = ?
+    """, (connection_id,))
+
+    conn.commit()
+    conn.close()
+
+    flash("Sync history reset. Next login will perform a full re-sync from your oldest loan.", "success")
     return redirect("/settings/banks")
 
 
@@ -2502,14 +2642,21 @@ def match_transactions():
                     user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
                     return render_template("match_upload.html", user_connections=user_connections)
 
+                # Get user password from session (required for decryption)
+                user_password = session.get('user_password')
+                if not user_password:
+                    flash("Please log in with your password to sync bank transactions.", "error")
+                    return redirect("/login")
+
                 connector = ConnectorRegistry.create_from_connection(
                     get_db_path(),
                     connection_id,
-                    get_current_user_id()
+                    get_current_user_id(),
+                    user_password
                 )
 
                 if not connector:
-                    flash(f"Unable to connect to your bank. Please check your connection settings.", "error")
+                    flash(f"Unable to connect to your bank. Please check your connection settings or log in with your password.", "error")
                     user_connections = ConnectorRegistry.get_user_connections(get_db_path(), get_current_user_id())
                     return render_template("match_upload.html", user_connections=user_connections)
 
@@ -3057,6 +3204,193 @@ def analytics():
                          metrics=metrics,
                          recent_events=recent_events,
                          event_counts=event_counts)
+
+
+@app.route("/sync-banks", methods=["POST"])
+@login_required
+def sync_banks_now():
+    """Manually trigger bank sync."""
+    user_password = session.get('user_password')
+    if not user_password:
+        flash("Please log in with your password to sync bank transactions.", "error")
+        return redirect("/login")
+
+    try:
+        from services.auto_sync import sync_all_bank_connections
+        sync_results = sync_all_bank_connections(get_db_path(), get_current_user_id(), user_password)
+
+        # Store results in session for dashboard display
+        session['sync_results'] = {
+            'auto_applied_count': len(sync_results['auto_applied']),
+            'pending_review_count': len(sync_results['pending_review']),
+            'connections_synced': sync_results['connections_synced'],
+            'total_transactions_fetched': sync_results['total_transactions_fetched'],
+            'new_transactions_found': sync_results['new_transactions_found'],
+            'already_applied_count': sync_results['already_applied_count'],
+            'connection_details': sync_results['connection_details'],
+            'errors': sync_results['errors'],
+            'timestamp': datetime.now().isoformat()
+        }
+
+        # Store pending matches for review page
+        if sync_results['pending_review']:
+            session['pending_matches'] = [
+                {
+                    'transaction': t,  # Already a dict
+                    'loan': l,
+                    'confidence': c
+                }
+                for t, l, c in sync_results['pending_review']
+            ]
+
+        if sync_results['new_transactions_found'] > 0:
+            flash(f"Sync complete! Found {sync_results['new_transactions_found']} new transaction(s).", "success")
+        else:
+            flash("Sync complete. No new transactions found.", "info")
+
+        if sync_results['errors']:
+            for error in sync_results['errors']:
+                flash(error, "error")
+
+    except Exception as e:
+        app.logger.error(f"Manual sync failed: {str(e)}")
+        flash(f"Sync failed: {str(e)}", "error")
+
+    return redirect("/")
+
+
+@app.route("/match/review-pending")
+@login_required
+def review_pending_auto_matches():
+    """Review pending matches from auto-sync."""
+    pending_matches = session.get('pending_matches', [])
+
+    if not pending_matches:
+        flash("No pending matches to review.", "info")
+        return redirect("/")
+
+    return render_template("match_review_pending.html", matches=pending_matches)
+
+
+@app.route("/match/apply-pending", methods=["POST"])
+@login_required
+def apply_pending_match():
+    """Apply a pending match from auto-sync."""
+    match_index = int(request.form.get("match_index", -1))
+    pending_matches = session.get('pending_matches', [])
+
+    if match_index < 0 or match_index >= len(pending_matches):
+        flash("Invalid match.", "error")
+        return redirect("/match/review-pending")
+
+    match = pending_matches[match_index]
+    transaction = match['transaction']
+    loan = match['loan']
+    confidence = match['confidence']
+
+    # Apply the match
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    c.execute("""
+        INSERT INTO applied_transactions
+        (date, description, amount, loan_id, auto_applied, confidence_score)
+        VALUES (?, ?, ?, ?, 0, ?)
+    """, (transaction['date'], transaction['description'], transaction['amount'],
+          loan['id'], confidence))
+
+    conn.commit()
+    conn.close()
+
+    # Remove from pending list
+    pending_matches.pop(match_index)
+    session['pending_matches'] = pending_matches
+
+    flash(f"Applied ${transaction['amount']:.2f} payment to {loan['borrower']}'s loan.", "success")
+
+    if pending_matches:
+        return redirect("/match/review-pending")
+    else:
+        return redirect("/")
+
+
+@app.route("/match/reject-pending", methods=["POST"])
+@login_required
+def reject_pending_match():
+    """Reject a pending match from auto-sync."""
+    match_index = int(request.form.get("match_index", -1))
+    pending_matches = session.get('pending_matches', [])
+
+    if match_index < 0 or match_index >= len(pending_matches):
+        flash("Invalid match.", "error")
+        return redirect("/match/review-pending")
+
+    match = pending_matches[match_index]
+    transaction = match['transaction']
+    loan = match['loan']
+
+    # Record rejection
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    c.execute("""
+        INSERT INTO rejected_matches (date, description, amount, loan_id)
+        VALUES (?, ?, ?, ?)
+    """, (transaction['date'], transaction['description'], transaction['amount'], loan['id']))
+
+    conn.commit()
+    conn.close()
+
+    # Remove from pending list
+    pending_matches.pop(match_index)
+    session['pending_matches'] = pending_matches
+
+    flash("Match rejected.", "info")
+
+    if pending_matches:
+        return redirect("/match/review-pending")
+    else:
+        return redirect("/")
+
+
+@app.route("/match/undo/<int:transaction_id>", methods=["POST"])
+@login_required
+def undo_auto_match(transaction_id):
+    """Undo an auto-applied match."""
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Verify ownership and that it was auto-applied
+    c.execute("""
+        SELECT at.id, at.loan_id, at.amount, l.user_id
+        FROM applied_transactions at
+        JOIN loans l ON l.id = at.loan_id
+        WHERE at.id = ? AND at.auto_applied = 1
+    """, (transaction_id,))
+
+    result = c.fetchone()
+
+    if not result:
+        flash("Transaction not found or not eligible for undo.", "error")
+        conn.close()
+        return redirect("/")
+
+    trans_id, loan_id, amount, owner_id = result
+
+    if owner_id != get_current_user_id():
+        flash("Unauthorized", "error")
+        conn.close()
+        return redirect("/")
+
+    # Delete the applied transaction
+    c.execute("DELETE FROM applied_transactions WHERE id = ?", (transaction_id,))
+    conn.commit()
+    conn.close()
+
+    log_event('auto_match_undone', event_data={'transaction_id': transaction_id, 'loan_id': loan_id})
+
+    flash(f"Undid auto-applied payment of ${amount:.2f}. The transaction can be re-matched if needed.", "success")
+    return redirect("/")
 
 
 if __name__ == "__main__":

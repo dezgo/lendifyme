@@ -254,6 +254,32 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 23:
+        try:
+            migrate_v23_add_encryption_salt(conn)
+            _set_user_version(conn, 23)
+            conn.commit()
+            print("✅ Migration v23 applied.")
+        except Exception as e:
+            print(f"❌ Migration v23 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
+    if current < 24:
+        try:
+            migrate_v24_add_auto_match_tracking(conn)
+            _set_user_version(conn, 24)
+            conn.commit()
+            print("✅ Migration v24 applied.")
+        except Exception as e:
+            print(f"❌ Migration v24 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -1023,3 +1049,54 @@ def migrate_v22_add_subscriptions(conn):
             WHERE id IN (SELECT id FROM users)
         """)
         print(f"  Grandfathered {user_count} existing user(s) to Pro tier (lifetime free).")
+
+
+def migrate_v23_add_encryption_salt(conn):
+    """
+    Add encryption_salt to users table for zero-knowledge encryption.
+    This enables deriving encryption keys from user passwords instead of
+    storing a server-side key, ensuring server admins cannot access bank credentials.
+    """
+    c = conn.cursor()
+
+    # Check if column already exists
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'encryption_salt' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN encryption_salt TEXT")
+        print("  Added encryption_salt column to users table.")
+    else:
+        print("  encryption_salt column already exists.")
+
+
+def migrate_v24_add_auto_match_tracking(conn):
+    """
+    Add tracking fields to applied_transactions for auto-matching feature.
+    - auto_applied: Track which matches were automatically applied vs manually reviewed
+    - confidence_score: Store matching confidence (0-100) for transparency
+    - connection_id: Track which bank connection the transaction came from
+    """
+    c = conn.cursor()
+
+    # Check which columns already exist
+    c.execute("PRAGMA table_info(applied_transactions)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'auto_applied' not in columns:
+        c.execute("ALTER TABLE applied_transactions ADD COLUMN auto_applied BOOLEAN DEFAULT 0")
+        print("  Added auto_applied column to applied_transactions table.")
+
+    if 'confidence_score' not in columns:
+        c.execute("ALTER TABLE applied_transactions ADD COLUMN confidence_score REAL")
+        print("  Added confidence_score column to applied_transactions table.")
+
+    if 'connection_id' not in columns:
+        c.execute("ALTER TABLE applied_transactions ADD COLUMN connection_id INTEGER")
+        print("  Added connection_id column to applied_transactions table.")
+
+    # Create index for querying auto-applied transactions
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_applied_transactions_auto_applied
+        ON applied_transactions(auto_applied, applied_at)
+    """)
