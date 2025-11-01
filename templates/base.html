@@ -1,9 +1,48 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Basic -->
+    <title>{% block title %}LendifyMe — Simple, Smart Loan Tracking & Repayment Matching{% endblock %}</title>
+    <meta name="description" content="Track money you’ve lent or borrowed. Auto-match repayments from your bank, share borrower portals, and stay organized with LendifyMe. Free to start.">
+    <link rel="canonical" href="https://lendifyme.com/">
+
+    <!-- Open Graph (Facebook, LinkedIn) -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://lendifyme.com/">
+    <meta property="og:title" content="Track Your Loans, Effortlessly — LendifyMe">
+    <meta property="og:description" content="Track lending & borrowing, auto-match repayments, and share a borrower portal. Free to start.">
+    <meta property="og:image" content="https://lendifyme.com/static/og/og-image.jpg">
+
+    <!-- Twitter -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="Track Your Loans, Effortlessly — LendifyMe">
+    <meta name="twitter:description" content="Auto-match repayments from your bank. Lend & borrow tracking in one place.">
+    <meta name="twitter:image" content="https://lendifyme.com/static/og/og-image.jpg">
+
+    <!-- Icons -->
+    <link rel="icon" href="/favicon.ico">
+
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "LendifyMe",
+    "applicationCategory": "FinanceApplication",
+    "operatingSystem": "Web",
+    "url": "https://lendifyme.com/",
+    "description": "Track loans to friends and family, auto-match repayments, and share borrower portals.",
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "AUD" }
+    }
+    </script>
+
+    <!-- Performance/Indexing niceties -->
+    <meta name="robots" content="index,follow">
+    <link rel="preload" href="/static/css/app.css" as="style">
+    <link rel="preload" href="/static/js/app.js" as="script">
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}LendifyMe{% endblock %}</title>
     <style>
         * { box-sizing: border-box; }
         body {
