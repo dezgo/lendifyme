@@ -4,6 +4,7 @@ import sys
 import sqlite3
 import pytest
 
+
 # --- Ensure we're in test mode before importing the app ---
 os.environ.setdefault("FLASK_ENV", "test")
 

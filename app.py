@@ -21,16 +21,25 @@ from services.auth_helpers import (
     is_magic_link_expired
 )
 from services.email_sender import send_magic_link_email
+import os
+import logging
 import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 
 # Load environment variables from .env
 load_dotenv()
 
+ENV = os.environ.get("FLASK_ENV") or "production"
+
 sentry_sdk.init(
     dsn="https://930407a171aa9648e71bb8c75cf738b1@o4510260806352896.ingest.us.sentry.io/4510260812054528",
-    # Add data like request headers and IP for users,
-    # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
+    environment=ENV,          # ← This is the key bit
+    integrations=[
+        FlaskIntegration(),
+        LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+    ],
     send_default_pii=True,
 )
 
@@ -2409,6 +2418,76 @@ def admin_upgrade_user(user_id):
 
     log_event('admin_user_upgrade', event_data={'target_user_id': user_id, 'new_tier': new_tier})
     flash(f"Successfully updated {user_email} to {new_tier.title()} (manual override)", "success")
+
+    return redirect("/admin/users")
+
+
+@app.route("/admin/user/<int:user_id>/delete", methods=["POST"])
+@admin_required
+def admin_delete_user(user_id):
+    """Delete a user account and all associated data."""
+    current_user_id = get_current_user_id()
+
+    # Safety check: Can't delete yourself
+    if user_id == current_user_id:
+        flash("You cannot delete your own account.", "error")
+        return redirect("/admin/users")
+
+    conn = sqlite3.connect(get_db_path())
+    conn.execute("PRAGMA foreign_keys = ON")  # Enable foreign key constraints for CASCADE
+    c = conn.cursor()
+
+    # Check if user exists and get their info
+    c.execute("SELECT email, role FROM users WHERE id = ?", (user_id,))
+    user_result = c.fetchone()
+
+    if not user_result:
+        flash("User not found.", "error")
+        conn.close()
+        return redirect("/admin/users")
+
+    user_email, user_role = user_result
+
+    # Safety check: Don't delete the last admin
+    if user_role == 'admin':
+        c.execute("SELECT COUNT(*) FROM users WHERE role = 'admin'")
+        admin_count = c.fetchone()[0]
+
+        if admin_count <= 1:
+            flash("Cannot delete the last admin user.", "error")
+            conn.close()
+            return redirect("/admin/users")
+
+    # Manually delete related records (in case CASCADE isn't set up everywhere)
+    # Delete loans and their related data
+    c.execute("""
+        DELETE FROM applied_transactions
+        WHERE loan_id IN (SELECT id FROM loans WHERE user_id = ?)
+    """, (user_id,))
+
+    c.execute("""
+        DELETE FROM rejected_matches
+        WHERE loan_id IN (SELECT id FROM loans WHERE user_id = ?)
+    """, (user_id,))
+
+    c.execute("DELETE FROM loans WHERE user_id = ?", (user_id,))
+
+    # Delete other user-related data
+    c.execute("DELETE FROM bank_connections WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM pending_matches_data WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM passkeys WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM magic_links WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM user_subscriptions WHERE user_id = ?", (user_id,))
+    c.execute("DELETE FROM events WHERE user_id = ?", (user_id,))
+
+    # Finally delete the user
+    c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+    conn.commit()
+    conn.close()
+
+    log_event('admin_user_delete', event_data={'target_user_id': user_id, 'target_email': user_email})
+    flash(f"Successfully deleted user {user_email} and all associated data.", "success")
 
     return redirect("/admin/users")
 
