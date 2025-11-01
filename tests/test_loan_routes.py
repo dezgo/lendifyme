@@ -1,64 +1,14 @@
 import pytest
 import sqlite3
-from app import app as flask_app
 import json
 
 
 @pytest.fixture
-def app():
-    """Create test app with secret key."""
-    flask_app.config['TESTING'] = True
-    flask_app.config['SECRET_KEY'] = 'test-secret-key'
-    flask_app.config['APP_URL'] = 'http://localhost:5000'
-    return flask_app
-
-
-@pytest.fixture
-def client(app, tmpdir):
-    """Create test client with temporary database."""
-    db_path = str(tmpdir.join('test.db'))
-    app.config['DATABASE'] = db_path
-
-    with app.test_client() as client:
-        # Initialize database
-        conn = sqlite3.connect(db_path)
-        from services.migrations import run_migrations
-        run_migrations(conn)
-        conn.close()
-
-        yield client
-
-
-@pytest.fixture
-def logged_in_client(client, tmpdir):
-    """Create logged-in client with user session."""
-    db_path = tmpdir.join('test.db')
-    conn = sqlite3.connect(str(db_path))
-    c = conn.cursor()
-
-    # Create user
-    c.execute("""
-        INSERT INTO users (email, name, recovery_codes, created_at)
-        VALUES (?, ?, ?, datetime('now'))
-    """, ('test@example.com', 'Test User', '[]'))
-    user_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
-    # Set session
-    with client.session_transaction() as sess:
-        sess['user_id'] = user_id
-        sess['user_email'] = 'test@example.com'
-        sess['user_name'] = 'Test User'
-
-    yield client
-
-
-@pytest.fixture
-def client_with_loan(logged_in_client, tmpdir):
+def client_with_loan(app, logged_in_client):
     """Create logged-in client with a sample loan."""
-    db_path = tmpdir.join('test.db')
-    conn = sqlite3.connect(str(db_path))
+    # Use the app's configured database, not a separate tmpdir
+    db_path = app.config['DATABASE']
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
     # Get user_id
@@ -291,11 +241,11 @@ class TestLoanTransactions:
         assert b'Payment from Alice' in response.data
         assert b'50' in response.data
 
-    def test_export_transactions_csv(self, client_with_loan, tmpdir):
+    def test_export_transactions_csv(self, app, client_with_loan):
         """Test exporting transactions as CSV."""
         # Get loan ID
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
+        db_path = app.config['DATABASE']
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute("SELECT id FROM loans WHERE borrower = ?", ('Alice Smith',))
         loan_id = c.fetchone()[0]

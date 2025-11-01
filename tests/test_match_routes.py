@@ -1,63 +1,14 @@
 import pytest
 import sqlite3
 import json
-from app import app as flask_app
 
 
 @pytest.fixture
-def app():
-    """Create test app with secret key."""
-    flask_app.config['TESTING'] = True
-    flask_app.config['SECRET_KEY'] = 'test-secret-key'
-    return flask_app
-
-
-@pytest.fixture
-def client(app, tmpdir):
-    """Create test client with temporary database."""
-    db_path = str(tmpdir.join('test.db'))
-    app.config['DATABASE'] = db_path
-
-    with app.test_client() as client:
-        # Initialize database
-        conn = sqlite3.connect(db_path)
-        from services.migrations import run_migrations
-        run_migrations(conn)
-        conn.close()
-
-        yield client
-
-
-@pytest.fixture
-def logged_in_client(client, tmpdir):
-    """Create logged-in client with user session."""
-    db_path = tmpdir.join('test.db')
-    conn = sqlite3.connect(str(db_path))
-    c = conn.cursor()
-
-    # Create user
-    c.execute("""
-        INSERT INTO users (email, name, recovery_codes, created_at)
-        VALUES (?, ?, ?, datetime('now'))
-    """, ('test@example.com', 'Test User', '[]'))
-    user_id = c.lastrowid
-    conn.commit()
-    conn.close()
-
-    # Set session
-    with client.session_transaction() as sess:
-        sess['user_id'] = user_id
-        sess['user_email'] = 'test@example.com'
-        sess['user_name'] = 'Test User'
-
-    yield client
-
-
-@pytest.fixture
-def client_with_loan(logged_in_client, tmpdir):
+def client_with_loan(app, logged_in_client):
     """Create logged-in client with a sample loan."""
-    db_path = tmpdir.join('test.db')
-    conn = sqlite3.connect(str(db_path))
+    # Use the app's configured database, not a separate tmpdir
+    db_path = app.config['DATABASE']
+    conn = sqlite3.connect(db_path)
     c = conn.cursor()
 
     # Get user_id
@@ -107,7 +58,7 @@ class TestMatchSubmissionRoute:
 2025-10-15,Transfer from Alice,50.00"""
 
         response = client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -122,7 +73,7 @@ class TestMatchSubmissionRoute:
 2025-10-15,Coffee shop payment,3.47"""
 
         response = client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -135,7 +86,7 @@ class TestMatchSubmissionRoute:
         csv_data = """Date,Description,Amount"""
 
         response = client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -151,7 +102,7 @@ class TestMatchSubmissionRoute:
 2025-10-17,Transfer from Alice,50.00"""
 
         response = client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -162,22 +113,22 @@ class TestMatchSubmissionRoute:
 class TestApplyMatchRoute:
     """Test /apply-match POST route."""
 
-    def test_apply_match_updates_loan(self, client_with_loan, tmpdir):
+    def test_apply_match_updates_loan(self, app, client_with_loan):
         """Test that applying a match updates the loan."""
         # Submit transactions to create matches
         csv_data = """Date,Description,Amount
 2025-10-15,Transfer from Alice,50.00"""
 
         response = client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
         assert response.status_code == 200
 
         # Get the session key and load matches from database
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
+        db_path = app.config['DATABASE']
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
         with client_with_loan.session_transaction() as sess:
@@ -205,14 +156,14 @@ class TestApplyMatchRoute:
 
         assert amount_repaid == 50.00
 
-    def test_apply_match_invalid_id(self, client_with_loan, tmpdir):
+    def test_apply_match_invalid_id(self, client_with_loan):
         """Test applying match with invalid ID returns error."""
         # Create matches first
         csv_data = """Date,Description,Amount
 2025-10-15,Transfer from Alice,50.00"""
 
         client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -228,12 +179,12 @@ class TestApplyMatchRoute:
 class TestMatchWorkflow:
     """Test complete matching workflow integration."""
 
-    def test_full_workflow(self, logged_in_client, tmpdir):
+    def test_full_workflow(self, app, logged_in_client):
         """Test complete workflow: create loan, upload transactions, apply match."""
-        db_path = tmpdir.join('test.db')
+        db_path = app.config['DATABASE']
 
         # Get user_id
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
         user_id = c.fetchone()[0]
@@ -252,7 +203,7 @@ class TestMatchWorkflow:
 2025-10-15,Zelle from Bob Johnson,100.00"""
 
         response = logged_in_client.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -287,12 +238,12 @@ class TestMatchWorkflow:
 
         assert amount_repaid == 100.00
 
-    def test_multiple_matches_workflow(self, logged_in_client, tmpdir):
+    def test_multiple_matches_workflow(self, app, logged_in_client):
         """Test workflow with multiple loans and transactions."""
-        db_path = tmpdir.join('test.db')
+        db_path = app.config['DATABASE']
 
         # Get user_id
-        conn = sqlite3.connect(str(db_path))
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
         user_id = c.fetchone()[0]
@@ -315,7 +266,7 @@ class TestMatchWorkflow:
 2025-10-16,Payment Bob,100.00"""
 
         response = logged_in_client.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -344,7 +295,7 @@ class TestDateRangeFeature:
 2025-10-15,Transfer from Alice,50.00"""
 
         response = client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data,
             'date_range': '90'  # Should be ignored for CSV
         }, follow_redirects=True)
@@ -356,20 +307,20 @@ class TestDateRangeFeature:
 class TestRejectMatch:
     """Test /reject-match POST route."""
 
-    def test_reject_match_records_in_database(self, client_with_loan, tmpdir):
+    def test_reject_match_records_in_database(self, app, client_with_loan):
         """Test that rejecting a match records it in rejected_matches."""
         # Create matches first
         csv_data = """Date,Description,Amount
 2025-10-15,Transfer from Alice,50.00"""
 
         client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
         # Get the match_id
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
+        db_path = app.config['DATABASE']
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
 
         with client_with_loan.session_transaction() as sess:
@@ -423,7 +374,7 @@ class TestMatchReviewPage:
 2025-10-15,Transfer from Alice,50.00"""
 
         client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -438,11 +389,11 @@ class TestMatchReviewPage:
 class TestDuplicateTransactionPrevention:
     """Test that duplicate transactions are prevented."""
 
-    def test_applied_transaction_not_suggested_again(self, client_with_loan, tmpdir):
+    def test_applied_transaction_not_suggested_again(self, app, client_with_loan):
         """Test that already applied transactions are not suggested."""
         # Add an applied transaction
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
+        db_path = app.config['DATABASE']
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute("""
             INSERT INTO applied_transactions (loan_id, date, description, amount, applied_at)
@@ -456,7 +407,7 @@ class TestDuplicateTransactionPrevention:
 2025-10-15,Transfer from Alice,50.00"""
 
         response = client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 
@@ -464,11 +415,11 @@ class TestDuplicateTransactionPrevention:
         # Should redirect back to upload page with no matches message
         assert b'No pending matches' in response.data or b'Import transactions' in response.data
 
-    def test_rejected_transaction_not_suggested_for_same_loan(self, client_with_loan, tmpdir):
+    def test_rejected_transaction_not_suggested_for_same_loan(self, app, client_with_loan):
         """Test that rejected transactions are not suggested for the same loan."""
         # Add a rejected match
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
+        db_path = app.config['DATABASE']
+        conn = sqlite3.connect(db_path)
         c = conn.cursor()
         c.execute("""
             INSERT INTO rejected_matches (loan_id, date, description, amount, rejected_at)
@@ -482,7 +433,7 @@ class TestDuplicateTransactionPrevention:
 2025-10-15,Transfer from Alice,50.00"""
 
         response = client_with_loan.post('/match', data={
-            'connector_type': 'csv',
+            'import_source': 'csv',
             'transactions_csv': csv_data
         }, follow_redirects=True)
 

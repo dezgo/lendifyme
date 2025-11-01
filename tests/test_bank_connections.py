@@ -216,17 +216,31 @@ class TestConnectorRegistryUserConnections:
 
     def test_create_from_connection_success(self, app, client):
         """Test creating connector instance from stored connection."""
+        from services.encryption import generate_encryption_salt, encrypt_credentials_with_password
+
         with app.app_context():
             db_path = app.config['DATABASE']
 
             conn = sqlite3.connect(db_path)
             c = conn.cursor()
-            c.execute("INSERT INTO users (email, name, recovery_codes) VALUES (?, ?, ?)",
-                     ('test@example.com', 'Test User', '[]'))
+
+            # Generate encryption salt for password-based encryption
+            encryption_salt = generate_encryption_salt()
+
+            c.execute("INSERT INTO users (email, name, recovery_codes, encryption_salt) VALUES (?, ?, ?, ?)",
+                      ('test@example.com', 'Test User', '[]', encryption_salt))
             user_id = c.lastrowid
 
-            with patch.dict(os.environ, {'ENCRYPTION_KEY': 'ISO-GA14bRMefte-maLgDXga80SEn-M_Lz-MSLP5fhY='}):
-                encrypted_creds = encrypt_credentials({'api_key': 'up:yeah:test123'})
+            # ✅ ensure flags
+            c.execute("UPDATE users SET email_verified=1, onboarding_completed=1 WHERE id=?", (user_id,))
+
+            # Use password-based encryption for credentials
+            user_password = 'testpassword123'
+            encrypted_creds = encrypt_credentials_with_password(
+                {'api_key': 'up:yeah:test123'},
+                user_password,
+                encryption_salt
+            )
 
             c.execute("""
                 INSERT INTO bank_connections
@@ -237,11 +251,10 @@ class TestConnectorRegistryUserConnections:
             conn.commit()
             conn.close()
 
-            # Create connector from connection
-            with patch.dict(os.environ, {'ENCRYPTION_KEY': 'ISO-GA14bRMefte-maLgDXga80SEn-M_Lz-MSLP5fhY='}):
-                connector = ConnectorRegistry.create_from_connection(
-                    db_path, connection_id, user_id
-                )
+            # Create connector from connection with password
+            connector = ConnectorRegistry.create_from_connection(
+                db_path, connection_id, user_id, user_password
+            )
 
             assert connector is not None
             assert connector.connector_name == 'Up Bank'
@@ -438,8 +451,9 @@ class TestBankConnectionsRoutes:
                 conn = sqlite3.connect(db_path)
                 c = conn.cursor()
                 c.execute("INSERT INTO users (email, name, recovery_codes) VALUES (?, ?, ?)",
-                         ('user1@example.com', 'User 1', '[]'))
+                          ('user1@example.com', 'User 1', '[]'))
                 user1_id = c.lastrowid
+                c.execute("UPDATE users SET email_verified=1, onboarding_completed=1 WHERE id=?", (user1_id,))
 
                 # User 1 creates connection
                 encrypted_creds = encrypt_credentials({'api_key': 'test-key'})
@@ -475,32 +489,41 @@ class TestMatchRouteWithConnections:
 
     def test_match_page_shows_user_connections(self, logged_in_client, app, tmpdir):
         """Test that /match shows user's saved connections."""
+        from services.encryption import encrypt_credentials_with_password
+
         with app.app_context():
-            with patch.dict(os.environ, {'ENCRYPTION_KEY': 'ISO-GA14bRMefte-maLgDXga80SEn-M_Lz-MSLP5fhY='}):
-                db_path = app.config['DATABASE']
+            db_path = app.config['DATABASE']
 
-                # Get user_id from session
-                with logged_in_client.session_transaction() as sess:
-                    user_id = sess['user_id']
+            # Get user_id and password from session
+            with logged_in_client.session_transaction() as sess:
+                user_id = sess['user_id']
+                user_password = sess['user_password']
 
-                # Add a connection
-                conn = sqlite3.connect(db_path)
-                c = conn.cursor()
+            # Get user's encryption_salt
+            conn = sqlite3.connect(db_path)
+            c = conn.cursor()
+            c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
+            encryption_salt = c.fetchone()[0]
 
-                encrypted_creds = encrypt_credentials({'api_key': 'test-key'})
-                c.execute("""
-                    INSERT INTO bank_connections
-                    (user_id, connector_type, display_name, credentials_encrypted, is_active)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (user_id, 'up_bank', 'My Up Bank', encrypted_creds, 1))
-                conn.commit()
-                conn.close()
+            # Add a connection with password-based encryption
+            encrypted_creds = encrypt_credentials_with_password(
+                {'api_key': 'test-key'},
+                user_password,
+                encryption_salt
+            )
+            c.execute("""
+                INSERT INTO bank_connections
+                (user_id, connector_type, display_name, credentials_encrypted, is_active)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, 'up_bank', 'My Up Bank', encrypted_creds, 1))
+            conn.commit()
+            conn.close()
 
-                # Visit match page
-                response = logged_in_client.get('/match')
-                assert response.status_code == 200
-                assert b'My Up Bank' in response.data
-                assert b'Up Bank' in response.data
+            # Visit match page
+            response = logged_in_client.get('/match')
+            assert response.status_code == 200
+            assert b'My Up Bank' in response.data
+            assert b'Up Bank' in response.data
 
     def test_match_page_no_connections_shows_message(self, logged_in_client, app):
         """Test that /match shows helpful message when no connections."""
@@ -513,6 +536,8 @@ class TestMatchRouteWithConnections:
     @patch('services.connectors.up_bank.UpBankConnector.get_transactions')
     def test_match_with_user_connection(self, mock_get_trans, logged_in_client, app, tmpdir):
         """Test importing transactions using a user's saved connection."""
+        from services.encryption import encrypt_credentials_with_password
+
         # Mock transaction response
         mock_get_trans.return_value = [
             Transaction(
@@ -524,39 +549,46 @@ class TestMatchRouteWithConnections:
         ]
 
         with app.app_context():
-            with patch.dict(os.environ, {'ENCRYPTION_KEY': 'ISO-GA14bRMefte-maLgDXga80SEn-M_Lz-MSLP5fhY='}):
-                db_path = app.config['DATABASE']
+            db_path = app.config['DATABASE']
 
-                # Get user_id from session
-                with logged_in_client.session_transaction() as sess:
-                    user_id = sess['user_id']
+            # Get user_id and password from session
+            with logged_in_client.session_transaction() as sess:
+                user_id = sess['user_id']
+                user_password = sess['user_password']
 
-                # Create loan
-                logged_in_client.post('/', data={
-                    'borrower': 'Alice',
-                    'amount': '50',
-                    'date_borrowed': '2025-10-01'
-                })
+            # Create loan
+            logged_in_client.post('/', data={
+                'borrower': 'Alice',
+                'amount': '50',
+                'date_borrowed': '2025-10-01'
+            })
 
-                # Add bank connection
-                conn = sqlite3.connect(db_path)
-                c = conn.cursor()
+            # Get user's encryption_salt and add bank connection
+            conn = sqlite3.connect(db_path)
+            c = conn.cursor()
+            c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
+            encryption_salt = c.fetchone()[0]
 
-                encrypted_creds = encrypt_credentials({'api_key': 'up:yeah:validkey'})
-                c.execute("""
-                    INSERT INTO bank_connections
-                    (user_id, connector_type, display_name, credentials_encrypted, is_active)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (user_id, 'up_bank', 'My Up Bank', encrypted_creds, 1))
-                connection_id = c.lastrowid
-                conn.commit()
-                conn.close()
+            # Add bank connection with password-based encryption
+            encrypted_creds = encrypt_credentials_with_password(
+                {'api_key': 'up:yeah:validkey'},
+                user_password,
+                encryption_salt
+            )
+            c.execute("""
+                INSERT INTO bank_connections
+                (user_id, connector_type, display_name, credentials_encrypted, is_active)
+                VALUES (?, ?, ?, ?, ?)
+            """, (user_id, 'up_bank', 'My Up Bank', encrypted_creds, 1))
+            connection_id = c.lastrowid
+            conn.commit()
+            conn.close()
 
-                # Import transactions using the connection
-                response = logged_in_client.post('/match', data={
-                    'import_source': str(connection_id),
-                    'date_range': '30'
-                }, follow_redirects=True)
+            # Import transactions using the connection
+            response = logged_in_client.post('/match', data={
+                'import_source': str(connection_id),
+                'date_range': '30'
+            }, follow_redirects=True)
 
-                assert response.status_code == 200
-                assert b'Alice' in response.data  # Should see the match
+            assert response.status_code == 200
+            assert b'Alice' in response.data  # Should see the match

@@ -82,7 +82,7 @@ class TestRegisterRoute:
 
         assert response.status_code == 200
         assert b'Start tracking your loans today' in response.data
-        assert b'Create Account' in response.data
+        assert b'Get Started' in response.data
 
     def test_register_page_has_link_to_login(self, client):
         """Test that register page has link to login."""
@@ -94,13 +94,12 @@ class TestRegisterRoute:
     def test_successful_registration(self, client, tmpdir):
         """Test successful user registration."""
         response = client.post('/register', data={
-            'email': 'newuser@example.com',
-            'name': 'New User'
+            'email': 'newuser@example.com'
         }, follow_redirects=False)
 
         # Should redirect to recovery codes page
         assert response.status_code == 302
-        assert '/auth/recovery-codes' in response.location
+        assert '/onboarding' in response.location
 
         # Verify user was created
         db_path = tmpdir.join('test.db')
@@ -112,7 +111,6 @@ class TestRegisterRoute:
 
         assert user is not None
         assert user[0] == 'newuser@example.com'
-        assert user[1] == 'New User'
 
     def test_registration_without_name(self, client, tmpdir):
         """Test registration with only email (name optional)."""
