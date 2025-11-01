@@ -222,10 +222,15 @@ h1 {
                         <div class="event-name">{{ event.event_name }}</div>
                         <div class="event-user">{{ event.user_email }}</div>
                     </div>
-                    <div class="event-time">{{ event.created_at }}</div>
+                    <div class="event-time" data-timestamp="{{ event.created_at }}"></div>
                 </li>
             {% endfor %}
         </ul>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+// Update relative times every minute
+setInterval(window.convertTimestamps, 60000);
 {% endblock %}
