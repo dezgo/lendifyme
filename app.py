@@ -1,7 +1,5 @@
 import sqlite3
-import os
 import json
-import logging
 import secrets
 import time
 from logging.handlers import RotatingFileHandler
@@ -11,7 +9,7 @@ from services.transaction_matcher import match_transactions_to_loans
 from services.connectors.registry import ConnectorRegistry
 from services.connectors.csv_connector import CSVConnector
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, session, flash, url_for
+from flask import Flask, render_template, request, redirect, session, flash, url_for, send_from_directory
 from flask_mail import Mail, Message
 from functools import wraps
 from services.auth_helpers import (
@@ -3971,6 +3969,15 @@ def undo_auto_match(transaction_id):
 
     flash(f"Undid auto-applied payment of ${amount:.2f}. The transaction can be re-matched if needed.", "success")
     return redirect("/")
+
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(
+        os.path.join(app.root_path, 'static'),
+        'favicon.ico',
+        mimetype='image/vnd.microsoft.icon'
+    )
 
 
 if __name__ == "__main__":
