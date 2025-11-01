@@ -69,18 +69,19 @@ class TestDashboard:
 
         assert response.status_code == 200
 
-        # Verify loan was created
+        # Verify loan was created (data is now encrypted, so check encrypted columns)
         db_path = tmpdir.join('test.db')
         conn = sqlite3.connect(str(db_path))
         c = conn.cursor()
-        c.execute("SELECT borrower, amount, note FROM loans WHERE borrower = ?", ('Bob Jones',))
+        c.execute("SELECT id, borrower_encrypted, amount_encrypted, note_encrypted FROM loans ORDER BY id DESC LIMIT 1")
         loan = c.fetchone()
         conn.close()
 
         assert loan is not None
-        assert loan[0] == 'Bob Jones'
-        assert loan[1] == 250.00
-        assert loan[2] == 'Emergency loan'
+        # Verify encrypted fields exist (they should start with Fernet signature)
+        assert loan[1] is not None and loan[1].startswith('gAAAAA')  # borrower_encrypted
+        assert loan[2] is not None and loan[2].startswith('gAAAAA')  # amount_encrypted
+        assert loan[3] is not None and loan[3].startswith('gAAAAA')  # note_encrypted
 
     def test_dashboard_shows_summary_stats(self, client_with_loan):
         """Test that dashboard shows summary statistics."""

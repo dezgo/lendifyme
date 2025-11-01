@@ -191,3 +191,177 @@ def decrypt_credentials_with_password(encrypted_str: str, password: str, salt_b6
     f = Fernet(key)
     decrypted = f.decrypt(encrypted_str.encode())
     return json.loads(decrypted.decode())
+
+
+# ============================================================================
+# Envelope Encryption (for loan data)
+# ============================================================================
+
+def generate_dek() -> bytes:
+    """
+    Generate a Data Encryption Key (DEK) for envelope encryption.
+
+    This key is used to encrypt individual loan records. The DEK itself is then:
+    - Encrypted with the lender's password (for lender access)
+    - Embedded in the borrower access token (for borrower access)
+
+    Returns:
+        bytes: A 32-byte Fernet-compatible encryption key
+
+    Example:
+        >>> dek = generate_dek()
+        >>> len(dek)
+        44  # 32 bytes base64-encoded
+    """
+    return Fernet.generate_key()
+
+
+def create_token_from_dek(dek: bytes) -> str:
+    """
+    Create a borrower access token from a DEK.
+
+    The token is simply the DEK encoded as a URL-safe string. This allows
+    borrowers to decrypt their loan data using just the unguessable URL.
+
+    Args:
+        dek: The data encryption key (32 bytes)
+
+    Returns:
+        str: URL-safe token containing the DEK
+
+    Example:
+        >>> dek = generate_dek()
+        >>> token = create_token_from_dek(dek)
+        >>> len(token)
+        44  # Similar to old token length
+    """
+    return dek.decode('utf-8')  # DEK is already base64-urlsafe encoded
+
+
+def extract_dek_from_token(token: str) -> bytes:
+    """
+    Extract the DEK from a borrower access token.
+
+    Args:
+        token: The borrower access token from the URL
+
+    Returns:
+        bytes: The data encryption key
+
+    Raises:
+        ValueError: If token is invalid
+
+    Example:
+        >>> dek = generate_dek()
+        >>> token = create_token_from_dek(dek)
+        >>> extracted_dek = extract_dek_from_token(token)
+        >>> extracted_dek == dek
+        True
+    """
+    try:
+        return token.encode('utf-8')
+    except Exception as e:
+        raise ValueError(f"Invalid borrower access token: {e}")
+
+
+def encrypt_dek_with_password(dek: bytes, password: str, salt_b64: str) -> str:
+    """
+    Encrypt a DEK with the user's password for lender access.
+
+    This allows the lender to decrypt their loan data using their password,
+    while the borrower can decrypt using just the token.
+
+    Args:
+        dek: The data encryption key to encrypt
+        password: User's password
+        salt_b64: User's encryption salt from database
+
+    Returns:
+        str: Encrypted DEK safe for database storage
+
+    Example:
+        >>> dek = generate_dek()
+        >>> salt = generate_encryption_salt()
+        >>> encrypted = encrypt_dek_with_password(dek, "mypass", salt)
+    """
+    user_key = derive_key_from_password(password, salt_b64)
+    f = Fernet(user_key)
+    return f.encrypt(dek).decode()
+
+
+def decrypt_dek_with_password(encrypted_dek: str, password: str, salt_b64: str) -> bytes:
+    """
+    Decrypt a DEK using the user's password.
+
+    Args:
+        encrypted_dek: The encrypted DEK from database
+        password: User's password
+        salt_b64: User's encryption salt from database
+
+    Returns:
+        bytes: The decrypted data encryption key
+
+    Raises:
+        cryptography.fernet.InvalidToken: If password is wrong
+
+    Example:
+        >>> dek = generate_dek()
+        >>> salt = generate_encryption_salt()
+        >>> encrypted = encrypt_dek_with_password(dek, "mypass", salt)
+        >>> decrypted = decrypt_dek_with_password(encrypted, "mypass", salt)
+        >>> decrypted == dek
+        True
+    """
+    user_key = derive_key_from_password(password, salt_b64)
+    f = Fernet(user_key)
+    return f.decrypt(encrypted_dek.encode())
+
+
+def encrypt_field(value: str, dek: bytes) -> str:
+    """
+    Encrypt a single field value using a DEK.
+
+    Args:
+        value: The plaintext value to encrypt (will be converted to string)
+        dek: The data encryption key
+
+    Returns:
+        str: Encrypted value safe for database storage
+
+    Example:
+        >>> dek = generate_dek()
+        >>> encrypted = encrypt_field("Alice", dek)
+        >>> encrypted
+        'gAAAAABh...'
+    """
+    if value is None:
+        return None
+    f = Fernet(dek)
+    return f.encrypt(str(value).encode()).decode()
+
+
+def decrypt_field(encrypted_value: str, dek: bytes) -> str:
+    """
+    Decrypt a single field value using a DEK.
+
+    Args:
+        encrypted_value: The encrypted value from database
+        dek: The data encryption key
+
+    Returns:
+        str: The decrypted plaintext value
+
+    Raises:
+        cryptography.fernet.InvalidToken: If decryption fails
+
+    Example:
+        >>> dek = generate_dek()
+        >>> encrypted = encrypt_field("Alice", dek)
+        >>> decrypted = decrypt_field(encrypted, dek)
+        >>> decrypted
+        'Alice'
+    """
+    if encrypted_value is None:
+        return None
+    f = Fernet(dek)
+    return f.decrypt(encrypted_value.encode()).decode()

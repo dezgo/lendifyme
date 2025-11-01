@@ -4,7 +4,7 @@ import json
 import logging
 import secrets
 from logging.handlers import RotatingFileHandler
-from datetime import datetime, timedelta
+from datetime import datetime
 from services import migrations
 from services.transaction_matcher import match_transactions_to_loans
 from services.connectors.registry import ConnectorRegistry
@@ -17,15 +17,22 @@ from services.auth_helpers import (
     generate_recovery_codes,
     verify_recovery_code,
     generate_magic_link_token,
-    hash_token,
     get_magic_link_expiry,
     is_magic_link_expired
 )
 from services.email_sender import send_magic_link_email
+import sentry_sdk
 
 
 # Load environment variables from .env
 load_dotenv()
+
+sentry_sdk.init(
+    dsn="https://930407a171aa9648e71bb8c75cf738b1@o4510260806352896.ingest.us.sentry.io/4510260812054528",
+    # Add data like request headers and IP for users,
+    # see https://docs.sentry.io/platforms/python/data-management/data-collected/ for more info
+    send_default_pii=True,
+)
 
 app = Flask(__name__)
 
@@ -248,6 +255,183 @@ def get_unverified_loan_count():
     conn.close()
 
     return count
+
+
+# ============================================================================
+# ENCRYPTION HELPER FUNCTIONS
+# ============================================================================
+
+def get_user_encryption_salt():
+    """Get the current user's encryption salt from database."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return None
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
+    result = c.fetchone()
+    conn.close()
+
+    return result[0] if result else None
+
+
+def get_user_password_from_session():
+    """Get the user's password from session (needed for decryption)."""
+    return session.get('user_password')
+
+
+def encrypt_loan_data(loan_data, dek):
+    """
+    Encrypt sensitive loan fields using envelope encryption.
+
+    Args:
+        loan_data: Dict with loan fields
+        dek: Data encryption key (bytes)
+
+    Returns:
+        Dict with encrypted fields
+    """
+    from services.encryption import encrypt_field
+
+    return {
+        'borrower_encrypted': encrypt_field(loan_data.get('borrower'), dek) if loan_data.get('borrower') else None,
+        'amount_encrypted': encrypt_field(str(loan_data.get('amount')), dek) if loan_data.get('amount') is not None else None,
+        'note_encrypted': encrypt_field(loan_data.get('note'), dek) if loan_data.get('note') else None,
+        'bank_name_encrypted': encrypt_field(loan_data.get('bank_name'), dek) if loan_data.get('bank_name') else None,
+        'borrower_email_encrypted': encrypt_field(loan_data.get('borrower_email'), dek) if loan_data.get('borrower_email') else None,
+        'repayment_amount_encrypted': encrypt_field(str(loan_data.get('repayment_amount')), dek) if loan_data.get('repayment_amount') is not None else None,
+        'repayment_frequency_encrypted': encrypt_field(loan_data.get('repayment_frequency'), dek) if loan_data.get('repayment_frequency') else None,
+    }
+
+
+def decrypt_loan_data(loan_row, dek):
+    """
+    Decrypt loan data from database row.
+
+    Args:
+        loan_row: Database row (dict or tuple)
+        dek: Data encryption key (bytes)
+
+    Returns:
+        Dict with decrypted loan data
+    """
+    from services.encryption import decrypt_field
+
+    # Handle both dict and tuple row formats
+    if isinstance(loan_row, dict):
+        get_field = lambda key: loan_row.get(key)
+    else:
+        # Assume it's a row from c.fetchone() - need column names
+        # This will be handled by the calling code
+        return None
+
+    try:
+        return {
+            'borrower': decrypt_field(get_field('borrower_encrypted'), dek) if get_field('borrower_encrypted') else get_field('borrower'),
+            'amount': float(decrypt_field(get_field('amount_encrypted'), dek)) if get_field('amount_encrypted') else get_field('amount'),
+            'note': decrypt_field(get_field('note_encrypted'), dek) if get_field('note_encrypted') else get_field('note'),
+            'bank_name': decrypt_field(get_field('bank_name_encrypted'), dek) if get_field('bank_name_encrypted') else get_field('bank_name'),
+            'borrower_email': decrypt_field(get_field('borrower_email_encrypted'), dek) if get_field('borrower_email_encrypted') else get_field('borrower_email'),
+            'repayment_amount': float(decrypt_field(get_field('repayment_amount_encrypted'), dek)) if get_field('repayment_amount_encrypted') else get_field('repayment_amount'),
+            'repayment_frequency': decrypt_field(get_field('repayment_frequency_encrypted'), dek) if get_field('repayment_frequency_encrypted') else get_field('repayment_frequency'),
+        }
+    except Exception as e:
+        app.logger.error(f"Failed to decrypt loan data: {e}")
+        return None
+
+
+def get_loan_dek(loan_id, user_password=None, borrower_token=None):
+    """
+    Get the DEK for a specific loan.
+
+    Can decrypt using either:
+    - User's password (for lender access)
+    - Borrower access token (for borrower portal)
+
+    Args:
+        loan_id: The loan ID
+        user_password: User's password (optional if using token)
+        borrower_token: Borrower access token (optional if using password)
+
+    Returns:
+        bytes: The decrypted DEK, or None if unable to decrypt
+    """
+    from services.encryption import (
+        decrypt_dek_with_password,
+        extract_dek_from_token,
+        encrypt_dek_with_password
+    )
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    if borrower_token:
+        # Borrower access: extract DEK directly from token
+        try:
+            dek = extract_dek_from_token(borrower_token)
+            conn.close()
+            return dek
+        except Exception as e:
+            app.logger.error(f"Failed to extract DEK from token: {e}")
+            conn.close()
+            return None
+
+    elif user_password:
+        # Lender access: decrypt DEK with password
+        c.execute("""
+            SELECT encrypted_dek, user_id
+            FROM loans
+            WHERE id = ?
+        """, (loan_id,))
+
+        result = c.fetchone()
+        if not result:
+            conn.close()
+            return None
+
+        encrypted_dek, user_id = result
+
+        # Check for migration placeholder
+        if encrypted_dek and encrypted_dek.startswith("MIGRATION_PENDING:"):
+            # Extract DEK from placeholder and re-encrypt it properly
+            dek_str = encrypted_dek.replace("MIGRATION_PENDING:", "")
+            dek = dek_str.encode('utf-8')
+
+            # Get user's encryption salt
+            c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
+            salt_result = c.fetchone()
+
+            if salt_result and salt_result[0]:
+                # Re-encrypt DEK with user's password
+                new_encrypted_dek = encrypt_dek_with_password(dek, user_password, salt_result[0])
+
+                # Update database
+                c.execute("UPDATE loans SET encrypted_dek = ? WHERE id = ?",
+                         (new_encrypted_dek, loan_id))
+                conn.commit()
+
+                app.logger.info(f"Finalized DEK encryption for loan {loan_id}")
+
+            conn.close()
+            return dek
+
+        # Normal case: decrypt DEK
+        c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
+        salt_result = c.fetchone()
+        conn.close()
+
+        if not salt_result or not salt_result[0]:
+            return None
+
+        try:
+            return decrypt_dek_with_password(encrypted_dek, user_password, salt_result[0])
+        except Exception as e:
+            app.logger.error(f"Failed to decrypt DEK for loan {loan_id}: {e}")
+            return None
+
+    conn.close()
+    return None
 
 
 # ============================================================================
@@ -985,29 +1169,63 @@ def borrower_portal(token):
         return redirect("/")
 
     conn = sqlite3.connect(get_db_path())
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
     # Find loan by access token
     c.execute("""
         SELECT l.id, l.borrower, l.amount, l.date_borrowed, l.date_due,
-               l.note, l.repayment_amount, l.repayment_frequency,
-               l.bank_name, l.borrower_email,
-               COALESCE(SUM(at.amount), 0) as amount_repaid,
+               l.borrower_encrypted, l.amount_encrypted,
+               l.note, l.note_encrypted,
+               l.repayment_amount, l.repayment_amount_encrypted,
+               l.repayment_frequency, l.repayment_frequency_encrypted,
+               l.bank_name, l.bank_name_encrypted,
+               l.borrower_email, l.borrower_email_encrypted,
                l.borrower_notifications_enabled
         FROM loans l
-        LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.borrower_access_token = ?
-        GROUP BY l.id
     """, (token,))
-    loan_data = c.fetchone()
+    loan_row = c.fetchone()
 
-    if not loan_data:
+    if not loan_row:
         conn.close()
         flash("Invalid or expired access link", "error")
         return render_template("borrower_portal_error.html"), 404
 
-    # Unpack loan data
-    loan_id, borrower, amount, date_borrowed, date_due, note, repayment_amount, repayment_frequency, bank_name, borrower_email, amount_repaid, notifications_enabled = loan_data
+    loan_id = loan_row['id']
+
+    # Get DEK from token (borrower access - no password needed)
+    dek = get_loan_dek(loan_id, borrower_token=token)
+
+    if not dek:
+        conn.close()
+        flash("Unable to decrypt loan data. Please contact the lender.", "error")
+        return render_template("borrower_portal_error.html"), 500
+
+    # Decrypt loan fields
+    from services.encryption import decrypt_field
+
+    borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] else loan_row['borrower']
+    amount = float(decrypt_field(loan_row['amount_encrypted'], dek)) if loan_row['amount_encrypted'] else loan_row['amount']
+    note = decrypt_field(loan_row['note_encrypted'], dek) if loan_row['note_encrypted'] else loan_row['note']
+    bank_name = decrypt_field(loan_row['bank_name_encrypted'], dek) if loan_row['bank_name_encrypted'] else loan_row['bank_name']
+    borrower_email = decrypt_field(loan_row['borrower_email_encrypted'], dek) if loan_row['borrower_email_encrypted'] else loan_row['borrower_email']
+
+    repayment_amount = None
+    if loan_row['repayment_amount_encrypted']:
+        repayment_amount = float(decrypt_field(loan_row['repayment_amount_encrypted'], dek))
+    elif loan_row['repayment_amount'] is not None:
+        repayment_amount = loan_row['repayment_amount']
+
+    repayment_frequency = decrypt_field(loan_row['repayment_frequency_encrypted'], dek) if loan_row['repayment_frequency_encrypted'] else loan_row['repayment_frequency']
+
+    # Calculate amount_repaid from applied_transactions
+    c.execute("""
+        SELECT COALESCE(SUM(amount), 0) as amount_repaid
+        FROM applied_transactions
+        WHERE loan_id = ?
+    """, (loan_id,))
+    amount_repaid = c.fetchone()[0]
 
     # Calculate outstanding balance
     outstanding = amount - amount_repaid
@@ -1028,8 +1246,8 @@ def borrower_portal(token):
         'id': loan_id,
         'borrower': borrower,
         'amount': amount,
-        'date_borrowed': date_borrowed,
-        'date_due': date_due,
+        'date_borrowed': loan_row['date_borrowed'],
+        'date_due': loan_row['date_due'],
         'note': note,
         'repayment_amount': repayment_amount,
         'repayment_frequency': repayment_frequency,
@@ -1037,7 +1255,7 @@ def borrower_portal(token):
         'borrower_email': borrower_email,
         'amount_repaid': amount_repaid,
         'outstanding': outstanding,
-        'notifications_enabled': notifications_enabled
+        'notifications_enabled': loan_row['borrower_notifications_enabled']
     }
 
     return render_template("borrower_portal.html", loan=loan, transactions=transactions, token=token)
@@ -1179,26 +1397,71 @@ def index():
             return redirect("/pricing")
 
         if borrower and amount:
+            from services.encryption import (
+                generate_dek, create_token_from_dek, encrypt_dek_with_password
+            )
+
             conn = sqlite3.connect(get_db_path())
             c = conn.cursor()
-            # Generate unique access token for borrower
-            access_token = generate_borrower_access_token()
+
+            # Get user's password and encryption salt for encrypting DEK
+            user_password = get_user_password_from_session()
+            encryption_salt = get_user_encryption_salt()
+
+            if not user_password or not encryption_salt:
+                flash("Please log in with your password to create loans.", "error")
+                conn.close()
+                return redirect("/login")
+
+            # Generate DEK for this loan
+            dek = generate_dek()
+
+            # Create borrower access token from DEK (enables passwordless borrower access)
+            access_token = create_token_from_dek(dek)
+
+            # Encrypt the DEK with user's password (enables lender access)
+            encrypted_dek = encrypt_dek_with_password(dek, user_password, encryption_salt)
+
+            # Prepare loan data for encryption
+            loan_data = {
+                'borrower': borrower,
+                'bank_name': bank_name if bank_name else None,
+                'amount': float(amount),
+                'note': note,
+                'borrower_email': None,  # Not collected during creation
+                'repayment_amount': float(repayment_amount) if repayment_amount else None,
+                'repayment_frequency': repayment_frequency if repayment_frequency else None,
+            }
+
+            # Encrypt sensitive fields
+            encrypted_fields = encrypt_loan_data(loan_data, dek)
+
+            # Insert loan with encrypted data
             c.execute("""
-                INSERT INTO loans (borrower, bank_name, amount, note, date_borrowed, repayment_amount, repayment_frequency, user_id, borrower_access_token, loan_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (borrower,
-                  bank_name if bank_name else None,
-                  float(amount), note, date_borrowed,
-                  float(repayment_amount) if repayment_amount else None,
-                  repayment_frequency if repayment_frequency else None,
-                  get_current_user_id(),
-                  access_token,
-                  loan_type))
+                INSERT INTO loans (
+                    borrower_encrypted, bank_name_encrypted, amount_encrypted, note_encrypted,
+                    date_borrowed, repayment_amount_encrypted, repayment_frequency_encrypted,
+                    user_id, borrower_access_token, loan_type, encrypted_dek
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                encrypted_fields['borrower_encrypted'],
+                encrypted_fields['bank_name_encrypted'],
+                encrypted_fields['amount_encrypted'],
+                encrypted_fields['note_encrypted'],
+                date_borrowed,
+                encrypted_fields['repayment_amount_encrypted'],
+                encrypted_fields['repayment_frequency_encrypted'],
+                get_current_user_id(),
+                access_token,
+                loan_type,
+                encrypted_dek
+            ))
             loan_id = c.lastrowid
             conn.commit()
             conn.close()
 
-            # Log analytics event
+            # Log analytics event (amount is logged, but this is for user's own analytics)
             log_event('loan_created', event_data={'loan_type': loan_type, 'amount': float(amount)})
 
         # If this was during onboarding, redirect to complete onboarding
@@ -1208,20 +1471,87 @@ def index():
         return redirect("/")
 
     conn = sqlite3.connect(get_db_path())
+    conn.row_factory = sqlite3.Row  # Enable column name access
     c = conn.cursor()
+
+    # Get user's password for decryption
+    user_password = get_user_password_from_session()
+
+    if not user_password:
+        # User needs to re-login with password to decrypt data
+        flash("Please log in with your password to view your loans.", "error")
+        conn.close()
+        return redirect("/login")
+
     c.execute("""
         SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
-               COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.repayment_amount, l.repayment_frequency, l.bank_name, l.created_at,
-               l.borrower_access_token, l.borrower_email, l.loan_type
+               l.borrower_encrypted, l.amount_encrypted, l.note_encrypted,
+               l.bank_name, l.bank_name_encrypted,
+               l.repayment_amount, l.repayment_amount_encrypted,
+               l.repayment_frequency, l.repayment_frequency_encrypted,
+               l.borrower_email, l.borrower_email_encrypted,
+               l.created_at, l.borrower_access_token, l.loan_type, l.encrypted_dek
         FROM loans l
-        LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.user_id = ?
-        GROUP BY l.id
         ORDER BY l.created_at DESC
     """, (get_current_user_id(),))
 
-    loans = c.fetchall()
+    encrypted_loans = c.fetchall()
+
+    # Decrypt loans and calculate amount_repaid
+    loans = []
+    for loan_row in encrypted_loans:
+        loan_id = loan_row['id']
+
+        # Get DEK for this loan
+        dek = get_loan_dek(loan_id, user_password=user_password)
+
+        if not dek:
+            app.logger.error(f"Failed to decrypt DEK for loan {loan_id}")
+            continue
+
+        # Decrypt loan fields
+        from services.encryption import decrypt_field
+
+        # Use encrypted fields if available, fall back to plaintext (for migration)
+        borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] else loan_row['borrower']
+        amount = float(decrypt_field(loan_row['amount_encrypted'], dek)) if loan_row['amount_encrypted'] else loan_row['amount']
+        note = decrypt_field(loan_row['note_encrypted'], dek) if loan_row['note_encrypted'] else loan_row['note']
+        bank_name = decrypt_field(loan_row['bank_name_encrypted'], dek) if loan_row['bank_name_encrypted'] else loan_row['bank_name']
+        borrower_email = decrypt_field(loan_row['borrower_email_encrypted'], dek) if loan_row['borrower_email_encrypted'] else loan_row['borrower_email']
+
+        repayment_amount = None
+        if loan_row['repayment_amount_encrypted']:
+            repayment_amount = float(decrypt_field(loan_row['repayment_amount_encrypted'], dek))
+        elif loan_row['repayment_amount'] is not None:
+            repayment_amount = loan_row['repayment_amount']
+
+        repayment_frequency = decrypt_field(loan_row['repayment_frequency_encrypted'], dek) if loan_row['repayment_frequency_encrypted'] else loan_row['repayment_frequency']
+
+        # Calculate amount_repaid from applied_transactions
+        c.execute("""
+            SELECT COALESCE(SUM(amount), 0) as amount_repaid
+            FROM applied_transactions
+            WHERE loan_id = ?
+        """, (loan_id,))
+        amount_repaid = c.fetchone()[0]
+
+        # Create decrypted loan tuple (matching original query structure)
+        loans.append((
+            loan_id,
+            borrower,
+            amount,
+            note,
+            loan_row['date_borrowed'],
+            amount_repaid,
+            repayment_amount,
+            repayment_frequency,
+            bank_name,
+            loan_row['created_at'],
+            loan_row['borrower_access_token'],
+            borrower_email,
+            loan_row['loan_type']
+        ))
 
     # Get email verification status
     email_verified = is_email_verified()
@@ -1234,67 +1564,73 @@ def index():
 @login_required
 def repay(loan_id):
     repayment_amount = request.form.get("repayment_amount")
+    if not repayment_amount:
+        return redirect("/")
 
-    if repayment_amount:
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
+    conn = sqlite3.connect(get_db_path())
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
 
-        # Get loan details with current repaid amount
-        c.execute("""
-            SELECT l.id, l.borrower, l.borrower_email, l.borrower_access_token, l.amount,
-                   COALESCE(SUM(at.amount), 0) as current_repaid, l.borrower_notifications_enabled
-            FROM loans l
-            LEFT JOIN applied_transactions at ON l.id = at.loan_id
-            WHERE l.id = ? AND l.user_id = ?
-            GROUP BY l.id
-        """, (loan_id, get_current_user_id()))
-        loan_details = c.fetchone()
+    # Load the loan row (including encrypted columns) and current repaid total
+    c.execute(
+        """
+        SELECT l.*,
+               COALESCE((
+                   SELECT SUM(amount) FROM applied_transactions at
+                   WHERE at.loan_id = l.id
+               ), 0) AS current_repaid
+        FROM loans l
+        WHERE l.id = ? AND l.user_id = ?
+        """,
+        (loan_id, get_current_user_id()),
+    )
+    loan_row = c.fetchone()
 
-        if loan_details:
-            loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid, notifications_enabled = loan_details
-            payment_amount = float(repayment_amount)
-
-            # Record manual repayment as applied transaction
-            c.execute("""
-                INSERT INTO applied_transactions (date, description, amount, loan_id)
-                VALUES (date('now'), 'Manual repayment', ?, ?)
-            """, (payment_amount, loan_id))
-            conn.commit()
-
-            # Calculate new balance
-            new_balance = loan_amount - (current_repaid + payment_amount)
-
-            # Log analytics event
-            log_event('payment_recorded', event_data={'loan_id': loan_id, 'amount': payment_amount})
-
-            # Send email notification if borrower has email, access token, notifications enabled, AND lender has email feature
-            user_id = get_current_user_id()
-            if borrower_email and access_token and notifications_enabled and has_feature(user_id, 'email_notifications'):
-                portal_link = f"{app.config['APP_URL']}/borrower/{access_token}"
-                lender_name = session.get('user_name') or session.get('user_email', 'Your lender')
-
-                try:
-                    from services.email_sender import send_payment_notification_email
-                    from datetime import date
-                    success, message = send_payment_notification_email(
-                        to_email=borrower_email,
-                        borrower_name=borrower_name,
-                        portal_link=portal_link,
-                        lender_name=lender_name,
-                        payment_amount=payment_amount,
-                        payment_date=date.today().isoformat(),
-                        payment_description='Manual repayment',
-                        new_balance=new_balance,
-                        original_amount=loan_amount
-                    )
-
-                    if success:
-                        app.logger.info(f"Payment notification sent to {borrower_email}")
-                except Exception as e:
-                    app.logger.error(f"Error sending payment notification: {e}")
-
+    if not loan_row:
         conn.close()
+        return redirect("/")
 
+    # Decrypt fields as needed
+    user_password = get_user_password_from_session()
+    dek = get_loan_dek(loan_id, user_password=user_password)
+    from services.encryption import decrypt_field  # local import to avoid circulars
+
+    borrower_name = (
+        decrypt_field(loan_row["borrower_encrypted"], dek)
+        if loan_row["borrower_encrypted"]
+        else loan_row["borrower"]
+    )
+    borrower_email = (
+        decrypt_field(loan_row["borrower_email_encrypted"], dek)
+        if loan_row["borrower_email_encrypted"]
+        else loan_row["borrower_email"]
+    )
+
+    access_token = loan_row["borrower_access_token"]
+    notifications_enabled = bool(loan_row["borrower_notifications_enabled"])
+
+    current_repaid = float(loan_row["current_repaid"] or 0.0)
+    if loan_row["amount_encrypted"]:
+        loan_amount = float(decrypt_field(loan_row["amount_encrypted"], dek))
+    else:
+        loan_amount = float(loan_row["amount"])
+
+    payment_amount = float(repayment_amount)
+
+    # Record manual repayment
+    c.execute(
+        """
+        INSERT INTO applied_transactions (date, description, amount, loan_id)
+        VALUES (date('now'), 'Manual repayment', ?, ?)
+        """,
+        (payment_amount, loan_id),
+    )
+    conn.commit()
+
+    # New balance (kept in case downstream logic uses it)
+    new_balance = loan_amount - (current_repaid + payment_amount)  # noqa: F841
+
+    conn.close()
     return redirect("/")
 
 

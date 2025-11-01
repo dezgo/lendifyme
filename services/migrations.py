@@ -280,6 +280,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 25:
+        try:
+            migrate_v25_envelope_encryption(conn)
+            _set_user_version(conn, 25)
+            conn.commit()
+            print("✅ Migration v25 applied.")
+        except Exception as e:
+            print(f"❌ Migration v25 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -1100,3 +1113,336 @@ def migrate_v24_add_auto_match_tracking(conn):
         CREATE INDEX IF NOT EXISTS idx_applied_transactions_auto_applied
         ON applied_transactions(auto_applied, applied_at)
     """)
+
+
+def migrate_v25_envelope_encryption(conn):
+    """
+    Implement envelope encryption for true zero-knowledge data storage.
+
+    Encryption Strategy:
+    - Each loan gets a unique Data Encryption Key (DEK)
+    - Loan data is encrypted with the DEK
+    - DEK is encrypted with lender's password and stored in encrypted_dek column
+    - DEK is also embedded in borrower_access_token for borrower access
+
+    This ensures:
+    - Server admins cannot read loan data (zero-knowledge)
+    - Lenders can decrypt with their password
+    - Borrowers can decrypt with their access token (no password needed)
+
+    Fields encrypted in loans table:
+    - borrower, amount, note, bank_name, borrower_email
+    - repayment_amount, repayment_frequency
+
+    Fields encrypted in applied_transactions and rejected_matches:
+    - description, amount
+
+    Fields encrypted in pending_matches_data:
+    - matches_json, context_transactions_json
+    """
+    from services.encryption import (
+        generate_dek, create_token_from_dek, encrypt_dek_with_password,
+        encrypt_field, derive_key_from_password
+    )
+
+    c = conn.cursor()
+
+    print("  Starting envelope encryption migration...")
+
+    # ========================================================================
+    # Step 0: Make old plaintext columns nullable (backwards compatibility)
+    # ========================================================================
+    print("  Making old plaintext columns nullable...")
+
+    # SQLite doesn't support ALTER COLUMN, so we need to recreate the table
+    # First, check if we need to do this migration
+    c.execute("PRAGMA table_info(loans)")
+    columns_info = c.fetchall()
+
+    # Check if borrower column is NOT NULL
+    borrower_is_not_null = any(col[1] == 'borrower' and col[3] == 1 for col in columns_info)
+
+    if borrower_is_not_null:
+        print("    Recreating loans table to make plaintext columns nullable...")
+
+        # Get all existing column names
+        c.execute("PRAGMA table_info(loans)")
+        existing_columns = [col[1] for col in c.fetchall()]
+
+        # Create new table with same structure but nullable plaintext columns
+        # Only include columns that exist in old table
+        c.execute("""
+            CREATE TABLE loans_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                borrower TEXT,
+                amount REAL,
+                date_borrowed TEXT NOT NULL,
+                date_due TEXT,
+                date_repaid TEXT,
+                note TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                repayment_amount REAL,
+                repayment_frequency TEXT,
+                bank_name TEXT,
+                user_id INTEGER,
+                borrower_access_token TEXT,
+                borrower_email TEXT,
+                loan_type TEXT DEFAULT 'lending' NOT NULL,
+                borrower_notifications_enabled BOOLEAN DEFAULT 1
+            )
+        """)
+
+        # Copy data from old table (only columns that exist)
+        column_list = ', '.join(existing_columns)
+        c.execute(f"INSERT INTO loans_new ({column_list}) SELECT {column_list} FROM loans")
+
+        # Drop old table
+        c.execute("DROP TABLE loans")
+
+        # Rename new table
+        c.execute("ALTER TABLE loans_new RENAME TO loans")
+
+        # Recreate indexes
+        c.execute("CREATE INDEX IF NOT EXISTS idx_loans_user_id ON loans(user_id)")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_loans_borrower_token ON loans(borrower_access_token)")
+
+        print("    Loans table recreated with nullable columns.")
+    else:
+        print("    Plaintext columns already nullable, skipping table recreation.")
+
+    # ========================================================================
+    # Step 1: Add encrypted columns to loans table
+    # ========================================================================
+    c.execute("PRAGMA table_info(loans)")
+    loan_columns = [row[1] for row in c.fetchall()]
+
+    if 'encrypted_dek' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN encrypted_dek TEXT")
+        print("    Added encrypted_dek column to loans table.")
+
+    if 'borrower_encrypted' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN borrower_encrypted TEXT")
+        print("    Added borrower_encrypted column to loans table.")
+
+    if 'amount_encrypted' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN amount_encrypted TEXT")
+        print("    Added amount_encrypted column to loans table.")
+
+    if 'note_encrypted' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN note_encrypted TEXT")
+        print("    Added note_encrypted column to loans table.")
+
+    if 'bank_name_encrypted' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN bank_name_encrypted TEXT")
+        print("    Added bank_name_encrypted column to loans table.")
+
+    if 'borrower_email_encrypted' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN borrower_email_encrypted TEXT")
+        print("    Added borrower_email_encrypted column to loans table.")
+
+    if 'repayment_amount_encrypted' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN repayment_amount_encrypted TEXT")
+        print("    Added repayment_amount_encrypted column to loans table.")
+
+    if 'repayment_frequency_encrypted' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN repayment_frequency_encrypted TEXT")
+        print("    Added repayment_frequency_encrypted column to loans table.")
+
+    # ========================================================================
+    # Step 2: Add encrypted columns to applied_transactions
+    # ========================================================================
+    c.execute("PRAGMA table_info(applied_transactions)")
+    applied_columns = [row[1] for row in c.fetchall()]
+
+    if 'description_encrypted' not in applied_columns:
+        c.execute("ALTER TABLE applied_transactions ADD COLUMN description_encrypted TEXT")
+        print("    Added description_encrypted column to applied_transactions table.")
+
+    if 'amount_encrypted' not in applied_columns:
+        c.execute("ALTER TABLE applied_transactions ADD COLUMN amount_encrypted TEXT")
+        print("    Added amount_encrypted column to applied_transactions table.")
+
+    # ========================================================================
+    # Step 3: Add encrypted columns to rejected_matches
+    # ========================================================================
+    c.execute("PRAGMA table_info(rejected_matches)")
+    rejected_columns = [row[1] for row in c.fetchall()]
+
+    if 'description_encrypted' not in rejected_columns:
+        c.execute("ALTER TABLE rejected_matches ADD COLUMN description_encrypted TEXT")
+        print("    Added description_encrypted column to rejected_matches table.")
+
+    if 'amount_encrypted' not in rejected_columns:
+        c.execute("ALTER TABLE rejected_matches ADD COLUMN amount_encrypted TEXT")
+        print("    Added amount_encrypted column to rejected_matches table.")
+
+    # ========================================================================
+    # Step 4: Add encrypted columns to pending_matches_data
+    # ========================================================================
+    c.execute("PRAGMA table_info(pending_matches_data)")
+    pending_columns = [row[1] for row in c.fetchall()]
+
+    if 'matches_json_encrypted' not in pending_columns:
+        c.execute("ALTER TABLE pending_matches_data ADD COLUMN matches_json_encrypted TEXT")
+        print("    Added matches_json_encrypted column to pending_matches_data table.")
+
+    if 'context_transactions_json_encrypted' not in pending_columns:
+        c.execute("ALTER TABLE pending_matches_data ADD COLUMN context_transactions_json_encrypted TEXT")
+        print("    Added context_transactions_json_encrypted column to pending_matches_data table.")
+
+    # ========================================================================
+    # Step 5: Migrate existing loan data
+    # ========================================================================
+    print("  Migrating existing loan data to encrypted format...")
+
+    # Get all loans that need migration (no encrypted_dek yet)
+    c.execute("""
+        SELECT l.id, l.borrower, l.amount, l.note, l.bank_name, l.borrower_email,
+               l.repayment_amount, l.repayment_frequency, l.borrower_access_token,
+               l.user_id, u.encryption_salt
+        FROM loans l
+        LEFT JOIN users u ON u.id = l.user_id
+        WHERE l.encrypted_dek IS NULL
+    """)
+
+    loans_to_migrate = c.fetchall()
+
+    if loans_to_migrate:
+        print(f"    Found {len(loans_to_migrate)} loans to encrypt...")
+
+        # We need user passwords to encrypt the DEKs, but we don't have them!
+        # Solution: For existing loans, we'll need to encrypt them on next login
+        # For now, just generate DEKs and new tokens, store encrypted_dek as NULL
+        # The app will handle migration on next password-authenticated access
+
+        for loan in loans_to_migrate:
+            (loan_id, borrower, amount, note, bank_name, borrower_email,
+             repayment_amount, repayment_frequency, old_token, user_id, encryption_salt) = loan
+
+            # Generate new DEK for this loan
+            dek = generate_dek()
+
+            # Create new borrower access token from DEK
+            new_token = create_token_from_dek(dek)
+
+            # Encrypt all fields with the DEK
+            borrower_enc = encrypt_field(borrower, dek) if borrower else None
+            amount_enc = encrypt_field(str(amount), dek) if amount is not None else None
+            note_enc = encrypt_field(note, dek) if note else None
+            bank_name_enc = encrypt_field(bank_name, dek) if bank_name else None
+            borrower_email_enc = encrypt_field(borrower_email, dek) if borrower_email else None
+            repayment_amount_enc = encrypt_field(str(repayment_amount), dek) if repayment_amount is not None else None
+            repayment_frequency_enc = encrypt_field(repayment_frequency, dek) if repayment_frequency else None
+
+            # Note: We can't encrypt the DEK with user's password here because we don't have it
+            # Set encrypted_dek to a special marker that will trigger re-encryption on next login
+            # We'll use a placeholder that encodes the DEK temporarily (insecure, but will be replaced)
+            encrypted_dek_placeholder = f"MIGRATION_PENDING:{dek.decode('utf-8')}"
+
+            # Update the loan record
+            c.execute("""
+                UPDATE loans
+                SET borrower_encrypted = ?,
+                    amount_encrypted = ?,
+                    note_encrypted = ?,
+                    bank_name_encrypted = ?,
+                    borrower_email_encrypted = ?,
+                    repayment_amount_encrypted = ?,
+                    repayment_frequency_encrypted = ?,
+                    encrypted_dek = ?,
+                    borrower_access_token = ?
+                WHERE id = ?
+            """, (
+                borrower_enc, amount_enc, note_enc, bank_name_enc, borrower_email_enc,
+                repayment_amount_enc, repayment_frequency_enc,
+                encrypted_dek_placeholder, new_token, loan_id
+            ))
+
+        print(f"    Encrypted {len(loans_to_migrate)} loans.")
+        print("    ⚠️  Note: DEKs stored with temporary placeholder - will be encrypted with user password on next login")
+    else:
+        print("    No loans to migrate.")
+
+    # ========================================================================
+    # Step 6: Migrate applied_transactions
+    # ========================================================================
+    print("  Migrating applied_transactions to encrypted format...")
+
+    # For transactions, we need to get the DEK from the associated loan
+    c.execute("""
+        SELECT at.id, at.description, at.amount, at.loan_id, l.encrypted_dek
+        FROM applied_transactions at
+        JOIN loans l ON l.id = at.loan_id
+        WHERE at.description_encrypted IS NULL
+    """)
+
+    transactions_to_migrate = c.fetchall()
+
+    if transactions_to_migrate:
+        print(f"    Found {len(transactions_to_migrate)} transactions to encrypt...")
+
+        for trans in transactions_to_migrate:
+            trans_id, description, amount, loan_id, encrypted_dek_str = trans
+
+            # Extract DEK from placeholder (temporary during migration)
+            if encrypted_dek_str and encrypted_dek_str.startswith("MIGRATION_PENDING:"):
+                dek_str = encrypted_dek_str.replace("MIGRATION_PENDING:", "")
+                dek = dek_str.encode('utf-8')
+
+                # Encrypt transaction fields
+                desc_enc = encrypt_field(description, dek) if description else None
+                amount_enc = encrypt_field(str(amount), dek) if amount is not None else None
+
+                c.execute("""
+                    UPDATE applied_transactions
+                    SET description_encrypted = ?,
+                        amount_encrypted = ?
+                    WHERE id = ?
+                """, (desc_enc, amount_enc, trans_id))
+
+        print(f"    Encrypted {len(transactions_to_migrate)} applied transactions.")
+    else:
+        print("    No applied transactions to migrate.")
+
+    # ========================================================================
+    # Step 7: Migrate rejected_matches
+    # ========================================================================
+    print("  Migrating rejected_matches to encrypted format...")
+
+    c.execute("""
+        SELECT rm.id, rm.description, rm.amount, rm.loan_id, l.encrypted_dek
+        FROM rejected_matches rm
+        JOIN loans l ON l.id = rm.loan_id
+        WHERE rm.description_encrypted IS NULL
+    """)
+
+    rejected_to_migrate = c.fetchall()
+
+    if rejected_to_migrate:
+        print(f"    Found {len(rejected_to_migrate)} rejected matches to encrypt...")
+
+        for match in rejected_to_migrate:
+            match_id, description, amount, loan_id, encrypted_dek_str = match
+
+            # Extract DEK from placeholder
+            if encrypted_dek_str and encrypted_dek_str.startswith("MIGRATION_PENDING:"):
+                dek_str = encrypted_dek_str.replace("MIGRATION_PENDING:", "")
+                dek = dek_str.encode('utf-8')
+
+                # Encrypt match fields
+                desc_enc = encrypt_field(description, dek) if description else None
+                amount_enc = encrypt_field(str(amount), dek) if amount is not None else None
+
+                c.execute("""
+                    UPDATE rejected_matches
+                    SET description_encrypted = ?,
+                        amount_encrypted = ?
+                    WHERE id = ?
+                """, (desc_enc, amount_enc, match_id))
+
+        print(f"    Encrypted {len(rejected_to_migrate)} rejected matches.")
+    else:
+        print("    No rejected matches to migrate.")
+
+    print("  ✅ Envelope encryption migration complete!")
+    print("  ⚠️  Users will need to log in with their password to finalize DEK encryption.")

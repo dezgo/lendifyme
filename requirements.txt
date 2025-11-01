@@ -7,3 +7,4 @@ webauthn
 flask-mail
 cryptography
 stripe
+sentry-sdk[flask]
