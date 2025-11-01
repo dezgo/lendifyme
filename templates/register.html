@@ -119,6 +119,16 @@
         .auth-footer a:hover {
             text-decoration: underline;
         }
+        /* Honeypot field - hidden from users but visible to bots */
+        .hp-field {
+            position: absolute;
+            left: -9999px;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+            tab-index: -1;
+        }
     </style>
 </head>
 <body>
@@ -136,12 +146,23 @@
             {% endif %}
         {% endwith %}
 
-        <form method="post">
+        <form method="post" id="registerForm">
             <label>Email Address</label>
             <input type="email" name="email" placeholder="your@email.com" required autofocus>
 
+            <!-- Honeypot field - bots will likely fill this, humans won't see it -->
+            <input type="text" name="website" class="hp-field" tabindex="-1" autocomplete="off">
+
+            <!-- Timestamp for time-based validation -->
+            <input type="hidden" name="form_timestamp" id="formTimestamp">
+
             <button type="submit">Get Started</button>
         </form>
+
+        <script>
+            // Set form load timestamp
+            document.getElementById('formTimestamp').value = Date.now();
+        </script>
 
         <div class="magic-info">
             🚀 <strong>That's it!</strong><br>

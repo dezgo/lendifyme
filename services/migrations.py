@@ -293,6 +293,32 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 26:
+        try:
+            migrate_v26_create_rate_limits(conn)
+            _set_user_version(conn, 26)
+            conn.commit()
+            print("✅ Migration v26 applied.")
+        except Exception as e:
+            print(f"❌ Migration v26 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
+    if current < 27:
+        try:
+            migrate_v27_add_last_login(conn)
+            _set_user_version(conn, 27)
+            conn.commit()
+            print("✅ Migration v27 applied.")
+        except Exception as e:
+            print(f"❌ Migration v27 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -1446,3 +1472,49 @@ def migrate_v25_envelope_encryption(conn):
 
     print("  ✅ Envelope encryption migration complete!")
     print("  ⚠️  Users will need to log in with their password to finalize DEK encryption.")
+
+
+def migrate_v26_create_rate_limits(conn):
+    """
+    Create rate_limits table for anti-spam measures.
+    Tracks registration attempts by IP address to prevent bot signups.
+    """
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL,
+            timestamp TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Create index for faster lookups
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_rate_limits_key
+        ON rate_limits(key, timestamp)
+    """)
+
+    print("  Created rate_limits table for anti-spam tracking.")
+
+
+def migrate_v27_add_last_login(conn):
+    """
+    Add last_login_at column to track when users last accessed their account.
+    This enables automatic cleanup of inactive/unused accounts.
+    """
+    c = conn.cursor()
+
+    # Check if column already exists
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'last_login_at' not in columns:
+        c.execute("ALTER TABLE users ADD COLUMN last_login_at TEXT")
+        # Set last_login_at to created_at for existing users (assume they logged in when they signed up)
+        c.execute("UPDATE users SET last_login_at = created_at WHERE last_login_at IS NULL")
+        print("  Added last_login_at column to users table.")
+    else:
+        print("  last_login_at column already exists.")
+
+    conn.commit()

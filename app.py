@@ -3,6 +3,7 @@ import os
 import json
 import logging
 import secrets
+import time
 from logging.handlers import RotatingFileHandler
 from datetime import datetime
 from services import migrations
@@ -663,6 +664,61 @@ def register():
     if request.method == "POST":
         email = request.form.get("email", "").strip()
 
+        # Anti-spam measure 1: Honeypot field check
+        # Bots often fill in all fields, including hidden ones
+        honeypot = request.form.get("website", "")
+        if honeypot:
+            app.logger.warning(f"Registration blocked: honeypot filled for {email}")
+            # Don't tell the bot they failed - just pretend it worked
+            flash("Thanks for signing up! Check your email to verify your account.", "success")
+            return render_template("register.html")
+
+        # Anti-spam measure 2: Time-based validation
+        # Reject submissions that are unrealistically fast (< 3 seconds)
+        form_timestamp = request.form.get("form_timestamp", "")
+        if form_timestamp:
+            try:
+                form_load_time = int(form_timestamp)
+                current_time = int(time.time() * 1000)  # Convert to milliseconds
+                time_taken = (current_time - form_load_time) / 1000  # Convert to seconds
+
+                if time_taken < 3:
+                    app.logger.warning(f"Registration blocked: too fast ({time_taken}s) for {email}")
+                    flash("Please take a moment to review the form.", "error")
+                    return render_template("register.html")
+            except (ValueError, TypeError):
+                app.logger.warning(f"Registration blocked: invalid timestamp for {email}")
+                flash("Invalid form submission. Please try again.", "error")
+                return render_template("register.html")
+
+        # Anti-spam measure 3: Rate limiting by IP
+        # Allow max 3 registration attempts per IP per hour
+        client_ip = request.remote_addr or request.environ.get('HTTP_X_FORWARDED_FOR', 'unknown')
+        rate_limit_key = f"register_attempts:{client_ip}"
+
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+
+        # Check rate limit (stored in a simple table)
+        c.execute("""
+            SELECT COUNT(*) FROM rate_limits
+            WHERE key = ? AND timestamp > datetime('now', '-1 hour')
+        """, (rate_limit_key,))
+        attempt_count = c.fetchone()[0]
+
+        if attempt_count >= 3:
+            app.logger.warning(f"Registration blocked: rate limit exceeded for IP {client_ip}")
+            flash("Too many registration attempts. Please try again later.", "error")
+            conn.close()
+            return render_template("register.html")
+
+        # Record this attempt
+        c.execute("""
+            INSERT INTO rate_limits (key, timestamp) VALUES (?, datetime('now'))
+        """, (rate_limit_key,))
+        conn.commit()
+        conn.close()
+
         if not email:
             flash("Email is required", "error")
             return render_template("register.html")
@@ -778,6 +834,10 @@ def login():
                 session['is_admin'] = (user_role == 'admin')
                 # Store password in session for zero-knowledge encryption of bank credentials
                 session['user_password'] = password
+
+                # Update last login timestamp
+                c.execute("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", (user_id,))
+                conn.commit()
                 conn.close()
                 app.logger.info(f"Password login successful for {user_email}")
                 log_event('login_success', user_id=user_id, event_data={'method': 'password'})
@@ -897,8 +957,8 @@ def recover():
         # Verify recovery code
         is_valid, updated_codes = verify_recovery_code(recovery_code, recovery_codes_json)
         if is_valid:
-            # Update recovery codes (remove used one)
-            c.execute("UPDATE users SET recovery_codes = ? WHERE id = ?", (updated_codes, user_id))
+            # Update recovery codes (remove used one) and last login timestamp
+            c.execute("UPDATE users SET recovery_codes = ?, last_login_at = datetime('now') WHERE id = ?", (updated_codes, user_id))
             conn.commit()
             conn.close()
 
@@ -953,6 +1013,8 @@ def magic_link_auth(token):
 
     # Mark as used
     c.execute("UPDATE magic_links SET used = 1 WHERE id = ?", (link_id,))
+    # Update last login timestamp
+    c.execute("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", (user_id,))
     conn.commit()
     conn.close()
 
@@ -2488,6 +2550,109 @@ def admin_delete_user(user_id):
 
     log_event('admin_user_delete', event_data={'target_user_id': user_id, 'target_email': user_email})
     flash(f"Successfully deleted user {user_email} and all associated data.", "success")
+
+    return redirect("/admin/users")
+
+
+@app.route("/admin/cleanup-inactive", methods=["POST"])
+@admin_required
+def admin_cleanup_inactive():
+    """
+    Clean up inactive user accounts to prevent spam buildup.
+
+    Deletion criteria:
+    - Unverified accounts: inactive for 7+ days
+    - Verified accounts with no loans: inactive for 90+ days
+    - Accounts with loans are never auto-deleted (manual deletion only)
+    """
+    days_unverified = int(request.form.get("days_unverified", 7))
+    days_verified = int(request.form.get("days_verified", 90))
+    dry_run = request.form.get("dry_run") == "1"
+
+    conn = sqlite3.connect(get_db_path())
+    conn.execute("PRAGMA foreign_keys = ON")
+    c = conn.cursor()
+
+    deleted_users = []
+
+    # Find unverified accounts that haven't logged in for X days and have no loans
+    c.execute("""
+        SELECT u.id, u.email, u.created_at, u.last_login_at, u.email_verified
+        FROM users u
+        LEFT JOIN loans l ON l.user_id = u.id
+        WHERE u.email_verified = 0
+        AND (u.last_login_at IS NULL OR u.last_login_at < datetime('now', '-' || ? || ' days'))
+        AND u.role != 'admin'
+        GROUP BY u.id
+        HAVING COUNT(l.id) = 0
+    """, (days_unverified,))
+
+    unverified_users = c.fetchall()
+
+    # Find verified accounts that haven't logged in for X days and have no loans
+    c.execute("""
+        SELECT u.id, u.email, u.created_at, u.last_login_at, u.email_verified
+        FROM users u
+        LEFT JOIN loans l ON l.user_id = u.id
+        WHERE u.email_verified = 1
+        AND (u.last_login_at IS NULL OR u.last_login_at < datetime('now', '-' || ? || ' days'))
+        AND u.role != 'admin'
+        GROUP BY u.id
+        HAVING COUNT(l.id) = 0
+    """, (days_verified,))
+
+    verified_users = c.fetchall()
+
+    candidates = unverified_users + verified_users
+
+    if not dry_run:
+        for user_id, email, created_at, last_login_at, email_verified in candidates:
+            # Delete all user-related data
+            c.execute("DELETE FROM bank_connections WHERE user_id = ?", (user_id,))
+            c.execute("DELETE FROM pending_matches_data WHERE user_id = ?", (user_id,))
+            c.execute("DELETE FROM passkeys WHERE user_id = ?", (user_id,))
+            c.execute("DELETE FROM magic_links WHERE user_id = ?", (user_id,))
+            c.execute("DELETE FROM user_subscriptions WHERE user_id = ?", (user_id,))
+            c.execute("DELETE FROM events WHERE user_id = ?", (user_id,))
+            c.execute("DELETE FROM users WHERE id = ?", (user_id,))
+
+            deleted_users.append({
+                'email': email,
+                'verified': email_verified,
+                'created_at': created_at,
+                'last_login_at': last_login_at
+            })
+
+        conn.commit()
+
+        log_event('admin_cleanup_inactive', event_data={
+            'deleted_count': len(deleted_users),
+            'days_unverified': days_unverified,
+            'days_verified': days_verified
+        })
+
+        flash(f"Successfully deleted {len(deleted_users)} inactive accounts.", "success")
+    else:
+        # Dry run - just show what would be deleted
+        for user_id, email, created_at, last_login_at, email_verified in candidates:
+            deleted_users.append({
+                'email': email,
+                'verified': email_verified,
+                'created_at': created_at,
+                'last_login_at': last_login_at
+            })
+
+        flash(f"Dry run: Found {len(deleted_users)} accounts that would be deleted.", "success")
+
+    conn.close()
+
+    # Store results in session to display on admin page
+    session['cleanup_results'] = {
+        'deleted_users': deleted_users,
+        'dry_run': dry_run,
+        'days_unverified': days_unverified,
+        'days_verified': days_verified
+    }
 
     return redirect("/admin/users")
 
