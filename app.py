@@ -1,7 +1,8 @@
+from flask_wtf import CSRFProtect
+import sys
 import sqlite3
 import json
 import secrets
-import time
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from services import migrations
@@ -12,14 +13,6 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, session, flash, url_for, send_from_directory
 from flask_mail import Mail, Message
 from functools import wraps
-from services.auth_helpers import (
-    generate_recovery_codes,
-    verify_recovery_code,
-    generate_magic_link_token,
-    get_magic_link_expiry,
-    is_magic_link_expired
-)
-from services.email_sender import send_magic_link_email
 import os
 import logging
 import sentry_sdk
@@ -33,7 +26,7 @@ load_dotenv()
 ENV = os.environ.get("FLASK_ENV") or "production"
 
 sentry_sdk.init(
-    dsn="https://930407a171aa9648e71bb8c75cf738b1@o4510260806352896.ingest.us.sentry.io/4510260812054528",
+    dsn=os.getenv("SENTRY_DSN"),
     environment=ENV,          # ← This is the key bit
     integrations=[
         FlaskIntegration(),
@@ -43,10 +36,25 @@ sentry_sdk.init(
 )
 
 app = Flask(__name__)
+csrf = CSRFProtect(app)
+
+app.config.update(
+    SESSION_COOKIE_SECURE=True,       # only over HTTPS
+    SESSION_COOKIE_HTTPONLY=True,     # JS can’t read
+    SESSION_COOKIE_SAMESITE="Lax",    # or "Strict" if OK
+)
 
 # Config
 app.config['DATABASE'] = 'lendifyme.db'
-app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+app.secret_key = os.getenv('SECRET_KEY')
+
+if not app.secret_key:
+    sys.stderr.write(
+        "\nERROR: SECRET_KEY is not set in environment.\n"
+        "Generate one with:\n"
+        "    python -c \"import secrets; print(secrets.token_hex(32))\"\n\n"
+    )
+    sys.exit(1)
 
 # Session config - make sessions last 30 days
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
@@ -103,6 +111,13 @@ print(f"📧 Mailgun configured: {mailgun_configured}")
 print(f"📧 SMTP configured: {smtp_configured}")
 if mailgun_configured:
     print(f"📧 Mailgun domain: {os.getenv('MAILGUN_DOMAIN')}")
+
+# Register blueprints
+from routes.auth import auth_bp, init_mail
+app.register_blueprint(auth_bp)
+init_mail(mail)  # Pass mail instance to auth blueprint
+app.logger.info("Registered auth blueprint")
+print("✅ Registered auth blueprint")  # Pretty output for console
 
 
 # Custom Jinja2 filter for human-friendly date formatting
@@ -659,596 +674,11 @@ def init_db():
 init_db()
 
 
-@app.route("/register", methods=["GET", "POST"])
-def register():
-    """User registration - super simple, just email."""
-    if request.method == "POST":
-        email = request.form.get("email", "").strip()
-
-        # Anti-spam measure 1: Honeypot field check
-        # Bots often fill in all fields, including hidden ones
-        honeypot = request.form.get("website", "")
-        if honeypot:
-            app.logger.warning(f"Registration blocked: honeypot filled for {email}")
-            # Don't tell the bot they failed - just pretend it worked
-            flash("Thanks for signing up! Check your email to verify your account.", "success")
-            return render_template("register.html")
-
-        # Anti-spam measure 2: Time-based validation
-        # Reject submissions that are unrealistically fast (< 2 seconds)
-        form_timestamp = request.form.get("form_timestamp", "")
-        if form_timestamp:
-            try:
-                form_load_time = int(form_timestamp)
-                current_time = int(time.time() * 1000)  # Convert to milliseconds
-                time_taken = (current_time - form_load_time) / 1000  # Convert to seconds
-
-                if time_taken < 1:
-                    app.logger.warning(f"Registration blocked: too fast ({time_taken}s) for {email}")
-                    flash("Please take a moment to review the form.", "error")
-                    return render_template("register.html")
-            except (ValueError, TypeError):
-                app.logger.warning(f"Registration blocked: invalid timestamp for {email}")
-                flash("Invalid form submission. Please try again.", "error")
-                return render_template("register.html")
-
-        # Anti-spam measure 3: Rate limiting by IP
-        # Allow max 3 registration attempts per IP per hour
-        client_ip = request.remote_addr or request.environ.get('HTTP_X_FORWARDED_FOR', 'unknown')
-        rate_limit_key = f"register_attempts:{client_ip}"
-
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
-
-        # Check rate limit (stored in a simple table)
-        c.execute("""
-            SELECT COUNT(*) FROM rate_limits
-            WHERE key = ? AND timestamp > datetime('now', '-1 hour')
-        """, (rate_limit_key,))
-        attempt_count = c.fetchone()[0]
-
-        if attempt_count >= 3 and ENV != 'development':
-            app.logger.warning(f"Registration blocked: rate limit exceeded for IP {client_ip}")
-            flash("Too many registration attempts. Please try again later.", "error")
-            conn.close()
-            return render_template("register.html")
-
-        # Record this attempt
-        c.execute("""
-            INSERT INTO rate_limits (key, timestamp) VALUES (?, datetime('now'))
-        """, (rate_limit_key,))
-        conn.commit()
-        conn.close()
-
-        if not email:
-            flash("Email is required", "error")
-            return render_template("register.html")
-
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
-
-        # Check if email already exists
-        c.execute("SELECT id FROM users WHERE email = ?", (email,))
-        existing = c.fetchone()
-        if existing:
-            flash("Email already registered. Use 'Login' to sign in.", "error")
-            conn.close()
-            return redirect(url_for('login'))
-
-        # Generate recovery codes (for account recovery)
-        plain_codes, hashed_codes_json = generate_recovery_codes()
-
-        # Generate verification token
-        from services.auth_helpers import generate_verification_token, get_verification_expiry
-        verification_token = generate_verification_token()
-        verification_sent_at = get_verification_expiry(hours=0)  # Current time
-
-        # Create user - no name, no password required initially
-        c.execute("""
-            INSERT INTO users (email, recovery_codes, auth_provider, onboarding_completed, email_verified, verification_token, verification_sent_at)
-            VALUES (?, ?, 'magic_link', 0, 0, ?, ?)
-        """, (email, hashed_codes_json, verification_token, verification_sent_at))
-        conn.commit()
-
-        user_id = c.lastrowid
-        conn.close()
-
-        # Log analytics event
-        log_event('user_signed_up', user_id=user_id, event_data={'email': email})
-
-        # Send verification email
-        verification_link = f"{app.config['APP_URL']}/auth/verify/{verification_token}"
-        from services.email_sender import send_verification_email
-        try:
-            success, message = send_verification_email(email, None, verification_link)
-            if success:
-                app.logger.info(f"Verification email sent to {email}")
-            else:
-                app.logger.warning(f"Failed to send verification email: {message}")
-        except Exception as e:
-            app.logger.error(f"Error sending verification email: {e}")
-
-        # Log them in immediately (even though unverified - they can still use basic features)
-        session.permanent = True  # Ensure session persists across redirects
-        session['user_id'] = user_id
-        session['user_email'] = email
-        session['user_name'] = None
-
-        # Store recovery codes for later (they'll see them during onboarding)
-        session['recovery_codes'] = plain_codes
-
-        # Redirect to onboarding
-        return redirect("/onboarding")
-
-    return render_template("register.html")
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    """User login - supports both password and magic link."""
-    if request.method == "POST":
-        app.logger.info("Login POST request received")
-        email = request.form.get("email")
-        password = request.form.get("password")
-        app.logger.info(f"Login attempt for email: {email}")
-
-        if not email:
-            flash("Email is required", "error")
-            return render_template("login.html")
-
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
-
-        c.execute("SELECT id, email, name, password_hash, auth_provider FROM users WHERE email = ?", (email,))
-        user = c.fetchone()
-
-        if not user:
-            # Don't reveal if email exists or not for security
-            app.logger.info(f"User not found for email: {email}")
-            if password:
-                flash("Invalid email or password", "error")
-            else:
-                flash("If that email is registered, you'll receive a magic link shortly.", "success")
-            conn.close()
-            return render_template("login.html")
-
-        user_id, user_email, user_name, password_hash, auth_provider = user
-        app.logger.info(f"User found: {user_id} - {user_email}")
-
-        # If password provided, try password auth
-        if password:
-            if not password_hash:
-                flash("This account uses magic link authentication. Leave password blank to receive a magic link.", "error")
-                conn.close()
-                return render_template("login.html")
-
-            from werkzeug.security import check_password_hash
-            if check_password_hash(password_hash, password):
-                # Password correct - log in
-                # Get user role
-                c.execute("SELECT role FROM users WHERE id = ?", (user_id,))
-                role_row = c.fetchone()
-                user_role = role_row[0] if role_row else 'user'
-
-                session.permanent = True  # Ensure session persists
-                session['user_id'] = user_id
-                session['user_email'] = user_email
-                session['user_name'] = user_name
-                session['is_admin'] = (user_role == 'admin')
-                # Store password in session for zero-knowledge encryption of bank credentials
-                session['user_password'] = password
-                # Clear recovery login flag (they logged in normally)
-                session.pop('logged_in_via_recovery', None)
-
-                # Update last login timestamp
-                c.execute("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", (user_id,))
-                conn.commit()
-
-                # Check if user has a master recovery key and migrate existing loans if needed
-                c.execute("SELECT master_recovery_key_hash, encryption_salt FROM users WHERE id = ?", (user_id,))
-                recovery_info = c.fetchone()
-                master_recovery_key_hash, encryption_salt = recovery_info if recovery_info else (None, None)
-
-                if master_recovery_key_hash and encryption_salt:
-                    # Check if there are loans that need migration
-                    c.execute("""
-                        SELECT id, encrypted_dek FROM loans
-                        WHERE user_id = ? AND encrypted_dek_recovery IS NULL AND encrypted_dek IS NOT NULL
-                    """, (user_id,))
-                    loans_to_migrate = c.fetchall()
-
-                    if loans_to_migrate:
-                        # Check if we have master recovery key in session (from recent password setup)
-                        master_recovery_key = session.get('master_recovery_key')
-
-                        if not master_recovery_key:
-                            # User doesn't have recovery key in session - try to verify it from password
-                            # This won't work for security reasons, so just log it
-                            app.logger.info(f"User {user_id} has {len(loans_to_migrate)} loans that need recovery key encryption, but key not in session")
-                            session['needs_recovery_key_migration'] = len(loans_to_migrate)
-                        else:
-                            # We have the recovery key! Migrate the loans now
-                            from services.encryption import (
-                                decrypt_dek_with_password, encrypt_dek_with_recovery_key
-                            )
-
-                            migrated_count = 0
-                            for loan_id, encrypted_dek in loans_to_migrate:
-                                try:
-                                    # Decrypt DEK with password
-                                    dek = decrypt_dek_with_password(encrypted_dek, password, encryption_salt)
-
-                                    # Re-encrypt with recovery key
-                                    encrypted_dek_recovery = encrypt_dek_with_recovery_key(dek, master_recovery_key, encryption_salt)
-
-                                    # Update loan
-                                    c.execute("""
-                                        UPDATE loans
-                                        SET encrypted_dek_recovery = ?
-                                        WHERE id = ?
-                                    """, (encrypted_dek_recovery, loan_id))
-
-                                    migrated_count += 1
-                                except Exception as e:
-                                    app.logger.error(f"Failed to migrate loan {loan_id}: {e}")
-
-                            if migrated_count > 0:
-                                conn.commit()
-                                app.logger.info(f"Successfully migrated {migrated_count} loans for user {user_id}")
-                                session.pop('needs_recovery_key_migration', None)
-
-                conn.close()
-                app.logger.info(f"Password login successful for {user_email}")
-                log_event('login_success', user_id=user_id, event_data={'method': 'password'})
-
-                # Clear any old sync results
-                session.pop('sync_results', None)
-
-                flash("Welcome back!", "success")
-                return redirect("/")
-            else:
-                # Password incorrect
-                conn.close()
-                app.logger.warning(f"Invalid password for {user_email}")
-                flash("Invalid email or password", "error")
-                return render_template("login.html")
-
-        # No password provided - send magic link
-        user_id, user_email, user_name = user_id, user_email, user_name
-        app.logger.info(f"User requested magic link for {user_id}")
-
-        # Send magic link
-        app.logger.info(f"Generating magic link for user {user_id}")
-        token = generate_magic_link_token()
-        expires_at = get_magic_link_expiry(minutes=15)
-
-        c.execute("""
-            INSERT INTO magic_links (user_id, token, expires_at)
-            VALUES (?, ?, ?)
-        """, (user_id, token, expires_at))
-        conn.commit()
-        conn.close()
-        app.logger.info(f"Magic link token saved to database")
-
-        # Send email with magic link
-        magic_link = f"{app.config['APP_URL']}/auth/magic/{token}"
-        email_sent = False
-        app.logger.info(f"About to send magic link email to {user_email}")
-
-        # Try Mailgun API first (recommended)
-        success, message = send_magic_link_email(user_email, user_name, magic_link)
-        app.logger.info(f"send_magic_link_email returned: success={success}, message={message}")
-        if success:
-            app.logger.info(f"Magic link sent successfully to {user_email}")
-            flash("Check your email! We've sent you a magic link to sign in.", "success")
-            email_sent = True
-        else:
-            app.logger.warning(f"Mailgun failed for {user_email}: {message}")
-            # Try Flask-Mail (SMTP) as fallback
-            if app.config.get('MAIL_USERNAME') and app.config.get('MAIL_DEFAULT_SENDER'):
-                try:
-                    msg = Message(
-                        subject="Your LendifyMe Login Link",
-                        recipients=[user_email],
-                        body=f"""Hi {user_name or 'there'},
-
-Click the link below to sign in to LendifyMe:
-
-{magic_link}
-
-This link will expire in 15 minutes.
-
-If you didn't request this, you can safely ignore this email.
-
----
-LendifyMe
-"""
-                    )
-                    mail.send(msg)
-                    app.logger.info(f"Magic link sent via SMTP to {user_email}")
-                    flash("Check your email! We've sent you a magic link to sign in.", "success")
-                    email_sent = True
-                except Exception as e:
-                    app.logger.error(f"SMTP failed for {user_email}: {str(e)}")
-                    flash(f"Error sending email: {str(e)}", "error")
-
-        # Development mode - print link to console if email failed
-        if not email_sent:
-            app.logger.warning(f"No email provider configured. Magic link for {user_email}: {magic_link}")
-            print("\n" + "="*70)
-            print("🔗 MAGIC LINK (Development Mode - Email not configured)")
-            print("="*70)
-            print(f"User: {user_email}")
-            print(f"Link: {magic_link}")
-            print("="*70 + "\n")
-            flash("Email not configured. Check the console for your magic link!", "success")
-
-        return render_template("login.html")
-
-    return render_template("login.html")
-
-
-@app.route("/auth/recover", methods=["GET", "POST"])
-def recover():
-    """Recovery code login for users who lost email access."""
-    if request.method == "POST":
-        email = request.form.get("email")
-        recovery_code = request.form.get("recovery_code")
-
-        if not email or not recovery_code:
-            flash("Both email and recovery code are required", "error")
-            return render_template("recover.html")
-
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
-
-        c.execute("SELECT id, email, name, recovery_codes FROM users WHERE email = ?", (email,))
-        user = c.fetchone()
-
-        if not user:
-            # Don't reveal if email exists or not for security
-            flash("Invalid email or recovery code", "error")
-            conn.close()
-            return render_template("recover.html")
-
-        user_id, user_email, user_name, recovery_codes_json = user
-
-        # Verify recovery code
-        is_valid, updated_codes = verify_recovery_code(recovery_code, recovery_codes_json)
-        if is_valid:
-            # Update recovery codes (remove used one) and last login timestamp
-            c.execute("UPDATE users SET recovery_codes = ?, last_login_at = datetime('now') WHERE id = ?", (updated_codes, user_id))
-            conn.commit()
-            conn.close()
-
-            # Log them in
-            session.permanent = True  # Ensure session persists
-            session['user_id'] = user_id
-            session['user_email'] = user_email
-            session['user_name'] = user_name
-            session['logged_in_via_recovery'] = True  # Flag to allow password reset without old password
-
-            flash(f"Welcome back, {user_name or user_email}! Recovery code accepted.", "success")
-            return redirect(url_for('index'))
-        else:
-            flash("Invalid email or recovery code", "error")
-            conn.close()
-            return render_template("recover.html")
-
-    return render_template("recover.html")
-
-
-@app.route("/auth/magic/<token>")
-def magic_link_auth(token):
-    """Verify magic link and log user in."""
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-
-    c.execute("""
-        SELECT ml.id, ml.user_id, ml.expires_at, ml.used, u.email, u.name, u.role
-        FROM magic_links ml
-        JOIN users u ON ml.user_id = u.id
-        WHERE ml.token = ?
-    """, (token,))
-
-    result = c.fetchone()
-
-    if not result:
-        flash("Invalid or expired login link", "error")
-        conn.close()
-        return redirect(url_for('login'))
-
-    link_id, user_id, expires_at, used, user_email, user_name, user_role = result
-
-    # Check if already used
-    if used:
-        flash("This login link has already been used", "error")
-        conn.close()
-        return redirect(url_for('login'))
-
-    # Check if expired
-    if is_magic_link_expired(expires_at):
-        flash("This login link has expired. Request a new one.", "error")
-        conn.close()
-        return redirect(url_for('login'))
-
-    # Mark as used
-    c.execute("UPDATE magic_links SET used = 1 WHERE id = ?", (link_id,))
-    # Update last login timestamp
-    c.execute("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-
-    # Log user in
-    session.permanent = True  # Ensure session persists
-    session['user_id'] = user_id
-    session['user_email'] = user_email
-    session['user_name'] = user_name
-    session['is_admin'] = (user_role == 'admin')
-    # Clear recovery login flag (they logged in normally)
-    session.pop('logged_in_via_recovery', None)
-
-    log_event('login_success', user_id=user_id, event_data={'method': 'magic_link'})
-
-    flash(f"Welcome back, {user_name or user_email}!", "success")
-    return redirect(url_for('index'))
-
-
-@app.route("/auth/verify/<token>")
-def verify_email(token):
-    """Verify user's email address via verification token."""
-    from services.auth_helpers import is_verification_expired
-
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-
-    # Find user by verification token
-    c.execute("""
-        SELECT id, email, name, verification_sent_at, email_verified
-        FROM users
-        WHERE verification_token = ?
-    """, (token,))
-
-    result = c.fetchone()
-
-    if not result:
-        flash("Invalid or expired verification link", "error")
-        conn.close()
-        return redirect(url_for('login'))
-
-    user_id, user_email, user_name, verification_sent_at, email_verified = result
-
-    # Check if already verified
-    if email_verified:
-        flash("Your email is already verified!", "success")
-        conn.close()
-        return redirect(url_for('login'))
-
-    # Check if expired (24 hours)
-    if verification_sent_at and is_verification_expired(verification_sent_at, hours=24):
-        flash("This verification link has expired. Request a new one from your account settings.", "error")
-        conn.close()
-        return redirect(url_for('login'))
-
-    # Mark as verified and clear token
-    c.execute("""
-        UPDATE users
-        SET email_verified = 1, verification_token = NULL, verification_sent_at = NULL
-        WHERE id = ?
-    """, (user_id,))
-    conn.commit()
-    conn.close()
-
-    # Log them in if not already logged in
-    if session.get('user_id') != user_id:
-        session['user_id'] = user_id
-        session['user_email'] = user_email
-        session['user_name'] = user_name
-
-    flash("Email verified successfully! 🎉", "success")
-    return redirect(url_for('index'))
-
-
-@app.route("/resend-verification", methods=["POST"])
-@login_required
-def resend_verification():
-    """Resend verification email to current user."""
-    from services.auth_helpers import generate_verification_token, get_verification_expiry
-
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-
-    # Get user details
-    c.execute("SELECT email, name, email_verified FROM users WHERE id = ?", (get_current_user_id(),))
-    user = c.fetchone()
-
-    if not user:
-        flash("User not found", "error")
-        conn.close()
-        return redirect("/")
-
-    email, name, email_verified = user
-
-    # Check if already verified
-    if email_verified:
-        flash("Your email is already verified!", "success")
-        conn.close()
-        return redirect("/")
-
-    # Generate new verification token
-    verification_token = generate_verification_token()
-    verification_sent_at = get_verification_expiry(hours=0)  # Current time
-
-    # Update user with new token
-    c.execute("""
-        UPDATE users
-        SET verification_token = ?, verification_sent_at = ?
-        WHERE id = ?
-    """, (verification_token, verification_sent_at, get_current_user_id()))
-    conn.commit()
-    conn.close()
-
-    # Send verification email
-    verification_link = f"{app.config['APP_URL']}/auth/verify/{verification_token}"
-    from services.email_sender import send_verification_email
-    try:
-        success, message = send_verification_email(email, name, verification_link)
-        if success:
-            app.logger.info(f"Verification email resent to {email}")
-            flash("Verification email sent! Check your inbox.", "success")
-        else:
-            app.logger.warning(f"Failed to resend verification email: {message}")
-            flash("Failed to send email. Please try again later.", "error")
-    except Exception as e:
-        app.logger.error(f"Error sending verification email: {e}")
-        flash("Failed to send email. Please try again later.", "error")
-
-    return redirect("/")
-
-
-@app.route("/auth/recovery-codes")
-@login_required
-def show_recovery_codes():
-    """Show recovery codes and master recovery key after password setup (one-time view)."""
-    if 'show_recovery_codes' not in session:
-        flash("No recovery codes to show", "error")
-        return redirect(url_for('index'))
-
-    codes = session.get('show_recovery_codes')
-    master_recovery_key = session.get('show_master_recovery_key')
-    user_id = session.get('recovery_codes_for_user')
-
-    # Auto-login the user who just registered
-    if user_id:
-        conn = sqlite3.connect(get_db_path())
-        c = conn.cursor()
-        c.execute("SELECT id, email, name FROM users WHERE id = ?", (user_id,))
-        user = c.fetchone()
-        conn.close()
-
-        if user:
-            session['user_id'] = user[0]
-            session['user_email'] = user[1]
-            session['user_name'] = user[2]
-
-    # Clear from session after showing once
-    session.pop('show_recovery_codes', None)
-    session.pop('show_master_recovery_key', None)
-    session.pop('recovery_codes_for_user', None)
-
-    return render_template("recovery_codes.html", codes=codes, master_recovery_key=master_recovery_key)
-
-
-@app.route("/logout")
-def logout():
-    """User logout."""
-    session.clear()
-    flash("You have been logged out", "success")
-    return redirect(url_for('index'))
-
-
 @app.route("/health")
 def health():
+    if ENV != 'development':
+        return "status: ok", 200, {'Content-Type': 'text/plain; charset=utf-8'}
+
     """Health check endpoint with diagnostics."""
     import sys
 
@@ -1536,7 +966,7 @@ def index():
         if borrower and amount:
             from services.encryption import (
                 generate_dek, create_token_from_dek, encrypt_dek_with_password,
-                encrypt_dek_with_recovery_key
+                encrypt_dek_with_recovery_phrase
             )
 
             conn = sqlite3.connect(get_db_path())
@@ -1560,11 +990,11 @@ def index():
             # Encrypt the DEK with user's password (enables lender access)
             encrypted_dek = encrypt_dek_with_password(dek, user_password, encryption_salt)
 
-            # Encrypt the DEK with master recovery key (enables password reset without data loss)
+            # Encrypt the DEK with master recovery phrase (enables password reset without data loss)
             master_recovery_key = session.get('master_recovery_key')
             encrypted_dek_recovery = None
             if master_recovery_key:
-                encrypted_dek_recovery = encrypt_dek_with_recovery_key(dek, master_recovery_key, encryption_salt)
+                encrypted_dek_recovery = encrypt_dek_with_recovery_phrase(dek, master_recovery_key, encryption_salt)
 
             # Prepare loan data for encryption
             loan_data = {
@@ -2792,69 +2222,6 @@ def settings():
     return render_template("settings.html")
 
 
-@app.route("/settings/recovery-codes", methods=["GET", "POST"])
-@login_required
-def settings_recovery_codes():
-    """View and manage recovery codes."""
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-
-    c.execute("SELECT recovery_codes, password_hash FROM users WHERE id = ?", (get_current_user_id(),))
-    user = c.fetchone()
-    conn.close()
-
-    if not user:
-        flash("User not found", "error")
-        return redirect("/")
-
-    recovery_codes_json, password_hash = user
-    has_codes = recovery_codes_json and recovery_codes_json != '[]'
-    has_password = password_hash is not None
-
-    if request.method == "POST":
-        action = request.form.get("action")
-
-        if action == "generate":
-            # Generate new recovery codes
-            password = request.form.get("password", "").strip() if has_password else None
-
-            # Verify password if user has one
-            if has_password:
-                if not password:
-                    flash("Password is required to generate new recovery codes", "error")
-                    return render_template("settings_recovery_codes.html",
-                                         has_codes=has_codes, has_password=has_password)
-
-                from werkzeug.security import check_password_hash
-                if not check_password_hash(password_hash, password):
-                    flash("Incorrect password", "error")
-                    return render_template("settings_recovery_codes.html",
-                                         has_codes=has_codes, has_password=has_password)
-
-            # Generate new codes
-            from services.auth_helpers import generate_recovery_codes
-            plain_codes, hashed_codes_json = generate_recovery_codes()
-
-            # Save to database
-            conn = sqlite3.connect(get_db_path())
-            c = conn.cursor()
-            c.execute("UPDATE users SET recovery_codes = ? WHERE id = ?",
-                     (hashed_codes_json, get_current_user_id()))
-            conn.commit()
-            conn.close()
-
-            flash("New recovery codes generated! Save them in a secure place.", "success")
-            return render_template("settings_recovery_codes.html",
-                                 has_codes=True,
-                                 has_password=has_password,
-                                 new_codes=plain_codes)
-
-    # GET request
-    return render_template("settings_recovery_codes.html",
-                         has_codes=has_codes,
-                         has_password=has_password)
-
-
 # Common passwords blocklist
 COMMON_PASSWORDS = {
     'password', '12345678', '123456789', '12345', '1234567', '123456',
@@ -2923,16 +2290,17 @@ def settings_password():
                 return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             from werkzeug.security import generate_password_hash
-            from services.encryption import generate_encryption_salt, generate_master_recovery_key
+            from services.encryption import generate_encryption_salt, generate_master_recovery_phrase, normalize_recovery_phrase
 
             password_hash = generate_password_hash(new_password)
 
             # Generate encryption salt for zero-knowledge encryption of bank credentials
             encryption_salt = generate_encryption_salt()
 
-            # Generate master recovery key for password recovery without data loss
-            master_recovery_key = generate_master_recovery_key()
-            master_recovery_key_hash = generate_password_hash(master_recovery_key)
+            # Generate master recovery phrase (6 BIP39 words) for password recovery without data loss
+            master_recovery_key = generate_master_recovery_phrase(num_words=6)
+            # Normalize and hash the phrase for verification (same as password hashing)
+            master_recovery_key_hash = generate_password_hash(normalize_recovery_phrase(master_recovery_key))
 
             c.execute("""
                 UPDATE users
@@ -2949,31 +2317,11 @@ def settings_password():
             # (Similar to how we store password in session)
             session['master_recovery_key'] = master_recovery_key
 
-            # Store recovery codes and master recovery key in session to show to user
-            # Get recovery codes that were generated during registration
-            recovery_codes = session.get('recovery_codes', [])
-            if not recovery_codes:
-                # If no codes in session, generate new ones
-                from services.auth_helpers import generate_recovery_codes
-                plain_codes, hashed_codes_json = generate_recovery_codes()
+            # Store master recovery phrase for display (one-time view)
+            session['show_master_recovery_phrase'] = master_recovery_key
 
-                # Update user with recovery codes
-                conn = sqlite3.connect(get_db_path())
-                c = conn.cursor()
-                c.execute("UPDATE users SET recovery_codes = ? WHERE id = ?",
-                         (hashed_codes_json, get_current_user_id()))
-                conn.commit()
-                conn.close()
-
-                recovery_codes = plain_codes
-
-            # Store in session for recovery codes display page
-            session['show_recovery_codes'] = recovery_codes
-            session['show_master_recovery_key'] = master_recovery_key
-            session['recovery_codes_for_user'] = get_current_user_id()
-
-            # Redirect to recovery codes display page
-            return redirect("/auth/recovery-codes")
+            # Redirect to recovery phrase display page
+            return redirect("/auth/recovery-phrase")
 
         elif action == "upgrade":
             # Upgrade existing password to enable bank encryption

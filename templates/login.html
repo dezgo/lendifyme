@@ -113,19 +113,6 @@
         .auth-footer a:hover {
             text-decoration: underline;
         }
-        .recovery-link {
-            text-align: center;
-            margin-top: 1rem;
-            font-size: 0.85rem;
-        }
-        .recovery-link a {
-            color: #6c757d;
-            text-decoration: none;
-        }
-        .recovery-link a:hover {
-            color: #667eea;
-            text-decoration: underline;
-        }
     </style>
 </head>
 <body>
@@ -144,6 +131,7 @@
         {% endwith %}
 
         <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label>Email Address</label>
             <input type="email" name="email" placeholder="your@email.com" required autofocus>
 
@@ -156,10 +144,6 @@
         <div class="magic-info">
             🔐 <strong>Two ways to sign in:</strong><br>
             Enter your password for instant access, or leave it blank to receive a magic link by email
-        </div>
-
-        <div class="recovery-link">
-            <a href="/auth/recover">Lost access to email?</a>
         </div>
 
         <div class="auth-footer">

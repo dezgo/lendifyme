@@ -495,6 +495,7 @@
         <div class="verification-banner-text">Check your inbox and click the verification link to unlock all features. Limited to 2 loans until verified.</div>
     </div>
     <form method="post" action="/resend-verification" style="margin: 0;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="verification-banner-btn">Resend Email</button>
     </form>
 </div>
@@ -516,6 +517,7 @@
         <a href="/match" class="btn btn-secondary">📊 Match Transactions</a>
         {% if session.user_password %}
         <form method="post" action="/sync-banks" style="margin: 0;" id="sync-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-success" id="sync-btn">
                 <span id="sync-icon">🔄</span>
                 <span id="sync-text">Sync Banks</span>
@@ -677,6 +679,7 @@
                         <a href="/loan/{{ loan[0] }}/send-invite" class="btn-small btn-invite">✉️ Send Invite</a>
                     {% endif %}
                     <form method="post" action="/delete/{{ loan[0] }}" style="display: inline;" onsubmit="return confirm('Are you sure you want to delete this loan?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn-small btn-delete">Delete</button>
                     </form>
                 </div>
@@ -711,6 +714,7 @@
         </div>
         <div class="modal-body">
             <form method="post">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div class="form-group">
                     <label class="form-label">Loan Type</label>
                     <select name="loan_type" id="loan_type" class="form-control" onchange="updateLoanLabels()">
@@ -778,6 +782,7 @@
         </div>
         <div class="modal-body">
             <form id="paymentForm" method="post" action="">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div style="background: #f8f9fa; padding: 1rem; border-radius: 6px; margin-bottom: 1.5rem;">
                     <p style="margin: 0; color: #6c757d; font-size: 0.9rem;">Recording payment for:</p>
                     <p style="margin: 0.25rem 0 0 0; font-weight: 600; font-size: 1.1rem;" id="paymentBorrowerName"></p>

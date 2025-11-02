@@ -92,13 +92,14 @@ class TestRegisterRoute:
         assert b'/login' in response.data
 
     def test_successful_registration(self, client, tmpdir):
+
         """Test successful user registration."""
         response = client.post('/register', data={
-            'email': 'newuser@example.com'
+            'email': 'newuser@example.com',
         }, follow_redirects=False)
 
         # Should redirect to recovery codes page
-        assert response.status_code == 302
+        assert response.status_code == 302, response.data.decode()[:2000]
         assert '/onboarding' in response.location
 
         # Verify user was created
@@ -320,9 +321,11 @@ class TestRecoveryCodesPage:
         assert response.status_code == 302
         assert '/login' in response.location
 
-    def test_recovery_codes_page_shows_codes(self, client_with_user, tmpdir):
-        """Test that logged-in users can see recovery codes."""
-        # Log in first and set up recovery codes session
+    def test_recovery_codes_page_shows_codes_once(self, client_with_user, tmpdir):
+        """Recovery codes are shown exactly once right after generation."""
+        import sqlite3
+
+        # Prime the session with a logged-in user and freshly generated codes
         with client_with_user.session_transaction() as sess:
             db_path = tmpdir.join('test.db')
             conn = sqlite3.connect(str(db_path))
@@ -334,18 +337,32 @@ class TestRecoveryCodesPage:
             sess['user_id'] = user[0]
             sess['user_email'] = user[1]
             sess['user_name'] = user[2]
-            # Set recovery codes in session (normally set during registration)
+            # Only set when codes were just generated:
             sess['show_recovery_codes'] = ['CODE1', 'CODE2', 'CODE3', 'CODE4', 'CODE5']
             sess['recovery_codes_for_user'] = user[0]
 
-        response = client_with_user.get('/auth/recovery-codes')
+        # First load: codes are visible
+        resp1 = client_with_user.get('/auth/recovery-codes')
+        assert resp1.status_code == 200
+        assert b'Recovery Codes' in resp1.data
+        assert b'Copy All Codes' in resp1.data
+        assert b'Print Codes' in resp1.data
+        assert any(code in resp1.data for code in [b'CODE1', b'CODE2', b'CODE3', b'CODE4', b'CODE5'])
 
-        assert response.status_code == 200
-        assert b'Recovery Codes' in response.data
-        assert b'Copy All Codes' in response.data
-        assert b'Print Codes' in response.data
-        # Verify at least one code is shown
-        assert b'CODE1' in response.data or b'CODE2' in response.data
+        # Session flags should be cleared after first view
+        with client_with_user.session_transaction() as sess:
+            assert 'show_recovery_codes' not in sess
+            assert 'recovery_codes_for_user' not in sess
+
+        # Second load: no longer visible; typically a redirect away
+        resp2 = client_with_user.get('/auth/recovery-codes', follow_redirects=False)
+        assert resp2.status_code in (302, 303)
+        assert 'Location' in resp2.headers
+
+        # If we follow redirects, ensure codes aren't shown again
+        resp3 = client_with_user.get('/auth/recovery-codes', follow_redirects=True)
+        assert b'Recovery Codes' not in resp3.data
+        assert b'CODE1' not in resp3.data and b'CODE2' not in resp3.data
 
 
 class TestLogout:

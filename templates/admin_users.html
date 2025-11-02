@@ -282,6 +282,7 @@ tr:hover {
         <p>Remove inactive spam and unused accounts. Accounts with loans are never auto-deleted.</p>
 
         <form method="post" action="/admin/cleanup-inactive" class="cleanup-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
                 <label>Unverified Accounts (days inactive)</label>
                 <input type="number" name="days_unverified" value="7" min="1" max="365">
@@ -384,6 +385,7 @@ tr:hover {
                         </td>
                         <td>
                             <form method="post" action="/admin/user/{{ user.id }}/upgrade" class="tier-form">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <select name="tier" required>
                                     <option value="free" {% if user.tier == 'free' %}selected{% endif %}>Free</option>
                                     <option value="basic" {% if user.tier == 'basic' %}selected{% endif %}>Basic</option>
@@ -393,6 +395,7 @@ tr:hover {
                             </form>
                             <form method="post" action="/admin/user/{{ user.id }}/delete"
                                   onsubmit="return confirm('Are you sure you want to delete {{ user.email }}? This will permanently delete all their loans and data. This action cannot be undone.');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                                 <button type="submit" class="delete-btn">Delete User</button>
                             </form>
                         </td>

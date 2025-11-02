@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recovery Phrase – LendifyMe</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: sans-serif;
+            max-width: 600px;
+            margin: 3rem auto;
+            padding: 1rem;
+            line-height: 1.5;
+        }
+        .recovery-container {
+            background: #f8f9fa;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            font-size: 1.75rem;
+            margin-bottom: 0.25rem;
+            text-align: center;
+            color: #dc3545;
+        }
+        .subtitle {
+            text-align: center;
+            color: #555;
+            font-size: 0.95rem;
+            margin-bottom: 1.5rem;
+        }
+        .warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1.5rem;
+        }
+        .warning strong {
+            color: #856404;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        .warning p {
+            color: #856404;
+            margin: 0.4rem 0;
+            font-size: 0.9rem;
+        }
+        .phrase-container {
+            background: white;
+            border: 2px solid #dc3545;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .phrase-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .word-item {
+            background: #fff8f8;
+            border: 1px solid #dc3545;
+            border-radius: 4px;
+            padding: 0.75rem;
+            text-align: center;
+        }
+        .word-number {
+            color: #999;
+            font-size: 0.8rem;
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+        .word-text {
+            font-family: 'Courier New', monospace;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #333;
+        }
+        button, .btn {
+            width: 100%;
+            margin-bottom: 0.75rem;
+            padding: 0.75rem;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            text-decoration: none;
+            display: block;
+            text-align: center;
+        }
+        .btn-primary {
+            background: #198754;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #157347;
+        }
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        @media (max-width: 480px) {
+            .phrase-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+        @media print {
+            button, .btn-secondary { display: none !important; }
+            .recovery-container { box-shadow: none; }
+            body { margin: 0; max-width: 100%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="recovery-container">
+        <h1>🔐 Save Your Recovery Phrase</h1>
+        <p class="subtitle">
+            We built LendifyMe around privacy — your data belongs to you, not us.
+            That means <strong>only you</strong> hold the key to decrypt it.
+        </p>
+
+        <div class="warning">
+            <strong>⚠️ You'll only see this phrase once.</strong>
+            <p>
+                If you ever forget your password, these 6 words are the <strong>only way</strong> to unlock your
+                encrypted data.  Think of them as a <em>spare key</em>. Without them, no one — not even us — can
+                recover your data.
+            </p>
+            <p>
+                We don’t store them for you, because that would break our promise of zero-knowledge privacy.
+                Once you leave this page, the codes are gone — so save them somewhere safe.
+            </p>
+            <p>
+                We also don't send password reset emails like most sites,    because your data is encrypted with a key
+                derived from your password. We never see or store that key — it stays entirely with you.
+                This means even our team can’t peek into your financial information.
+            </p>
+            <p><strong>Save these words in order</strong> in a secure place: a password manager, a printed copy in a
+                safe spot, or your phone’s secure notes.
+            </p>
+        </div>
+
+        <div class="phrase-container">
+            <div class="phrase-grid">
+                {% for word in master_recovery_phrase.split() %}
+                    <div class="word-item">
+                        <span class="word-number">{{ loop.index }}.</span>
+                        <span class="word-text">{{ word }}</span>
+                    </div>
+                {% endfor %}
+            </div>
+            <button onclick="copyPhrase()" class="btn btn-secondary">📋 Copy Recovery Phrase</button>
+        </div>
+
+        <button onclick="window.print()" class="btn btn-secondary">🖨️ Print Recovery Phrase</button>
+        <a href="{% if redirect_to == 'onboarding' %}/onboarding{% else %}/{% endif %}" class="btn btn-primary">✓ I've Saved It — Continue</a>
+    </div>
+
+    <script>
+        function copyPhrase() {
+            const phrase = {{ master_recovery_phrase|tojson }};
+            navigator.clipboard.writeText(phrase)
+                .then(() => alert('Recovery phrase copied to clipboard!'))
+                .catch(() => alert('Failed to copy. Please copy it manually.'));
+        }
+    </script>
+</body>
+</html>

@@ -1,15 +1,32 @@
 # conftest.py
+import re
+from flask.testing import FlaskClient
 import os
 import sys
 import sqlite3
+# --- make CSRF a no-op in tests (global) ---
 import pytest
+import flask_wtf.csrf as csrf_mod
 
+
+_token_re = re.compile(r'name="csrf_token"[^>]*value="([^"]+)"')
 
 # --- Ensure we're in test mode before importing the app ---
 os.environ.setdefault("FLASK_ENV", "test")
 
 # Make project root importable
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+
+@pytest.fixture(autouse=True)
+def _disable_csrf(app, monkeypatch):
+    # If CSRFProtect is registered on the app, disable its request hook
+    ext = getattr(app, "extensions", {}).get("csrf")
+    if ext:
+        monkeypatch.setattr(ext, "protect", lambda: None, raising=False)
+
+    # Also short-circuit direct validators some forms call
+    monkeypatch.setattr(csrf_mod, "validate_csrf", lambda *a, **k: None, raising=False)
 
 
 @pytest.fixture
@@ -27,8 +44,9 @@ def app(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     flask_app.config.update(
         TESTING=True,
+        PROPAGATE_EXCEPTIONS=True,
         SECRET_KEY="test-secret-key",
-        DATABASE=str(db_path),  # single source of truth
+        DATABASE=str(db_path),
     )
 
     # Initialize schema on the temp DB
@@ -44,12 +62,6 @@ def app(tmp_path, monkeypatch):
 
     # Cleanup env var
     monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
-
-
-@pytest.fixture
-def client(app):
-    """Flask test client bound to the temp DB configured in `app`."""
-    return app.test_client()
 
 
 @pytest.fixture
@@ -104,3 +116,63 @@ def logged_in_client(app, client):
         sess['user_password'] = test_password  # Required for bank connection decryption
 
     return client
+
+
+def _extract_csrf(html: str) -> str | None:
+    m = _token_re.search(html or "")
+    return m.group(1) if m else None
+
+
+class CSRFClient(FlaskClient):
+    _cached_csrf = None
+
+    def _ensure_csrf(self, path_hint="/"):
+        if self._cached_csrf:
+            return self._cached_csrf
+        for path in (path_hint, "/register", "/login", "/"):  # add common form pages
+            resp = self.get(path)
+            if resp.status_code == 200:
+                token = _extract_csrf(resp.data.decode("utf-8", "ignore"))
+                if token:
+                    self._cached_csrf = token
+                    return token
+        # No token found — return empty string so posts still go through
+        # (useful for API routes or if CSRF is off/exempt).
+        return ""
+
+    def _with_csrf(self, path, kwargs):
+        # If the test already provided a token, leave it alone
+        if "json" in kwargs:
+            headers = kwargs.setdefault("headers", {})
+            if "X-CSRFToken" not in headers and "X-CSRF-Token" not in headers:
+                token = self._ensure_csrf(path)
+                headers.setdefault("X-CSRFToken", token)
+        else:
+            data = kwargs.setdefault("data", {})
+            if "csrf_token" not in data:
+                token = self._ensure_csrf(path)
+                data["csrf_token"] = token
+        return kwargs
+
+    def post(self, path, *args, **kwargs):
+        kwargs = self._with_csrf(path, kwargs)
+        return super().post(path, *args, **kwargs)
+
+    def put(self, path, *args, **kwargs):
+        kwargs = self._with_csrf(path, kwargs)
+        return super().put(path, *args, **kwargs)
+
+    def patch(self, path, *args, **kwargs):
+        kwargs = self._with_csrf(path, kwargs)
+        return super().patch(path, *args, **kwargs)
+
+    def delete(self, path, *args, **kwargs):
+        kwargs = self._with_csrf(path, kwargs)
+        return super().delete(path, *args, **kwargs)
+
+
+@pytest.fixture
+def client(app):
+    app.test_client_class = CSRFClient
+    with app.test_client() as c:
+        yield c

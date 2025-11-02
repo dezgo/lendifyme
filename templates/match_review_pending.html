@@ -148,10 +148,12 @@
 
         <div class="match-actions">
             <form method="post" action="/match/apply-pending" style="display: inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="match_index" value="{{ loop.index0 }}">
                 <button type="submit" class="btn btn-success">Apply Match</button>
             </form>
             <form method="post" action="/match/reject-pending" style="display: inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="match_index" value="{{ loop.index0 }}">
                 <button type="submit" class="btn btn-danger">Not a Match</button>
             </form>

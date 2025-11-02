@@ -168,6 +168,7 @@
         </div>
 
         <form method="post" action="/">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group">
                 <label for="borrower">Who borrowed money?</label>
                 <input type="text" id="borrower" name="borrower" placeholder="e.g., Alice, Bob, Friend's name" required autofocus>

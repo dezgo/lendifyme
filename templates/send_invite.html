@@ -94,6 +94,7 @@ button:hover {
     </div>
 
     <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <label for="borrower_email">Borrower's Email Address</label>
         <input
             type="email"

@@ -147,6 +147,7 @@
         {% endwith %}
 
         <form method="post" id="registerForm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label>Email Address</label>
             <input type="email" name="email" placeholder="your@email.com" required autofocus>
 

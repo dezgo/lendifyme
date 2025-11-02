@@ -19,6 +19,159 @@ import secrets
 import base64
 
 
+# ============================================================================
+# Human-friendly Master Recovery Phrase (6-word mnemonic)
+# ============================================================================
+
+# Minimal fallback list so the function still works if the BIP39 file is missing.
+# Strongly recommended: place a 2048-word BIP39 English list in the same folder
+# as this file named "bip39_english.txt" (one word per line).
+# Example source: https://github.com/bitcoin/bips/blob/master/bip-0039/english.txt
+_FALLBACK_WORDLIST = [
+    "able","about","above","abuse","access","accident","account","achieve","across","action",
+    "active","actor","adapt","add","adjust","admit","adult","advance","advice","aerobic",
+    "affair","afford","afraid","after","again","agency","agenda","agent","agree","ahead",
+    "aim","air","airport","alarm","album","alert","alien","align","alike","alive",
+    "allow","almost","alone","along","aloud","alpha","alter","always","amazing","ambition",
+    "amount","amuse","anchor","ancient","anger","angle","animal","ankle","announce","annual",
+    "another","answer","anyone","apart","apology","appear","apple","apply","april","arch",
+    "area","argue","arise","arm","army","around","arrange","arrest","arrive","arrow",
+    "art","article","artist","asleep","aspect","assist","assume","athlete","attack","attend",
+    "august","author","auto","autumn","average","avoid","awake","award","aware","away",
+    "awesome","awful","baby","bachelor","back","backup","backyard","bacon","badge","bag",
+    "balance","bald","ball","banana","band","bank","bar","barely","bargain","barrel",
+    "basic","basket","bath","battle","beach","bean","bear","beard","beast","beauty",
+    "because","become","beef","before","begin","behave","behind","believe","bell","belong",
+    "below","belt","bench","benefit","best","betray","better","between","beyond","bicycle",
+    "bid","bike","bill","bird","birth","biscuit","bitter","black","blade","blame",
+    "blank","blast","blend","bless","blind","block","blood","bloom","blouse","blue",
+    "board","boat","body","boil","bold","bolt","bomb","bond","bonus","book",
+    "boost","border","born","boss","both","bother","bottle","bottom","bounce","box",
+    "boy","brain","brand","brave","bread","break","breeze","brick","bridge","brief",
+    "bright","bring","broad","broken","brother","brown","brush","bubble","budget","build",
+    "bulb","bulk","bullet","bundle","bunker","burden","burger","burn","burst","bus",
+    "business","busy","butter","button","buyer","buzz","cabin","cable","cactus","cage",
+    "cake","call","calm","camera","camp","can","canal","cancel","candy","canoe",
+    "canvas","canyon","capable","capital","captain","car","carbon","card","care","cargo",
+    "carpet","carry","cart","case","cash","casino","castle","casual","cat","catch",
+    "category","cattle","cause","caution","cave","ceiling","celebrity","cell","cement","census",
+    "center","central","century","ceramic","certain","chair","chalk","champion","change","chaos",
+    "chapter","charge","chase","chat","cheap","check","cheese","chef","cherry","chess",
+    "chest","chew","chicken","chief","child","chimney","choice","choose","chorus","chuckle",
+    "chunk","church","cigar","cinema","circle","city","civil","claim","clap","clarify",
+    "claw","clean","clear","clerk","clever","click","client","cliff","climate","climb",
+    "clinic","clip","clock","clog","close","cloth","cloud","clown","club","clue"
+]  # ~300 words (~8.2 bits/word). Use BIP39 (2048 words) for ~11 bits/word.
+
+
+def _load_wordlist(path: str = None) -> list[str]:
+    """
+    Load a wordlist. Prefers a local BIP39 English file ('bip39_english.txt').
+    Falls back to a small built-in list if not found.
+
+    Args:
+        path: Optional path to a wordlist file (one word per line).
+
+    Returns:
+        list[str]: Wordlist.
+    """
+    candidates = []
+    if path:
+        candidates.append(path)
+    # Default: next to this file.
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.join(here, "bip39_english.txt"))
+
+    for p in candidates:
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                words = [w.strip() for w in f.readlines() if w.strip()]
+            # Basic sanity: BIP39 is exactly 2048 words.
+            if len(words) >= 2048:
+                return words
+        except Exception:
+            pass
+
+    return _FALLBACK_WORDLIST
+
+
+def generate_master_recovery_phrase(num_words: int = 6, wordlist_path: str | None = None) -> str:
+    """
+    Generate a human-friendly recovery phrase like: 'guitar apple ocean ...' (6 words).
+
+    Security notes:
+      - With a 2048-word list (BIP39), each word ≈ 11 bits. Six words ≈ 66 bits.
+      - That’s strong for a recovery secret when combined with your PBKDF2 settings.
+      - If the fallback list is used (~300 words), entropy is ≈ 6 * log2(300) ≈ 49 bits.
+        This is acceptable for convenience, but add the full BIP39 list in production.
+
+    Args:
+        num_words: Number of words to produce (default 6).
+        wordlist_path: Optional path to a wordlist file.
+
+    Returns:
+        str: Space-separated lowercase words.
+    """
+    words = _load_wordlist(wordlist_path)
+    n = len(words)
+    chosen = [words[secrets.randbelow(n)] for _ in range(num_words)]
+    return " ".join(chosen)
+
+
+def normalize_recovery_phrase(phrase: str) -> str:
+    """
+    Normalize a phrase typed by the user (collapse spaces, lowercase).
+
+    Args:
+        phrase: The phrase as typed/pasted by the user.
+
+    Returns:
+        str: Normalized phrase suitable for key derivation.
+    """
+    parts = [p.strip().lower() for p in phrase.strip().split()]
+    parts = [p for p in parts if p]  # remove empties
+    return " ".join(parts)
+
+
+def encrypt_dek_with_recovery_phrase(dek: bytes, phrase: str, salt_b64: str) -> str:
+    """
+    Encrypt a DEK using a human-friendly recovery phrase (6 words).
+
+    Args:
+        dek: Data encryption key (Fernet base64).
+        phrase: Space-separated words (e.g., from generate_master_recovery_phrase()).
+        salt_b64: User's encryption salt (base64).
+
+    Returns:
+        str: Encrypted DEK suitable for storage (encrypted_dek_recovery).
+    """
+    phrase_norm = normalize_recovery_phrase(phrase)
+    key = derive_key_from_password(phrase_norm, salt_b64)
+    f = Fernet(key)
+    return f.encrypt(dek).decode()
+
+
+def decrypt_dek_with_recovery_phrase(encrypted_dek_recovery: str, phrase: str, salt_b64: str) -> bytes:
+    """
+    Decrypt a DEK using the human-friendly recovery phrase.
+
+    Args:
+        encrypted_dek_recovery: Stored encrypted DEK (string).
+        phrase: Space-separated words entered by the user.
+        salt_b64: User's encryption salt (base64).
+
+    Returns:
+        bytes: The decrypted DEK.
+
+    Raises:
+        cryptography.fernet.InvalidToken: If phrase is wrong or data corrupted.
+    """
+    phrase_norm = normalize_recovery_phrase(phrase)
+    key = derive_key_from_password(phrase_norm, salt_b64)
+    f = Fernet(key)
+    return f.decrypt(encrypted_dek_recovery.encode())
+
+
 def get_encryption_key():
     """
     Get the encryption key from environment variables.

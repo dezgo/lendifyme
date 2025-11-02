@@ -259,6 +259,7 @@ input[type="password"]:focus {
         {% endif %}
 
         <form method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="action" value="generate">
 
             {% if has_password %}
