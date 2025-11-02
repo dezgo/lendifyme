@@ -672,7 +672,7 @@ def register():
             return render_template("register.html")
 
         # Anti-spam measure 2: Time-based validation
-        # Reject submissions that are unrealistically fast (< 3 seconds)
+        # Reject submissions that are unrealistically fast (< 2 seconds)
         form_timestamp = request.form.get("form_timestamp", "")
         if form_timestamp:
             try:
@@ -680,7 +680,7 @@ def register():
                 current_time = int(time.time() * 1000)  # Convert to milliseconds
                 time_taken = (current_time - form_load_time) / 1000  # Convert to seconds
 
-                if time_taken < 3:
+                if time_taken < 1:
                     app.logger.warning(f"Registration blocked: too fast ({time_taken}s) for {email}")
                     flash("Please take a moment to review the form.", "error")
                     return render_template("register.html")
