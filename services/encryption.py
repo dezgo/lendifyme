@@ -365,3 +365,89 @@ def decrypt_field(encrypted_value: str, dek: bytes) -> str:
         return None
     f = Fernet(dek)
     return f.decrypt(encrypted_value.encode()).decode()
+
+
+# ============================================================================
+# Master Recovery Key (for password recovery without data loss)
+# ============================================================================
+
+def generate_master_recovery_key() -> str:
+    """
+    Generate a strong master recovery key for password recovery.
+
+    The master recovery key is a 32-character alphanumeric key that's shown
+    to the user ONCE during registration. It allows password reset without
+    data loss by providing an alternative way to decrypt DEKs.
+
+    Returns:
+        str: A 32-character recovery key (e.g., "a3f7d9e2b8c1...")
+
+    Example:
+        >>> key = generate_master_recovery_key()
+        >>> len(key)
+        32
+    """
+    # Generate 32 random bytes and convert to hex (64 chars), then take first 32
+    # This gives us a strong 128-bit key that's easy to type
+    return secrets.token_hex(16)  # 16 bytes = 32 hex characters
+
+
+def encrypt_dek_with_recovery_key(dek: bytes, recovery_key: str, salt_b64: str) -> str:
+    """
+    Encrypt a DEK with the master recovery key.
+
+    This creates a second encrypted copy of the DEK that can be used to
+    reset the user's password without losing access to their data.
+
+    Args:
+        dek: The data encryption key to encrypt
+        recovery_key: The master recovery key (32-character hex string)
+        salt_b64: User's encryption salt from database
+
+    Returns:
+        str: Encrypted DEK safe for database storage in encrypted_dek_recovery
+
+    Example:
+        >>> dek = generate_dek()
+        >>> recovery_key = generate_master_recovery_key()
+        >>> salt = generate_encryption_salt()
+        >>> encrypted = encrypt_dek_with_recovery_key(dek, recovery_key, salt)
+    """
+    # Derive a key from the recovery key using the same KDF as passwords
+    # This ensures consistent encryption strength
+    recovery_encryption_key = derive_key_from_password(recovery_key, salt_b64)
+    f = Fernet(recovery_encryption_key)
+    return f.encrypt(dek).decode()
+
+
+def decrypt_dek_with_recovery_key(encrypted_dek_recovery: str, recovery_key: str, salt_b64: str) -> bytes:
+    """
+    Decrypt a DEK using the master recovery key.
+
+    Used during password reset to decrypt all DEKs and re-encrypt them
+    with the new password.
+
+    Args:
+        encrypted_dek_recovery: The encrypted DEK from loans.encrypted_dek_recovery
+        recovery_key: The master recovery key (provided by user)
+        salt_b64: User's encryption salt from database
+
+    Returns:
+        bytes: The decrypted data encryption key
+
+    Raises:
+        cryptography.fernet.InvalidToken: If recovery key is wrong
+
+    Example:
+        >>> dek = generate_dek()
+        >>> recovery_key = generate_master_recovery_key()
+        >>> salt = generate_encryption_salt()
+        >>> encrypted = encrypt_dek_with_recovery_key(dek, recovery_key, salt)
+        >>> decrypted = decrypt_dek_with_recovery_key(encrypted, recovery_key, salt)
+        >>> decrypted == dek
+        True
+    """
+    # Derive key from recovery key using same KDF
+    recovery_encryption_key = derive_key_from_password(recovery_key, salt_b64)
+    f = Fernet(recovery_encryption_key)
+    return f.decrypt(encrypted_dek_recovery.encode())

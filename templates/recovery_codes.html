@@ -193,14 +193,33 @@
     <div class="toast-container" id="toast-container"></div>
 
     <div class="recovery-container">
-        <h1>🔐 Save Your Recovery Codes</h1>
+        <h1>🔐 Save Your Recovery Information</h1>
 
         <div class="warning">
-            <strong>⚠️ IMPORTANT - Save These Now!</strong>
-            <p>These recovery codes are shown ONLY ONCE.</p>
-            <p>Save them somewhere safe (password manager, printed copy, etc.)</p>
-            <p>You'll need one if you ever lose access to your email.</p>
+            <strong>⚠️ CRITICAL - Save These Now!</strong>
+            <p>This information is shown ONLY ONCE and cannot be recovered.</p>
+            <p>Save it somewhere safe (password manager, printed copy, safe deposit box).</p>
+            <p>You'll need this if you forget your password or lose access to your email.</p>
         </div>
+
+        {% if master_recovery_key %}
+        <h2 style="margin-top: 2rem; margin-bottom: 0.5rem; color: #dc3545; font-size: 1.25rem;">🔑 Master Recovery Key</h2>
+        <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
+            This key allows you to reset your password without losing access to your encrypted data.
+            <strong>Keep this extremely safe!</strong>
+        </p>
+        <div style="background: white; border: 2px solid #dc3545; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem;">
+            <div style="font-family: 'Courier New', monospace; font-size: 1.25rem; font-weight: bold; text-align: center; color: #dc3545; letter-spacing: 2px; word-break: break-all;">
+                {{ master_recovery_key }}
+            </div>
+            <button onclick="copyMasterKey()" class="btn btn-secondary" style="margin-top: 1rem;">📋 Copy Master Recovery Key</button>
+        </div>
+        {% endif %}
+
+        <h2 style="margin-bottom: 0.5rem; color: #333; font-size: 1.25rem;">🎫 One-Time Recovery Codes</h2>
+        <p style="margin-bottom: 1rem; color: #666; font-size: 0.95rem;">
+            Use these to sign in if you lose access to your email. Each code can only be used once.
+        </p>
 
         <div class="codes-grid">
             {% for code in codes %}
@@ -208,12 +227,14 @@
             {% endfor %}
         </div>
 
-        <button onclick="copyAllCodes()" class="btn btn-secondary">📋 Copy All Codes</button>
-        <button onclick="window.print()" class="btn btn-secondary">🖨️ Print Codes</button>
-        <a href="/" class="btn btn-primary">✓ I've Saved My Codes - Continue</a>
+        <button onclick="copyAllCodes()" class="btn btn-secondary">📋 Copy All Recovery Codes</button>
+        <button onclick="window.print()" class="btn btn-secondary">🖨️ Print Everything</button>
+        <a href="/" class="btn btn-primary">✓ I've Saved Everything - Continue</a>
 
         <div class="info">
-            💡 <strong>Tip:</strong> Each code can only be used once. When you use a code to sign in, it will be permanently deleted.
+            💡 <strong>What's the difference?</strong><br>
+            • <strong>Master Recovery Key:</strong> Reusable. Lets you reset your password and keep your encrypted data.<br>
+            • <strong>Recovery Codes:</strong> Single-use. Let you sign in without email access. One code is consumed each time.
         </div>
     </div>
 
@@ -247,6 +268,15 @@
             const toast = button.closest('.toast');
             toast.classList.add('hiding');
             setTimeout(() => toast.remove(), 300);
+        }
+
+        function copyMasterKey() {
+            const key = {{ master_recovery_key|tojson }};
+            navigator.clipboard.writeText(key).then(() => {
+                showToast('Master recovery key copied to clipboard!', 'success');
+            }).catch(err => {
+                showToast('Failed to copy key. Please select and copy it manually.', 'error');
+            });
         }
 
         function copyAllCodes() {

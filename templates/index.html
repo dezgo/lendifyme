@@ -474,6 +474,19 @@
 {% endblock %}
 
 {% block content %}
+{% if not has_password %}
+<div class="verification-banner" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-color: #5568d3;">
+    <div class="verification-banner-icon">🔒</div>
+    <div class="verification-banner-content">
+        <div class="verification-banner-title" style="color: white;">Secure Your Account</div>
+        <div class="verification-banner-text" style="color: rgba(255,255,255,0.9);">Set up a password to encrypt your loan data with zero-knowledge encryption. Your data will be completely private!</div>
+    </div>
+    <a href="/settings/password?redirect=dashboard" class="verification-banner-btn" style="text-decoration: none; background: white; color: #667eea;">
+        Set Up Password
+    </a>
+</div>
+{% endif %}
+
 {% if not email_verified %}
 <div class="verification-banner">
     <div class="verification-banner-icon">📧</div>
@@ -491,9 +504,15 @@
 <div class="action-bar">
     <h2 class="page-title">Your Loans</h2>
     <div style="display: flex; gap: 0.75rem;">
+        {% if has_password %}
         <button onclick="openModal()" class="btn btn-primary">
             <span>+</span> Add New Loan
         </button>
+        {% else %}
+        <a href="/settings/password?redirect=dashboard" class="btn btn-primary">
+            <span>🔒</span> Set Up Password to Add Loans
+        </a>
+        {% endif %}
         <a href="/match" class="btn btn-secondary">📊 Match Transactions</a>
         {% if session.user_password %}
         <form method="post" action="/sync-banks" style="margin: 0;" id="sync-form">
@@ -669,10 +688,17 @@
     <div class="empty-state">
         <div class="empty-icon">💸</div>
         <h3 class="empty-title">No loans yet</h3>
+        {% if has_password %}
         <p class="empty-text">Start tracking your loans by adding your first one.</p>
         <button onclick="openModal()" class="btn btn-primary">
             <span>+</span> Add Your First Loan
         </button>
+        {% else %}
+        <p class="empty-text">Set up a password to start securely tracking your loans with encryption.</p>
+        <a href="/settings/password?redirect=dashboard" class="btn btn-primary" style="text-decoration: none;">
+            <span>🔒</span> Set Up Password
+        </a>
+        {% endif %}
     </div>
 {% endif %}
 

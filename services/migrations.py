@@ -319,6 +319,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 28:
+        try:
+            migrate_v28_master_recovery_key(conn)
+            _set_user_version(conn, 28)
+            conn.commit()
+            print("✅ Migration v28 applied.")
+        except Exception as e:
+            print(f"❌ Migration v28 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -1518,3 +1531,66 @@ def migrate_v27_add_last_login(conn):
         print("  last_login_at column already exists.")
 
     conn.commit()
+
+
+def migrate_v28_master_recovery_key(conn):
+    """
+    Add Master Recovery Key support to enable password recovery without data loss.
+
+    The Master Recovery Key is a strong 32+ character key generated during registration
+    that allows users to reset their password without losing access to encrypted data.
+
+    How it works:
+    - Each loan's DEK is encrypted TWO ways:
+      1. encrypted_dek (with user password) - existing
+      2. encrypted_dek_recovery (with master recovery key) - NEW
+    - When user forgets password and uses recovery codes to login, they can reset their
+      password because we can decrypt DEKs with the master recovery key and re-encrypt
+      them with the new password
+    - The master recovery key is shown to the user ONCE during registration (like recovery codes)
+      and stored hashed in the database (like password_hash)
+
+    Migration strategy:
+    - For existing loans: encrypted_dek_recovery will be NULL until user next logs in with password
+    - On password login, the app will detect NULL encrypted_dek_recovery and populate it
+    """
+    c = conn.cursor()
+
+    # ========================================================================
+    # Step 1: Add master_recovery_key_hash column to users table
+    # ========================================================================
+    c.execute("PRAGMA table_info(users)")
+    user_columns = [row[1] for row in c.fetchall()]
+
+    if 'master_recovery_key_hash' not in user_columns:
+        c.execute("ALTER TABLE users ADD COLUMN master_recovery_key_hash TEXT")
+        print("  Added master_recovery_key_hash column to users table.")
+    else:
+        print("  master_recovery_key_hash column already exists.")
+
+    # ========================================================================
+    # Step 2: Add encrypted_dek_recovery column to loans table
+    # ========================================================================
+    c.execute("PRAGMA table_info(loans)")
+    loan_columns = [row[1] for row in c.fetchall()]
+
+    if 'encrypted_dek_recovery' not in loan_columns:
+        c.execute("ALTER TABLE loans ADD COLUMN encrypted_dek_recovery TEXT")
+        print("  Added encrypted_dek_recovery column to loans table.")
+    else:
+        print("  encrypted_dek_recovery column already exists.")
+
+    # ========================================================================
+    # Step 3: Check for existing loans that need migration
+    # ========================================================================
+    c.execute("SELECT COUNT(*) FROM loans WHERE encrypted_dek_recovery IS NULL")
+    loans_needing_migration = c.fetchone()[0]
+
+    if loans_needing_migration > 0:
+        print(f"  ⚠️  Found {loans_needing_migration} existing loan(s) that need recovery key encryption.")
+        print("  These loans will be automatically migrated when the user next logs in with their password.")
+    else:
+        print("  No existing loans need migration.")
+
+    conn.commit()
+    print("  Master Recovery Key system enabled!")

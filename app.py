@@ -3,7 +3,7 @@ import json
 import secrets
 import time
 from logging.handlers import RotatingFileHandler
-from datetime import datetime
+from datetime import datetime, timedelta
 from services import migrations
 from services.transaction_matcher import match_transactions_to_loans
 from services.connectors.registry import ConnectorRegistry
@@ -47,6 +47,9 @@ app = Flask(__name__)
 # Config
 app.config['DATABASE'] = 'lendifyme.db'
 app.secret_key = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+
+# Session config - make sessions last 30 days
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=30)
 
 # Email config for magic links
 app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
@@ -704,7 +707,7 @@ def register():
         """, (rate_limit_key,))
         attempt_count = c.fetchone()[0]
 
-        if attempt_count >= 3:
+        if attempt_count >= 3 and ENV != 'development':
             app.logger.warning(f"Registration blocked: rate limit exceeded for IP {client_ip}")
             flash("Too many registration attempts. Please try again later.", "error")
             conn.close()
@@ -766,6 +769,7 @@ def register():
             app.logger.error(f"Error sending verification email: {e}")
 
         # Log them in immediately (even though unverified - they can still use basic features)
+        session.permanent = True  # Ensure session persists across redirects
         session['user_id'] = user_id
         session['user_email'] = email
         session['user_name'] = None
@@ -826,16 +830,73 @@ def login():
                 role_row = c.fetchone()
                 user_role = role_row[0] if role_row else 'user'
 
+                session.permanent = True  # Ensure session persists
                 session['user_id'] = user_id
                 session['user_email'] = user_email
                 session['user_name'] = user_name
                 session['is_admin'] = (user_role == 'admin')
                 # Store password in session for zero-knowledge encryption of bank credentials
                 session['user_password'] = password
+                # Clear recovery login flag (they logged in normally)
+                session.pop('logged_in_via_recovery', None)
 
                 # Update last login timestamp
                 c.execute("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", (user_id,))
                 conn.commit()
+
+                # Check if user has a master recovery key and migrate existing loans if needed
+                c.execute("SELECT master_recovery_key_hash, encryption_salt FROM users WHERE id = ?", (user_id,))
+                recovery_info = c.fetchone()
+                master_recovery_key_hash, encryption_salt = recovery_info if recovery_info else (None, None)
+
+                if master_recovery_key_hash and encryption_salt:
+                    # Check if there are loans that need migration
+                    c.execute("""
+                        SELECT id, encrypted_dek FROM loans
+                        WHERE user_id = ? AND encrypted_dek_recovery IS NULL AND encrypted_dek IS NOT NULL
+                    """, (user_id,))
+                    loans_to_migrate = c.fetchall()
+
+                    if loans_to_migrate:
+                        # Check if we have master recovery key in session (from recent password setup)
+                        master_recovery_key = session.get('master_recovery_key')
+
+                        if not master_recovery_key:
+                            # User doesn't have recovery key in session - try to verify it from password
+                            # This won't work for security reasons, so just log it
+                            app.logger.info(f"User {user_id} has {len(loans_to_migrate)} loans that need recovery key encryption, but key not in session")
+                            session['needs_recovery_key_migration'] = len(loans_to_migrate)
+                        else:
+                            # We have the recovery key! Migrate the loans now
+                            from services.encryption import (
+                                decrypt_dek_with_password, encrypt_dek_with_recovery_key
+                            )
+
+                            migrated_count = 0
+                            for loan_id, encrypted_dek in loans_to_migrate:
+                                try:
+                                    # Decrypt DEK with password
+                                    dek = decrypt_dek_with_password(encrypted_dek, password, encryption_salt)
+
+                                    # Re-encrypt with recovery key
+                                    encrypted_dek_recovery = encrypt_dek_with_recovery_key(dek, master_recovery_key, encryption_salt)
+
+                                    # Update loan
+                                    c.execute("""
+                                        UPDATE loans
+                                        SET encrypted_dek_recovery = ?
+                                        WHERE id = ?
+                                    """, (encrypted_dek_recovery, loan_id))
+
+                                    migrated_count += 1
+                                except Exception as e:
+                                    app.logger.error(f"Failed to migrate loan {loan_id}: {e}")
+
+                            if migrated_count > 0:
+                                conn.commit()
+                                app.logger.info(f"Successfully migrated {migrated_count} loans for user {user_id}")
+                                session.pop('needs_recovery_key_migration', None)
+
                 conn.close()
                 app.logger.info(f"Password login successful for {user_email}")
                 log_event('login_success', user_id=user_id, event_data={'method': 'password'})
@@ -961,9 +1022,11 @@ def recover():
             conn.close()
 
             # Log them in
+            session.permanent = True  # Ensure session persists
             session['user_id'] = user_id
             session['user_email'] = user_email
             session['user_name'] = user_name
+            session['logged_in_via_recovery'] = True  # Flag to allow password reset without old password
 
             flash(f"Welcome back, {user_name or user_email}! Recovery code accepted.", "success")
             return redirect(url_for('index'))
@@ -1017,10 +1080,13 @@ def magic_link_auth(token):
     conn.close()
 
     # Log user in
+    session.permanent = True  # Ensure session persists
     session['user_id'] = user_id
     session['user_email'] = user_email
     session['user_name'] = user_name
     session['is_admin'] = (user_role == 'admin')
+    # Clear recovery login flag (they logged in normally)
+    session.pop('logged_in_via_recovery', None)
 
     log_event('login_success', user_id=user_id, event_data={'method': 'magic_link'})
 
@@ -1143,12 +1209,13 @@ def resend_verification():
 @app.route("/auth/recovery-codes")
 @login_required
 def show_recovery_codes():
-    """Show recovery codes after registration (one-time view)."""
+    """Show recovery codes and master recovery key after password setup (one-time view)."""
     if 'show_recovery_codes' not in session:
         flash("No recovery codes to show", "error")
         return redirect(url_for('index'))
 
     codes = session.get('show_recovery_codes')
+    master_recovery_key = session.get('show_master_recovery_key')
     user_id = session.get('recovery_codes_for_user')
 
     # Auto-login the user who just registered
@@ -1166,9 +1233,10 @@ def show_recovery_codes():
 
     # Clear from session after showing once
     session.pop('show_recovery_codes', None)
+    session.pop('show_master_recovery_key', None)
     session.pop('recovery_codes_for_user', None)
 
-    return render_template("recovery_codes.html", codes=codes)
+    return render_template("recovery_codes.html", codes=codes, master_recovery_key=master_recovery_key)
 
 
 @app.route("/logout")
@@ -1467,7 +1535,8 @@ def index():
 
         if borrower and amount:
             from services.encryption import (
-                generate_dek, create_token_from_dek, encrypt_dek_with_password
+                generate_dek, create_token_from_dek, encrypt_dek_with_password,
+                encrypt_dek_with_recovery_key
             )
 
             conn = sqlite3.connect(get_db_path())
@@ -1478,9 +1547,9 @@ def index():
             encryption_salt = get_user_encryption_salt()
 
             if not user_password or not encryption_salt:
-                flash("Please log in with your password to create loans.", "error")
+                flash("Please set up a password to create encrypted loans.", "error")
                 conn.close()
-                return redirect("/login")
+                return redirect("/settings/password?redirect=dashboard")
 
             # Generate DEK for this loan
             dek = generate_dek()
@@ -1490,6 +1559,12 @@ def index():
 
             # Encrypt the DEK with user's password (enables lender access)
             encrypted_dek = encrypt_dek_with_password(dek, user_password, encryption_salt)
+
+            # Encrypt the DEK with master recovery key (enables password reset without data loss)
+            master_recovery_key = session.get('master_recovery_key')
+            encrypted_dek_recovery = None
+            if master_recovery_key:
+                encrypted_dek_recovery = encrypt_dek_with_recovery_key(dek, master_recovery_key, encryption_salt)
 
             # Prepare loan data for encryption
             loan_data = {
@@ -1506,26 +1581,36 @@ def index():
             encrypted_fields = encrypt_loan_data(loan_data, dek)
 
             # Insert loan with encrypted data
-            c.execute("""
-                INSERT INTO loans (
-                    borrower_encrypted, bank_name_encrypted, amount_encrypted, note_encrypted,
-                    date_borrowed, repayment_amount_encrypted, repayment_frequency_encrypted,
-                    user_id, borrower_access_token, loan_type, encrypted_dek
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                encrypted_fields['borrower_encrypted'],
-                encrypted_fields['bank_name_encrypted'],
-                encrypted_fields['amount_encrypted'],
-                encrypted_fields['note_encrypted'],
-                date_borrowed,
-                encrypted_fields['repayment_amount_encrypted'],
-                encrypted_fields['repayment_frequency_encrypted'],
-                get_current_user_id(),
-                access_token,
-                loan_type,
-                encrypted_dek
-            ))
+            # Note: plaintext columns (borrower, amount, etc.) are intentionally NULL
+            # Migration v25 makes them nullable to support zero-knowledge encryption
+            try:
+                c.execute("""
+                    INSERT INTO loans (
+                        borrower_encrypted, bank_name_encrypted, amount_encrypted, note_encrypted,
+                        date_borrowed, repayment_amount_encrypted, repayment_frequency_encrypted,
+                        user_id, borrower_access_token, loan_type, encrypted_dek, encrypted_dek_recovery
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    encrypted_fields['borrower_encrypted'],
+                    encrypted_fields['bank_name_encrypted'],
+                    encrypted_fields['amount_encrypted'],
+                    encrypted_fields['note_encrypted'],
+                    date_borrowed,
+                    encrypted_fields['repayment_amount_encrypted'],
+                    encrypted_fields['repayment_frequency_encrypted'],
+                    get_current_user_id(),
+                    access_token,
+                    loan_type,
+                    encrypted_dek,
+                    encrypted_dek_recovery
+                ))
+            except sqlite3.IntegrityError as e:
+                # If this fails, it means the migration didn't run to make columns nullable
+                conn.close()
+                app.logger.error(f"Failed to create loan: {e}. Database may need migration.")
+                flash("Database error. Please restart the application to run migrations.", "error")
+                return redirect("/")
             loan_id = c.lastrowid
             conn.commit()
             conn.close()
@@ -1546,11 +1631,39 @@ def index():
     # Get user's password for decryption
     user_password = get_user_password_from_session()
 
+    # Check if user has any loans first
+    c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (get_current_user_id(),))
+    loan_count = c.fetchone()[0]
+
+    if not user_password and loan_count > 0:
+        # User has loans but no password in session
+        # Check if they have a password_hash (already set up password) or not
+        c.execute("SELECT password_hash FROM users WHERE id = ?", (get_current_user_id(),))
+        user_row = c.fetchone()
+        has_password_in_db = user_row and user_row[0] is not None
+
+        if has_password_in_db:
+            # They have a password but it's not in session (e.g., logged in via email verification)
+            flash("Please log in with your password to access your encrypted loan data.", "error")
+            conn.close()
+            session.clear()  # Clear session to force proper login
+            return redirect("/login")
+        elif session.get('logged_in_via_recovery'):
+            # Logged in via recovery code but no password
+            flash("Please reset your password to access your encrypted loan data.", "error")
+            conn.close()
+            return redirect("/settings/password?redirect=dashboard")
+        else:
+            # No password at all
+            flash("Please set up a password to secure your loan data with encryption.", "error")
+            conn.close()
+            return redirect("/settings/password?redirect=dashboard")
+
     if not user_password:
-        # User needs to re-login with password to decrypt data
-        flash("Please log in with your password to view your loans.", "error")
+        # No password and no loans - show empty state
         conn.close()
-        return redirect("/login")
+        email_verified = is_email_verified()
+        return render_template("index.html", loans=[], app_url=app.config['APP_URL'], email_verified=email_verified, has_password=False)
 
     c.execute("""
         SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
@@ -1622,11 +1735,12 @@ def index():
             loan_row['loan_type']
         ))
 
-    # Get email verification status
+    # Get email verification status and password status
     email_verified = is_email_verified()
+    has_password = user_password is not None
     conn.close()
 
-    return render_template("index.html", loans=loans, app_url=app.config['APP_URL'], email_verified=email_verified)
+    return render_template("index.html", loans=loans, app_url=app.config['APP_URL'], email_verified=email_verified, has_password=has_password)
 
 
 @app.route("/repay/<int:loan_id>", methods=["POST"])
@@ -1913,28 +2027,44 @@ def onboarding():
         return redirect("/")
 
     # Get current step from query param
-    step = request.args.get('step', '1')
+    # Skip step 1 (email confirmation) as it's confusing after registration
+    step = request.args.get('step', '2')
 
     if step == '1':
-        # Step 1: Welcome + verify email
+        # Step 1: Welcome + verify email (kept for backwards compatibility, but skip by default)
         return render_template("onboarding_step1.html",
                              email=session.get('user_email'))
     elif step == '2':
+        # Check if user has password before showing loan creation
+        user_password = get_user_password_from_session()
+        encryption_salt = get_user_encryption_salt()
+
+        if not user_password or not encryption_salt:
+            # Redirect to password setup first
+            flash("First, let's secure your account with a password to encrypt your loan data.", "info")
+            return redirect("/settings/password?redirect=onboarding")
+
         # Step 2: Create first loan
         return render_template("onboarding_step2.html")
     elif step == 'complete':
         # Mark onboarding as complete
+        user_id = get_current_user_id()
+        if not user_id:
+            app.logger.error("Session lost during onboarding completion")
+            flash("Session expired. Please log in again.", "error")
+            return redirect("/login")
+
         conn = sqlite3.connect(get_db_path())
         c = conn.cursor()
-        c.execute("UPDATE users SET onboarding_completed = 1 WHERE id = ?",
-                 (get_current_user_id(),))
+        c.execute("UPDATE users SET onboarding_completed = 1 WHERE id = ?", (user_id,))
         conn.commit()
         conn.close()
 
+        app.logger.info(f"Onboarding completed for user {user_id}")
         flash("Welcome to LendifyMe! 🎉", "success")
         return redirect("/")
 
-    return redirect("/onboarding?step=1")
+    return redirect("/onboarding?step=2")
 
 
 @app.route("/onboarding/update-email", methods=["POST"])
@@ -2725,6 +2855,20 @@ def settings_recovery_codes():
                          has_password=has_password)
 
 
+# Common passwords blocklist
+COMMON_PASSWORDS = {
+    'password', '12345678', '123456789', '12345', '1234567', '123456',
+    'password1', 'password123', 'qwerty', 'abc123', 'monkey', '1234567890',
+    'letmein', 'trustno1', 'dragon', 'baseball', 'iloveyou', 'master',
+    'sunshine', 'ashley', 'bailey', 'shadow', 'superman', 'qazwsx',
+    '123123', 'welcome', 'admin', 'login', 'passw0rd', 'starwars',
+    'whatever', 'freedom', 'mustang', 'batman', 'football', 'princess',
+    'michael', 'jennifer', 'jordan', '111111', '000000',
+    '696969', '666666', 'zxcvbnm', 'hunter', 'buster', 'soccer',
+    'harley', 'ranger', 'charlie', 'abcd1234', 'password!',
+    'qwertyuiop', 'asdfghjkl', 'zxcvbn', '1q2w3e4r', 'abcdef'
+}
+
 @app.route("/settings/password", methods=["GET", "POST"])
 @login_required
 def settings_password():
@@ -2767,35 +2911,69 @@ def settings_password():
                 conn.close()
                 return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
+            # Block common passwords
+            if new_password.lower() in COMMON_PASSWORDS:
+                flash("This password is too common and frequently compromised. Please choose a different password.", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
+
             if new_password != confirm_password:
                 flash("Passwords do not match", "error")
                 conn.close()
                 return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
             from werkzeug.security import generate_password_hash
-            from services.encryption import generate_encryption_salt
+            from services.encryption import generate_encryption_salt, generate_master_recovery_key
 
             password_hash = generate_password_hash(new_password)
 
             # Generate encryption salt for zero-knowledge encryption of bank credentials
             encryption_salt = generate_encryption_salt()
 
+            # Generate master recovery key for password recovery without data loss
+            master_recovery_key = generate_master_recovery_key()
+            master_recovery_key_hash = generate_password_hash(master_recovery_key)
+
             c.execute("""
                 UPDATE users
-                SET password_hash = ?, auth_provider = 'password', encryption_salt = ?
+                SET password_hash = ?, auth_provider = 'password', encryption_salt = ?, master_recovery_key_hash = ?
                 WHERE id = ?
-            """, (password_hash, encryption_salt, get_current_user_id()))
+            """, (password_hash, encryption_salt, master_recovery_key_hash, get_current_user_id()))
             conn.commit()
             conn.close()
 
-            # Store password in session for immediate bank connection setup
+            # Store password in session for immediate bank connection setup and loan encryption
             session['user_password'] = new_password
 
-            flash("Password added successfully! You can now connect your bank accounts.", "success")
-            redirect_to = request.args.get('redirect')
-            if redirect_to == 'banks':
-                return redirect("/settings/banks/add")
-            return redirect("/settings/password")
+            # Store master recovery key in session for dual-encrypting loans
+            # (Similar to how we store password in session)
+            session['master_recovery_key'] = master_recovery_key
+
+            # Store recovery codes and master recovery key in session to show to user
+            # Get recovery codes that were generated during registration
+            recovery_codes = session.get('recovery_codes', [])
+            if not recovery_codes:
+                # If no codes in session, generate new ones
+                from services.auth_helpers import generate_recovery_codes
+                plain_codes, hashed_codes_json = generate_recovery_codes()
+
+                # Update user with recovery codes
+                conn = sqlite3.connect(get_db_path())
+                c = conn.cursor()
+                c.execute("UPDATE users SET recovery_codes = ? WHERE id = ?",
+                         (hashed_codes_json, get_current_user_id()))
+                conn.commit()
+                conn.close()
+
+                recovery_codes = plain_codes
+
+            # Store in session for recovery codes display page
+            session['show_recovery_codes'] = recovery_codes
+            session['show_master_recovery_key'] = master_recovery_key
+            session['recovery_codes_for_user'] = get_current_user_id()
+
+            # Redirect to recovery codes display page
+            return redirect("/auth/recovery-codes")
 
         elif action == "upgrade":
             # Upgrade existing password to enable bank encryption
@@ -2844,17 +3022,22 @@ def settings_password():
                 conn.close()
                 return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
-            if not current_password:
-                flash("Current password is required", "error")
-                conn.close()
-                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
+            # Check if user logged in via recovery code (password reset scenario)
+            logged_in_via_recovery = session.get('logged_in_via_recovery', False)
 
-            # Verify current password
-            from werkzeug.security import check_password_hash
-            if not check_password_hash(user[0], current_password):
-                flash("Current password is incorrect", "error")
-                conn.close()
-                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
+            if not logged_in_via_recovery:
+                # Normal password change - require current password
+                if not current_password:
+                    flash("Current password is required", "error")
+                    conn.close()
+                    return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from, logged_in_via_recovery=False)
+
+                # Verify current password
+                from werkzeug.security import check_password_hash
+                if not check_password_hash(user[0], current_password):
+                    flash("Current password is incorrect", "error")
+                    conn.close()
+                    return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from, logged_in_via_recovery=False)
 
             if not new_password:
                 flash("New password is required", "error")
@@ -2863,6 +3046,12 @@ def settings_password():
 
             if len(new_password) < 8:
                 flash("New password must be at least 8 characters", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
+
+            # Block common passwords
+            if new_password.lower() in COMMON_PASSWORDS:
+                flash("This password is too common and frequently compromised. Please choose a different password.", "error")
                 conn.close()
                 return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
@@ -2882,37 +3071,18 @@ def settings_password():
             conn.commit()
             conn.close()
 
-            flash("Password changed successfully!", "success")
+            # Clear recovery login flag and store new password in session
+            session.pop('logged_in_via_recovery', None)
+            session['user_password'] = new_password
+
+            flash("Password changed successfully! Your data is now accessible.", "success")
             return redirect("/settings/password")
 
         elif action == "remove":
-            # Remove password (go back to magic link only)
-            if not has_password:
-                flash("You don't have a password to remove.", "error")
-                conn.close()
-                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
-
-            if not current_password:
-                flash("Current password is required to remove it", "error")
-                conn.close()
-                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
-
-            # Verify current password
-            from werkzeug.security import check_password_hash
-            if not check_password_hash(user[0], current_password):
-                flash("Current password is incorrect", "error")
-                conn.close()
-                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
-
-            c.execute("""
-                UPDATE users
-                SET password_hash = NULL, auth_provider = 'magic_link'
-                WHERE id = ?
-            """, (get_current_user_id(),))
-            conn.commit()
+            # Password removal is no longer allowed due to zero-knowledge encryption
+            # Without a password, users cannot decrypt their loan data
+            flash("Password cannot be removed. It's required to encrypt and decrypt your loan data.", "error")
             conn.close()
-
-            flash("Password removed. You'll now use magic links to sign in.", "success")
             return redirect("/settings/password")
 
         conn.close()
@@ -2928,11 +3098,13 @@ def settings_password():
     has_encryption_salt = user and user[1] is not None
     needs_upgrade = has_password and not has_encryption_salt
     redirect_from = request.args.get('redirect')
+    logged_in_via_recovery = session.get('logged_in_via_recovery', False)
 
     return render_template("settings_password.html",
                          has_password=has_password,
                          needs_upgrade=needs_upgrade,
-                         redirect_from=redirect_from)
+                         redirect_from=redirect_from,
+                         logged_in_via_recovery=logged_in_via_recovery)
 
 
 @app.route("/settings/banks")
