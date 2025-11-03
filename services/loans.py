@@ -7,11 +7,7 @@ import sqlite3
 import json
 import secrets
 from flask import current_app, session
-
-
-def get_db_path():
-    """Get the database path from Flask config."""
-    return current_app.config['DATABASE']
+from helpers.utils import get_db_path
 
 
 def get_current_user_id():

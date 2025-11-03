@@ -4,11 +4,7 @@ Shared utility functions used across the application.
 import sqlite3
 import json
 from flask import session, current_app
-
-
-def get_db_path():
-    """Get database path from config (allows tests to override)."""
-    return current_app.config.get('DATABASE', 'lendifyme.db')
+from helpers.db import get_db_path
 
 
 def get_current_user_id():

@@ -96,59 +96,205 @@ def repay(loan_id):
 @loan_bp.route("/edit/<int:loan_id>", methods=["GET", "POST"])
 @login_required
 def edit_loan(loan_id):
-    if request.method == "POST":
-        borrower = request.form.get("borrower")
-        bank_name = request.form.get("bank_name")
-        amount = request.form.get("amount")
-        date_borrowed = request.form.get("date_borrowed")
-        note = request.form.get("note")
-        repayment_amount = request.form.get("repayment_amount")
-        repayment_frequency = request.form.get("repayment_frequency")
+    from services.encryption import decrypt_field, encrypt_field  # local import to avoid circulars
 
-        if borrower and amount:
-            conn = sqlite3.connect(get_db_path())
-            c = conn.cursor()
-            c.execute("""
-                UPDATE loans
-                SET borrower = ?, bank_name = ?, amount = ?, date_borrowed = ?, note = ?,
-                    repayment_amount = ?, repayment_frequency = ?
-                WHERE id = ? AND user_id = ?
-            """, (borrower,
-                  bank_name if bank_name else None,
-                  float(amount), date_borrowed, note,
-                  float(repayment_amount) if repayment_amount else None,
-                  repayment_frequency if repayment_frequency else None,
-                  loan_id, get_current_user_id()))
-            conn.commit()
-            conn.close()
-
-            # Log analytics event
-            log_event('loan_updated', event_data={'loan_id': loan_id})
-
-            flash("Loan updated successfully", "success")
-
-        return redirect("/")
-
-    # GET request - show edit form
+    # Always load the loan first to know if it's encrypted
     conn = sqlite3.connect(get_db_path())
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     c.execute("""
-        SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
-               COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.repayment_amount, l.repayment_frequency, l.bank_name
+        SELECT
+            l.*,
+            COALESCE(SUM(at.amount), 0) AS amount_repaid
         FROM loans l
         LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.id = ? AND l.user_id = ?
         GROUP BY l.id
     """, (loan_id, get_current_user_id()))
-    loan = c.fetchone()
-    conn.close()
+    loan_row = c.fetchone()
 
-    if not loan:
+    if not loan_row:
+        conn.close()
         flash("Loan not found", "error")
         return redirect("/")
 
-    return render_template("edit_loan.html", loan=loan)
+    # Helper: get DEK only if we need it
+    user_password = get_user_password_from_session()
+    dek = None
+    def need_dek() -> bool:
+        # Any encrypted column present?
+        for col in ("borrower_encrypted", "amount_encrypted", "note_encrypted",
+                    "bank_name_encrypted", "repayment_amount_encrypted",
+                    "repayment_frequency_encrypted"):
+            if col in loan_row.keys() and loan_row[col]:
+                return True
+        return False
+
+    if request.method == "POST":
+        borrower = request.form.get("borrower") or None
+        bank_name = request.form.get("bank_name") or None
+        amount = request.form.get("amount") or None
+        date_borrowed = request.form.get("date_borrowed") or None
+        note = request.form.get("note") or None
+        repayment_amount = request.form.get("repayment_amount") or None
+        repayment_frequency = request.form.get("repayment_frequency") or None
+
+        if borrower and amount:
+            # If this loan uses encrypted columns, update those; else update plaintext columns
+            uses_encryption = need_dek()
+            if uses_encryption:
+                if dek is None:
+                    dek = get_loan_dek(loan_id, user_password=user_password)
+
+                # Encrypt the sensitive fields if the encrypted columns exist
+                updates = []
+                params = []
+
+                # Borrower
+                if "borrower_encrypted" in loan_row.keys():
+                    updates.append("borrower_encrypted = ?")
+                    params.append(encrypt_field(borrower, dek))
+                    # keep plaintext NULL for zero-knowledge discipline
+                    if "borrower" in loan_row.keys():
+                        updates.append("borrower = NULL")
+
+                elif "borrower" in loan_row.keys():
+                    updates.append("borrower = ?")
+                    params.append(borrower)
+
+                # Bank name (less sensitive—store as plaintext unless you actually created *_encrypted)
+                if "bank_name_encrypted" in loan_row.keys():
+                    updates.append("bank_name_encrypted = ?")
+                    params.append(encrypt_field(bank_name, dek) if bank_name else None)
+                    if "bank_name" in loan_row.keys():
+                        updates.append("bank_name = NULL")
+                elif "bank_name" in loan_row.keys():
+                    updates.append("bank_name = ?")
+                    params.append(bank_name)
+
+                # Amount
+                if "amount_encrypted" in loan_row.keys():
+                    updates.append("amount_encrypted = ?")
+                    params.append(encrypt_field(str(float(amount)), dek))
+                    if "amount" in loan_row.keys():
+                        updates.append("amount = NULL")
+                elif "amount" in loan_row.keys():
+                    updates.append("amount = ?")
+                    params.append(float(amount))
+
+                # Date borrowed (usually non-sensitive: keep plaintext)
+                if "date_borrowed" in loan_row.keys():
+                    updates.append("date_borrowed = ?")
+                    params.append(date_borrowed)
+
+                # Note
+                if "note_encrypted" in loan_row.keys():
+                    updates.append("note_encrypted = ?")
+                    params.append(encrypt_field(note, dek) if note else None)
+                    if "note" in loan_row.keys():
+                        updates.append("note = NULL")
+                elif "note" in loan_row.keys():
+                    updates.append("note = ?")
+                    params.append(note)
+
+                # Repayment amount
+                if "repayment_amount_encrypted" in loan_row.keys():
+                    updates.append("repayment_amount_encrypted = ?")
+                    params.append(encrypt_field(str(float(repayment_amount)), dek) if repayment_amount else None)
+                    if "repayment_amount" in loan_row.keys():
+                        updates.append("repayment_amount = NULL")
+                elif "repayment_amount" in loan_row.keys():
+                    updates.append("repayment_amount = ?")
+                    params.append(float(repayment_amount) if repayment_amount else None)
+
+                # Repayment frequency (string)
+                if "repayment_frequency_encrypted" in loan_row.keys():
+                    updates.append("repayment_frequency_encrypted = ?")
+                    params.append(encrypt_field(repayment_frequency, dek) if repayment_frequency else None)
+                    if "repayment_frequency" in loan_row.keys():
+                        updates.append("repayment_frequency = NULL")
+                elif "repayment_frequency" in loan_row.keys():
+                    updates.append("repayment_frequency = ?")
+                    params.append(repayment_frequency if repayment_frequency else None)
+
+                # Finalize
+                params.extend([loan_id, get_current_user_id()])
+                c.execute(f"""
+                    UPDATE loans
+                    SET {", ".join(updates)}
+                    WHERE id = ? AND user_id = ?
+                """, tuple(params))
+                conn.commit()
+            else:
+                # Legacy plaintext update (your current code, but using Row + None handling)
+                c.execute("""
+                    UPDATE loans
+                    SET borrower = ?, bank_name = ?, amount = ?, date_borrowed = ?, note = ?,
+                        repayment_amount = ?, repayment_frequency = ?
+                    WHERE id = ? AND user_id = ?
+                """, (
+                    borrower,
+                    bank_name,
+                    float(amount),
+                    date_borrowed,
+                    note,
+                    float(repayment_amount) if repayment_amount else None,
+                    repayment_frequency if repayment_frequency else None,
+                    loan_id, get_current_user_id()
+                ))
+                conn.commit()
+
+            conn.close()
+            log_event('loan_updated', event_data={'loan_id': loan_id})
+            flash("Loan updated successfully", "success")
+        else:
+            conn.close()
+
+        return redirect("/")
+
+    # -------- GET: build decrypted model for the template --------
+    if need_dek():
+        if dek is None:
+            dek = get_loan_dek(loan_id, user_password=user_password)
+
+    def pick(name: str, enc: str | None = None, cast=None):
+        val = None
+        if enc and enc.endswith("_encrypted") and enc in loan_row.keys():
+            raw = loan_row[enc]
+            if raw not in (None, ""):
+                # Only decrypt strings/bytes; never numbers
+                if isinstance(raw, (bytes, bytearray)):
+                    v = decrypt_field(raw.decode(), dek)
+                elif isinstance(raw, str):
+                    v = decrypt_field(raw, dek)
+                else:
+                    # If somehow a non-string landed here, just use it as-is
+                    v = raw
+                val = v
+        elif name in loan_row.keys():
+            val = loan_row[name]
+
+        if cast and val is not None:
+            try:
+                return cast(val)
+            except Exception:
+                return val
+        return val
+
+    loan_for_form = {
+        "id": loan_row["id"],
+        "borrower": pick("borrower", "borrower_encrypted"),
+        "bank_name": pick("bank_name", "bank_name_encrypted"),
+        "amount": pick("amount", "amount_encrypted", cast=float),
+        "date_borrowed": loan_row["date_borrowed"],
+        "note": pick("note", "note_encrypted"),
+        "repayment_amount": pick("repayment_amount", "repayment_amount_encrypted", cast=lambda x: float(x) if x not in (None, "") else None),
+        "repayment_frequency": pick("repayment_frequency", "repayment_frequency_encrypted"),
+        "amount_repaid": loan_row["amount_repaid"],  # computed, no enc
+    }
+
+    conn.close()
+    return render_template("edit_loan.html", loan=loan_for_form)
 
 
 @loan_bp.route("/delete/<int:loan_id>", methods=["POST"])

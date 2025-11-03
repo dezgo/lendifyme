@@ -3,15 +3,7 @@ Session and user-related helper functions.
 """
 from flask import session
 import sqlite3
-
-
-def get_db_path():
-    """Get database path (imported from app for now)."""
-    import os
-    ENV = os.getenv('FLASK_ENV', 'production')
-    if ENV == 'test':
-        return os.getenv('TEST_DB_PATH', 'test_lendifyme.db')
-    return 'lendifyme.db'
+from helpers.utils import get_db_path
 
 
 def get_current_user_id():

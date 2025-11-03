@@ -62,7 +62,7 @@ h1 {
 <h1>Edit Loan</h1>
 
 <div class="info-text">
-    <strong>Current repaid amount:</strong> ${{ '%.2f'|format(loan[5]) }}
+    <strong>Current repaid amount:</strong> ${{ '%.2f'|format((loan.amount_repaid or 0.0)) }}
     <br>
     Note: Changing the loan amount won't affect the repaid amount.
 </div>
@@ -70,37 +70,37 @@ h1 {
 <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Borrower Name</label>
-    <input type="text" name="borrower" value="{{ loan[1] }}" placeholder="e.g. Alice Smith" required>
+    <input type="text" name="borrower" value="{{ loan.borrower }}" placeholder="e.g. Alice Smith" required>
 
     <label>Bank Statement Name (optional)</label>
-    <input type="text" name="bank_name" value="{{ loan[8] if loan[8] else '' }}"
+    <input type="text" name="bank_name" value="{{ loan.bank_name if loan.bank_name else '' }}"
            placeholder="e.g. Alice S or A Smith - as it appears in your bank">
     <p style="font-size: 0.85rem; color: #6c757d; margin-top: -0.5rem; margin-bottom: 1rem;">
         Use this if their name appears differently in your bank transactions
     </p>
 
     <label>Date Borrowed</label>
-    <input type="date" name="date_borrowed" value="{{ loan[4] }}" required>
+    <input type="date" name="date_borrowed" value="{{ loan.date_borrowed }}" required>
 
     <label>Amount ($)</label>
-    <input type="number" step="0.01" name="amount" value="{{ loan[2] }}" required>
+    <input type="number" step="0.01" name="amount" value="{{ loan.amount }}" required>
 
     <label>Repayment Schedule (optional)</label>
     <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem;">
         <input type="number" step="0.01" name="repayment_amount"
                placeholder="Amount"
-               value="{{ loan[6] if loan[6] else '' }}"
+               value="{{ loan.repayment_amount if loan.repayment_amount else '' }}"
                style="flex: 1;">
         <select name="repayment_frequency" style="flex: 1;">
-            <option value="" {% if not loan[7] %}selected{% endif %}>No schedule</option>
-            <option value="weekly" {% if loan[7] == 'weekly' %}selected{% endif %}>Weekly</option>
-            <option value="fortnightly" {% if loan[7] == 'fortnightly' %}selected{% endif %}>Fortnightly</option>
-            <option value="monthly" {% if loan[7] == 'monthly' %}selected{% endif %}>Monthly</option>
+            <option value="" {% if not loan.repayment_frequency %}selected{% endif %}>No schedule</option>
+            <option value="weekly" {% if loan.repayment_frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+            <option value="fortnightly" {% if loan.repayment_frequency == 'fortnightly' %}selected{% endif %}>Fortnightly</option>
+            <option value="monthly" {% if loan.repayment_frequency == 'monthly' %}selected{% endif %}>Monthly</option>
         </select>
     </div>
 
     <label>Note (optional)</label>
-    <textarea name="note">{{ loan[3] if loan[3] else '' }}</textarea>
+    <textarea name="note">{{ loan.note if loan.note else '' }}</textarea>
 
     <button type="submit">Save Changes</button>
 </form>

@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+
+{% block title %}Feedback Management – LendifyMe{% endblock %}
+
+{% block extra_css %}
+.admin-container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+h1 {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #6c757d;
+    margin-bottom: 2rem;
+}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1.5rem;
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 600;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+.stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+.stat-card {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    cursor: pointer;
+    transition: all 0.2s;
+    border: 2px solid transparent;
+}
+.stat-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+.stat-card.active {
+    border-color: #667eea;
+}
+.stat-label {
+    font-size: 0.85rem;
+    color: #6c757d;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+}
+.stat-value {
+    font-size: 2.5rem;
+    font-weight: bold;
+    color: #667eea;
+}
+.feedback-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+.feedback-item {
+    background: white;
+    border-radius: 12px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    border-left: 4px solid #667eea;
+}
+.feedback-item.status-resolved {
+    border-left-color: #198754;
+}
+.feedback-item.status-closed {
+    border-left-color: #6c757d;
+    opacity: 0.7;
+}
+.feedback-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+.feedback-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: center;
+}
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+.badge-suggestion {
+    background: #cfe2ff;
+    color: #084298;
+}
+.badge-bug {
+    background: #f8d7da;
+    color: #842029;
+}
+.badge-praise {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+.badge-other {
+    background: #e9ecef;
+    color: #6c757d;
+}
+.badge-new {
+    background: #fff3cd;
+    color: #856404;
+}
+.badge-reviewed {
+    background: #cfe2ff;
+    color: #084298;
+}
+.badge-resolved {
+    background: #d1e7dd;
+    color: #0f5132;
+}
+.badge-closed {
+    background: #e9ecef;
+    color: #6c757d;
+}
+.feedback-user {
+    color: #6c757d;
+    font-size: 0.9rem;
+}
+.feedback-date {
+    color: #6c757d;
+    font-size: 0.85rem;
+}
+.feedback-message {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: #f8f9fa;
+    border-radius: 8px;
+    font-size: 1rem;
+    line-height: 1.6;
+    white-space: pre-wrap;
+}
+.feedback-context {
+    margin: 1rem 0;
+    padding: 0.75rem;
+    background: #e7f3ff;
+    border-radius: 6px;
+    border-left: 3px solid #007bff;
+    font-size: 0.85rem;
+}
+.feedback-context strong {
+    color: #212529;
+}
+.feedback-context a {
+    color: #007bff;
+    text-decoration: none;
+}
+.feedback-context a:hover {
+    text-decoration: underline;
+}
+.feedback-admin-notes {
+    margin: 1rem 0;
+    padding: 0.75rem;
+    background: #fff3cd;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+.feedback-actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+.feedback-form {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    flex: 1;
+}
+.form-group {
+    flex: 0 0 auto;
+}
+.form-group label {
+    display: block;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    color: #495057;
+}
+.form-group select,
+.form-group textarea {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    font-size: 0.9rem;
+}
+.form-group textarea {
+    width: 100%;
+    min-width: 300px;
+    resize: vertical;
+}
+.update-btn {
+    padding: 0.5rem 1.5rem;
+    background: #667eea;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.update-btn:hover {
+    background: #5568d3;
+}
+.empty-state {
+    background: white;
+    border-radius: 12px;
+    padding: 3rem;
+    text-align: center;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.empty-state-icon {
+    font-size: 4rem;
+    margin-bottom: 1rem;
+}
+.empty-state h2 {
+    margin: 0 0 0.5rem 0;
+    color: #495057;
+}
+.empty-state p {
+    color: #6c757d;
+    margin: 0;
+}
+@media (max-width: 768px) {
+    .feedback-header {
+        flex-direction: column;
+    }
+    .feedback-form {
+        flex-direction: column;
+        width: 100%;
+    }
+    .form-group textarea {
+        min-width: 100%;
+    }
+}
+{% endblock %}
+
+{% block content %}
+<div class="admin-container">
+    <a href="/" class="back-link">← Back to Dashboard</a>
+
+    <h1>Feedback Management</h1>
+    <p class="subtitle">Review and manage user feedback and suggestions</p>
+
+    <div class="stats">
+        <a href="?status=all" style="text-decoration: none;">
+            <div class="stat-card {% if status_filter == 'all' %}active{% endif %}">
+                <div class="stat-label">All Feedback</div>
+                <div class="stat-value">{{ feedback|length }}</div>
+            </div>
+        </a>
+        <a href="?status=new" style="text-decoration: none;">
+            <div class="stat-card {% if status_filter == 'new' %}active{% endif %}">
+                <div class="stat-label">New</div>
+                <div class="stat-value">{{ status_counts.get('new', 0) }}</div>
+            </div>
+        </a>
+        <a href="?status=reviewed" style="text-decoration: none;">
+            <div class="stat-card {% if status_filter == 'reviewed' %}active{% endif %}">
+                <div class="stat-label">Reviewed</div>
+                <div class="stat-value">{{ status_counts.get('reviewed', 0) }}</div>
+            </div>
+        </a>
+        <a href="?status=resolved" style="text-decoration: none;">
+            <div class="stat-card {% if status_filter == 'resolved' %}active{% endif %}">
+                <div class="stat-label">Resolved</div>
+                <div class="stat-value">{{ status_counts.get('resolved', 0) }}</div>
+            </div>
+        </a>
+        <a href="?status=closed" style="text-decoration: none;">
+            <div class="stat-card {% if status_filter == 'closed' %}active{% endif %}">
+                <div class="stat-label">Closed</div>
+                <div class="stat-value">{{ status_counts.get('closed', 0) }}</div>
+            </div>
+        </a>
+    </div>
+
+    {% if feedback %}
+    <div class="feedback-list">
+        {% for item in feedback %}
+        <div class="feedback-item status-{{ item.status }}">
+            <div class="feedback-header">
+                <div class="feedback-meta">
+                    <span class="badge badge-{{ item.feedback_type }}">{{ item.feedback_type }}</span>
+                    <span class="badge badge-{{ item.status }}">{{ item.status }}</span>
+                    <span class="feedback-user">
+                        {{ item.user_email or 'Anonymous' }}
+                    </span>
+                    <span class="feedback-date">
+                        {{ item.created_at[:16] }}
+                    </span>
+                </div>
+            </div>
+
+            <div class="feedback-message">{{ item.message }}</div>
+
+            <div class="feedback-context">
+                <strong>📍 Context:</strong>
+                <a href="{{ item.page_url }}" target="_blank">{{ item.page_title or item.page_url }}</a>
+            </div>
+
+            {% if item.admin_notes %}
+            <div class="feedback-admin-notes">
+                <strong>📝 Admin Notes:</strong> {{ item.admin_notes }}
+            </div>
+            {% endif %}
+
+            <form method="post" action="/admin/feedback/{{ item.id }}/update" class="feedback-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <div class="form-group">
+                    <label>Status</label>
+                    <select name="status" required>
+                        <option value="new" {% if item.status == 'new' %}selected{% endif %}>New</option>
+                        <option value="reviewed" {% if item.status == 'reviewed' %}selected{% endif %}>Reviewed</option>
+                        <option value="resolved" {% if item.status == 'resolved' %}selected{% endif %}>Resolved</option>
+                        <option value="closed" {% if item.status == 'closed' %}selected{% endif %}>Closed</option>
+                    </select>
+                </div>
+
+                <div class="form-group" style="flex: 1;">
+                    <label>Admin Notes</label>
+                    <textarea name="admin_notes" rows="2" placeholder="Add notes...">{{ item.admin_notes or '' }}</textarea>
+                </div>
+
+                <button type="submit" class="update-btn">Update</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state">
+        <div class="empty-state-icon">💬</div>
+        <h2>No feedback yet</h2>
+        <p>User feedback will appear here when submitted.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

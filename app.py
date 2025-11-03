@@ -1,23 +1,10 @@
 from flask_wtf import CSRFProtect
+import click
 import sys
 import json
-from flask import current_app, render_template, request, session, redirect, flash
-import sqlite3
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
-from services.loans import \
-    decrypt_loans, \
-    get_loan_dek, \
-    encrypt_loan_data, \
-    get_user_subscription_tier, \
-    check_loan_limit, \
-    has_feature
-from services import migrations
-from services.transaction_matcher import match_transactions_to_loans
-from services.connectors.registry import ConnectorRegistry
-from services.connectors.csv_connector import CSVConnector
 from dotenv import load_dotenv
-from flask import Flask, url_for, send_from_directory
 from flask_mail import Mail
 from functools import wraps
 import os
@@ -26,6 +13,30 @@ import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
 from werkzeug.middleware.proxy_fix import ProxyFix
+
+from flask import Flask, send_from_directory, request, session, render_template, redirect, url_for, flash, jsonify
+from schemas.feedback import validate_feedback_input, ValidationError
+
+import sqlite3
+
+from services.loans import (
+    decrypt_loans,
+    get_loan_dek,
+    encrypt_loan_data,
+    get_user_subscription_tier,
+    check_loan_limit,
+    has_feature,
+)
+from services.transaction_matcher import match_transactions_to_loans
+from services.connectors.registry import ConnectorRegistry
+from services.connectors.csv_connector import CSVConnector
+from services.feedback_service import (
+    admin_feedback,
+    admin_feedback_update,
+    submit_feedback,
+)
+
+from helpers.utils import get_db_path
 
 
 # Load environment variables from .env
@@ -169,11 +180,6 @@ def format_date_filter(date_string):
     except (ValueError, AttributeError):
         # If parsing fails, return original string
         return date_string
-
-
-def get_db_path():
-    """Get database path from config (allows tests to override)."""
-    return app.config.get('DATABASE', 'lendifyme.db')
 
 
 def filter_duplicate_transactions(matches):
@@ -338,8 +344,6 @@ def log_event(event_name, user_id=None, event_data=None):
         event_data: Optional dict with additional context (stored as JSON)
     """
     try:
-        import json
-
         # Use current user if not specified
         if user_id is None:
             user_id = get_current_user_id()
@@ -388,12 +392,23 @@ def not_found(e):
 
 
 def init_db():
-    conn = sqlite3.connect(get_db_path())
-    migrations.run_migrations(conn)
-    conn.close()
+    from services import migrations
+
+    db_path = get_db_path()  # uses current_app when context is active
+    conn = sqlite3.connect(db_path)
+    try:
+        migrations.run_migrations(conn)
+    finally:
+        conn.close()
 
 
-init_db()
+@app.cli.command("init-db")
+def init_db_command():
+    """Initialize DB / run migrations (use in deploy)."""
+    # Flask provides an app context for CLI commands, but we’ll be explicit
+    with app.app_context():
+        init_db()
+    click.echo("✅ Database initialized (migrations applied).")
 
 
 @app.route("/health")
@@ -402,8 +417,6 @@ def health():
         return "status: ok", 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
     """Health check endpoint with diagnostics."""
-    import sys
-
     # Write a test log entry
     app.logger.info("Health check endpoint accessed")
 
@@ -425,7 +438,6 @@ def health():
     }
 
     # Try to read last 10 lines of log file
-    log_preview = []
     if os.path.exists(log_file):
         try:
             with open(log_file, 'r') as f:
@@ -745,8 +757,6 @@ def onboarding_update_email():
 @app.route("/pricing")
 def pricing():
     """Display pricing tiers and subscription options."""
-    import json
-
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
 
@@ -802,7 +812,6 @@ def pricing():
 def subscribe(tier):
     """Create Stripe checkout session for subscription."""
     import stripe
-    import os
     from datetime import datetime, timedelta
 
     # Validate tier
@@ -942,7 +951,6 @@ def checkout_cancel():
 def stripe_webhook():
     """Handle Stripe webhook events."""
     import stripe
-    import os
     from datetime import datetime
 
     payload = request.data
@@ -1111,9 +1119,6 @@ def stripe_webhook():
 def billing():
     """Manage subscription and billing."""
     import stripe
-    import os
-    from datetime import datetime
-    import json
 
     user_id = get_current_user_id()
     conn = sqlite3.connect(get_db_path())
@@ -1426,6 +1431,114 @@ def admin_cleanup_inactive():
     return redirect("/admin/users")
 
 
+# ---------------------------
+# Admin: list + pagination
+# ---------------------------
+@app.route("/admin/feedback")
+@admin_required
+def _admin_feedback():
+    status_filter = (request.args.get("status") or "all").lower().strip()
+
+    # simple, safe int parsing
+    try:
+        page = int(request.args.get("page", 1))
+    except ValueError:
+        page = 1
+    try:
+        page_size = int(request.args.get("page_size", 50))
+    except ValueError:
+        page_size = 50
+
+    try:
+        feedback_list, status_counts, total = admin_feedback(
+            status_filter=status_filter,
+            page=page,
+            page_size=page_size,
+        )
+    except ValidationError as e:
+        flash(str(e), "error")
+        # fall back to "all"
+        feedback_list, status_counts, total = admin_feedback(
+            status_filter="all", page=1, page_size=page_size
+        )
+        status_filter = "all"
+        page = 1
+
+    # For template pager
+    total_pages = max(1, (total + page_size - 1) // page_size)
+
+    return render_template(
+        "admin_feedback.html",
+        feedback=feedback_list,
+        status_filter=status_filter,
+        status_counts=status_counts,
+        page=page,
+        page_size=page_size,
+        total=total,
+        total_pages=total_pages,
+    )
+
+
+# ---------------------------
+# Admin: update one row
+# ---------------------------
+@app.route("/admin/feedback/<int:feedback_id>/update", methods=["POST"])
+@admin_required
+def _admin_feedback_update(feedback_id: int):
+    new_status = request.form.get("status", "")
+    admin_notes = request.form.get("admin_notes", "")
+
+    try:
+        updated = admin_feedback_update(
+            feedback_id=feedback_id,
+            new_status=new_status,
+            admin_notes=admin_notes,
+        )
+    except ValidationError as e:
+        flash(str(e), "error")
+        # preserve current filter/page in the redirect if present
+        return redirect(url_for("_admin_feedback", **request.args))
+
+    if updated:
+        flash("Feedback updated successfully", "success")
+    else:
+        flash("No changes made (record not found?)", "warning")
+
+    return redirect(url_for("_admin_feedback", **request.args))
+
+
+# ---------------------------
+# Public: submit feedback
+# ---------------------------
+@app.route("/feedback/submit", methods=["POST"])
+def feedback_submit_route():
+    # Thin route: gather raw inputs only
+    ip_addr = (request.headers.get("X-Forwarded-For") or request.remote_addr or "").split(",")[0].strip()
+    user_agent = request.headers.get("User-Agent")
+
+    try:
+        data = validate_feedback_input(
+            feedback_type=request.form.get("feedback_type"),
+            message=request.form.get("message"),
+            page_url=request.form.get("page_url"),
+            page_title=request.form.get("page_title"),
+            user_id=session.get("user_id"),
+            user_email=session.get("user_email"),
+            ip_addr=ip_addr,
+            user_agent=user_agent,
+        )
+    except ValidationError as e:
+        return jsonify({"success": False, "error": str(e)}), getattr(e, "status_code", 400)
+
+    # Service owns connection + transactions
+    try:
+        fb_id, _ = submit_feedback(data)
+    except ValidationError as e:
+        return jsonify({"success": False, "error": str(e)}), getattr(e, "status_code", 400)
+
+    return jsonify({"success": True, "id": fb_id})
+
+
 @app.route("/settings")
 @login_required
 def settings():
@@ -1446,6 +1559,7 @@ COMMON_PASSWORDS = {
     'harley', 'ranger', 'charlie', 'abcd1234', 'password!',
     'qwertyuiop', 'asdfghjkl', 'zxcvbn', '1q2w3e4r', 'abcdef'
 }
+
 
 @app.route("/settings/password", methods=["GET", "POST"])
 @login_required
@@ -1688,10 +1802,10 @@ def settings_password():
 
                             reencrypted_count += 1
                         except Exception as e:
-                            current_app.logger.error(f"Failed to re-encrypt loan {loan_id}: {e}")
+                            app.logger.error(f"Failed to re-encrypt loan {loan_id}: {e}")
 
                     if reencrypted_count > 0:
-                        current_app.logger.info(f"Re-encrypted {reencrypted_count} loans with new password for user {get_current_user_id()}")
+                        app.logger.info(f"Re-encrypted {reencrypted_count} loans with new password for user {get_current_user_id()}")
 
             from werkzeug.security import generate_password_hash
             password_hash = generate_password_hash(new_password)
@@ -1837,10 +1951,10 @@ def settings_recovery():
 
                     reencrypted_count += 1
                 except Exception as e:
-                    current_app.logger.error(f"Failed to re-encrypt loan {loan_id} with new recovery phrase: {e}")
+                    app.logger.error(f"Failed to re-encrypt loan {loan_id} with new recovery phrase: {e}")
 
             if reencrypted_count > 0:
-                current_app.logger.info(f"Re-encrypted {reencrypted_count} loans with new recovery phrase for user {get_current_user_id()}")
+                app.logger.info(f"Re-encrypted {reencrypted_count} loans with new recovery phrase for user {get_current_user_id()}")
 
         # Update user's recovery phrase hash
         c.execute("""
@@ -2557,7 +2671,6 @@ def reject_match():
 def analytics():
     """Analytics dashboard showing usage metrics. Admin only."""
     from datetime import datetime, timedelta
-    import json
 
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
@@ -2901,7 +3014,7 @@ def index():
         return render_template(
             "index.html",
             loans=context_or_redirect["loans"],
-            app_url=current_app.config["APP_URL"],
+            app_url=app.config["APP_URL"],
             email_verified=context_or_redirect["email_verified"],
             has_password=context_or_redirect["has_password"],
             needs_password_unlock=context_or_redirect.get("needs_password_unlock", False),
@@ -3034,7 +3147,7 @@ def _handle_index_post(form):
         try:
             log_event("loan_created", event_data={"loan_type": loan_type, "amount": float(amount)})
         except Exception:
-            current_app.logger.exception("Failed to log loan_created event")
+            app.logger.exception("Failed to log loan_created event")
 
     # Complete onboarding flow if flagged
     if onboarding == "1":
@@ -3119,14 +3232,14 @@ def _create_encrypted_loan(
         conn.commit()
         return True
     except sqlite3.IntegrityError as e:
-        current_app.logger.error(
+        app.logger.error(
             "Failed to create loan (likely needs migrations for nullable plaintext columns): %s",
             e,
         )
         flash("Database error. Please restart the application to run migrations.", "error")
         return False
     except Exception:
-        current_app.logger.exception("Unhandled error creating encrypted loan")
+        app.logger.exception("Unhandled error creating encrypted loan")
         flash("Unexpected error creating loan.", "error")
         return False
     finally:
@@ -3208,4 +3321,8 @@ def _build_dashboard_context():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Avoid double-run in Flask’s reloader child
+    if os.getenv("WERKZEUG_RUN_MAIN") != "true":
+        with app.app_context():
+            init_db()
+    app.run(debug=True, host="127.0.0.1", port=5000)

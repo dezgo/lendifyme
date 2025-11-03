@@ -332,6 +332,32 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 29:
+        try:
+            migrate_v29_create_feedback_table(conn)
+            _set_user_version(conn, 29)
+            conn.commit()
+            print("✅ Migration v29 applied.")
+        except Exception as e:
+            print(f"❌ Migration v29 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
+    if current < 30:
+        try:
+            migrate_v30_feedback_throttle(conn)
+            _set_user_version(conn, 30)
+            conn.commit()
+            print("✅ Migration v30 applied.")
+        except Exception as e:
+            print(f"❌ Migration v30 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -1594,3 +1620,77 @@ def migrate_v28_master_recovery_key(conn):
 
     conn.commit()
     print("  Master Recovery Key system enabled!")
+
+
+def migrate_v29_create_feedback_table(conn):
+    """
+    Migration v29: Create feedback table for user suggestions and bug reports.
+
+    Table: feedback
+    - id: Primary key
+    - user_id: Foreign key to users table (NULL if anonymous)
+    - user_email: Email of user (for context)
+    - page_url: The page URL where feedback was submitted
+    - page_title: The page title for easier identification
+    - feedback_type: Type of feedback (suggestion, bug, other)
+    - message: The actual feedback message
+    - user_agent: Browser user agent string
+    - created_at: Timestamp
+    - status: Status of feedback (new, reviewed, resolved, closed)
+    - admin_notes: Notes from admin reviewing the feedback
+    """
+    c = conn.cursor()
+
+    # Create feedback table
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            user_email TEXT,
+            page_url TEXT NOT NULL,
+            page_title TEXT,
+            feedback_type TEXT NOT NULL,
+            message TEXT NOT NULL,
+            user_agent TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            status TEXT DEFAULT 'new',
+            admin_notes TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # Create index on status for faster filtering
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_feedback_status
+        ON feedback(status)
+    """)
+
+    # Create index on user_id for user-specific queries
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_feedback_user
+        ON feedback(user_id)
+    """)
+
+    # Create index on created_at for chronological sorting
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_feedback_created
+        ON feedback(created_at)
+    """)
+
+    conn.commit()
+    print("  Created feedback table with indexes.")
+
+
+def migrate_v30_feedback_throttle(conn):
+    c = conn.cursor()
+
+    c.execute("""
+-- migrations/v30_feedback_throttle.sql
+        CREATE TABLE IF NOT EXISTS feedback_throttle (
+          key TEXT PRIMARY KEY,           -- "user:<id>" or "ip:<addr>"
+          window_start INTEGER NOT NULL,  -- epoch window (e.g., minutes)
+          count INTEGER NOT NULL
+        );
+    """)
+    conn.commit()
+    print("  Created feedback throttle table with indexes.")
