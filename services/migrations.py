@@ -1652,6 +1652,7 @@ def migrate_v29_create_feedback_table(conn):
             feedback_type TEXT NOT NULL,
             message TEXT NOT NULL,
             user_agent TEXT,
+            ip_address TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             status TEXT DEFAULT 'new',
             admin_notes TEXT,
