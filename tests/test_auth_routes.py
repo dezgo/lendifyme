@@ -158,8 +158,7 @@ class TestLoginRoute:
         """Test that login page has all necessary links."""
         response = client.get('/login')
 
-        assert b'Lost access to email?' in response.data
-        assert b'/auth/recover' in response.data
+        assert b'Sign In' in response.data
         assert b'Sign up free' in response.data
         assert b'/register' in response.data
 
@@ -191,60 +190,6 @@ class TestLoginRoute:
         # Should not reveal whether user exists
         assert response.status_code == 200
         assert b'magic link' in response.data.lower()
-
-
-class TestRecoveryRoute:
-    """Test recovery code authentication."""
-
-    def test_recovery_page_loads(self, client):
-        """Test that recovery page loads."""
-        response = client.get('/auth/recover')
-
-        assert response.status_code == 200
-        assert b'Use a recovery code' in response.data
-        assert b'Access Account' in response.data
-
-    def test_recovery_page_has_back_link(self, client):
-        """Test that recovery page has link back to login."""
-        response = client.get('/auth/recover')
-
-        assert b'Back to Sign In' in response.data
-        assert b'/login' in response.data
-
-    def test_successful_recovery_login(self, client_with_user, tmpdir):
-        """Test successful login with recovery code."""
-        response = client_with_user.post('/auth/recover', data={
-            'email': 'test@example.com',
-            'recovery_code': 'CODE1'
-        }, follow_redirects=False)
-
-        # Should redirect to dashboard
-        assert response.status_code == 302
-        assert response.location == '/'
-
-        # Verify user is logged in
-        with client_with_user.session_transaction() as sess:
-            assert sess.get('user_id') is not None
-            assert sess.get('user_email') == 'test@example.com'
-
-    def test_invalid_recovery_code(self, client_with_user):
-        """Test login with invalid recovery code."""
-        response = client_with_user.post('/auth/recover', data={
-            'email': 'test@example.com',
-            'recovery_code': 'INVALID'
-        }, follow_redirects=True)
-
-        assert response.status_code == 200
-        assert b'Invalid' in response.data
-
-    def test_recovery_without_email(self, client):
-        """Test recovery form without email."""
-        response = client.post('/auth/recover', data={
-            'recovery_code': 'CODE1'
-        }, follow_redirects=True)
-
-        assert response.status_code == 200
-        assert b'required' in response.data.lower()
 
 
 class TestMagicLinkAuth:
@@ -309,60 +254,6 @@ class TestMagicLinkAuth:
         response = client_with_user.get(f'/auth/magic/{token}', follow_redirects=True)
 
         assert b'already been used' in response.data
-
-
-class TestRecoveryCodesPage:
-    """Test recovery codes display page."""
-
-    def test_recovery_codes_page_requires_login(self, client):
-        """Test that recovery codes page requires authentication."""
-        response = client.get('/auth/recovery-codes', follow_redirects=False)
-
-        assert response.status_code == 302
-        assert '/login' in response.location
-
-    def test_recovery_codes_page_shows_codes_once(self, client_with_user, tmpdir):
-        """Recovery codes are shown exactly once right after generation."""
-        import sqlite3
-
-        # Prime the session with a logged-in user and freshly generated codes
-        with client_with_user.session_transaction() as sess:
-            db_path = tmpdir.join('test.db')
-            conn = sqlite3.connect(str(db_path))
-            c = conn.cursor()
-            c.execute("SELECT id, email, name FROM users WHERE email = ?", ('test@example.com',))
-            user = c.fetchone()
-            conn.close()
-
-            sess['user_id'] = user[0]
-            sess['user_email'] = user[1]
-            sess['user_name'] = user[2]
-            # Only set when codes were just generated:
-            sess['show_recovery_codes'] = ['CODE1', 'CODE2', 'CODE3', 'CODE4', 'CODE5']
-            sess['recovery_codes_for_user'] = user[0]
-
-        # First load: codes are visible
-        resp1 = client_with_user.get('/auth/recovery-codes')
-        assert resp1.status_code == 200
-        assert b'Recovery Codes' in resp1.data
-        assert b'Copy All Codes' in resp1.data
-        assert b'Print Codes' in resp1.data
-        assert any(code in resp1.data for code in [b'CODE1', b'CODE2', b'CODE3', b'CODE4', b'CODE5'])
-
-        # Session flags should be cleared after first view
-        with client_with_user.session_transaction() as sess:
-            assert 'show_recovery_codes' not in sess
-            assert 'recovery_codes_for_user' not in sess
-
-        # Second load: no longer visible; typically a redirect away
-        resp2 = client_with_user.get('/auth/recovery-codes', follow_redirects=False)
-        assert resp2.status_code in (302, 303)
-        assert 'Location' in resp2.headers
-
-        # If we follow redirects, ensure codes aren't shown again
-        resp3 = client_with_user.get('/auth/recovery-codes', follow_redirects=True)
-        assert b'Recovery Codes' not in resp3.data
-        assert b'CODE1' not in resp3.data and b'CODE2' not in resp3.data
 
 
 class TestLogout:

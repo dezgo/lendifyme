@@ -45,7 +45,7 @@ def login_required(f):
             try:
                 return redirect(url_for('auth.login', next=request.url))
             except:
-                return redirect(url_for('login', next=request.url))
+                return redirect(url_for('auth.login', next=request.url))
         return f(*args, **kwargs)
     return decorated_function
 
@@ -60,7 +60,7 @@ def admin_required(f):
             try:
                 return redirect(url_for('auth.login', next=request.url))
             except:
-                return redirect(url_for('login', next=request.url))
+                return redirect(url_for('auth.login', next=request.url))
 
         # Check if user is admin
         if not is_user_admin():
