@@ -5,7 +5,7 @@ import sqlite3
 import time
 from typing import Callable, Dict, List, Optional, Tuple
 
-from helpers.utils import get_db_path
+from helpers.db import get_db_connection
 from schemas.feedback import FeedbackInput, ValidationError, ALLOWED_FEEDBACK_TYPES
 
 # Throttle settings
@@ -20,7 +20,7 @@ ConnFactory = Callable[[], sqlite3.Connection]
 
 
 def default_conn_factory() -> sqlite3.Connection:
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     return conn
 

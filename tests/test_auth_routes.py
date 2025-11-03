@@ -1,55 +1,62 @@
-import pytest
-import sqlite3
-from app import app as flask_app
 from services.auth_helpers import hash_recovery_code
 import json
+import pytest
+from helpers.db import get_db_connection
+from services.migrations import run_migrations
+from app import app as flask_app
 
 
 @pytest.fixture
-def app():
-    """Create test app with secret key."""
-    flask_app.config['TESTING'] = True
-    flask_app.config['SECRET_KEY'] = 'test-secret-key'
-    flask_app.config['APP_URL'] = 'http://localhost:5000'
+def app(tmpdir, monkeypatch):
+    flask_app.config.update(
+        TESTING=True,
+        SECRET_KEY='test-secret-key',
+        APP_URL='http://localhost:5000',
+        DATABASE=str(tmpdir.join('test.db')),
+    )
+
+    # Run migrations on THIS DB inside app context so get_db_connection sees config
+    with flask_app.app_context():
+        with get_db_connection() as conn:
+            run_migrations(conn)
+
     return flask_app
 
 
 @pytest.fixture
-def client(app, tmpdir):
-    """Create test client with temporary database."""
-    db_path = str(tmpdir.join('test.db'))
-    app.config['DATABASE'] = db_path
-
-    with app.test_client() as client:
-        # Initialize database
-        conn = sqlite3.connect(db_path)
-        from services.migrations import run_migrations
-        run_migrations(conn)
-        conn.close()
-
-        yield client
+def client(app):
+    with app.test_client() as c:
+        yield c
 
 
 @pytest.fixture
-def client_with_user(client, tmpdir):
-    """Create test client with a registered user."""
-    db_path = tmpdir.join('test.db')
-    conn = sqlite3.connect(str(db_path))
-    c = conn.cursor()
+def client_with_user(app, client):
+    """Create a logged-out client but with a seeded user in the SAME DB."""
+    with app.app_context():
+        with get_db_connection() as conn:
+            c = conn.cursor()
 
-    # Create user with recovery codes
-    recovery_codes = ['CODE1', 'CODE2', 'CODE3']
-    hashed_codes = [hash_recovery_code(code) for code in recovery_codes]
-    codes_json = json.dumps(hashed_codes)
+            recovery_codes = ['CODE1', 'CODE2', 'CODE3']
+            hashed_codes = [hash_recovery_code(code) for code in recovery_codes]
+            codes_json = json.dumps(hashed_codes)
 
-    c.execute("""
-        INSERT INTO users (email, name, recovery_codes, created_at)
-        VALUES (?, ?, ?, datetime('now'))
-    """, ('test@example.com', 'Test User', codes_json))
-    conn.commit()
-    conn.close()
+            # Insert a user record compatible with your current schema.
+            # (Adjust columns if you’ve added NOT NULL constraints.)
+            c.execute("""
+                INSERT INTO users (
+                    email, name, recovery_codes, created_at,
+                    email_verified, onboarding_completed, role, subscription_tier
+                )
+                VALUES (?, ?, ?, datetime('now'), ?, ?, ?, ?)
+            """, (
+                'test@example.com', 'Test User', codes_json,
+                1, 1, 'user', 'free'
+            ))
 
-    yield client
+            conn.commit()
+
+    # Return the same client (no re-init, no new DB)
+    return client
 
 
 class TestLandingPage:
@@ -91,7 +98,7 @@ class TestRegisterRoute:
         assert b'Sign in' in response.data
         assert b'/login' in response.data
 
-    def test_successful_registration(self, client, tmpdir):
+    def test_successful_registration(self, client, app):
 
         """Test successful user registration."""
         response = client.post('/register', data={
@@ -103,17 +110,16 @@ class TestRegisterRoute:
         assert '/onboarding' in response.location
 
         # Verify user was created
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
-        c = conn.cursor()
-        c.execute("SELECT email, name FROM users WHERE email = ?", ('newuser@example.com',))
-        user = c.fetchone()
-        conn.close()
+        with app.app_context():
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("SELECT email, name FROM users WHERE email = ?", ('newuser@example.com',))
+                user = c.fetchone()
 
         assert user is not None
         assert user[0] == 'newuser@example.com'
 
-    def test_registration_without_name(self, client, tmpdir):
+    def test_registration_without_name(self, client, app):
         """Test registration with only email (name optional)."""
         response = client.post('/register', data={
             'email': 'noname@example.com'
@@ -122,12 +128,11 @@ class TestRegisterRoute:
         assert response.status_code == 302
 
         # Verify user was created
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
-        c = conn.cursor()
-        c.execute("SELECT email, name FROM users WHERE email = ?", ('noname@example.com',))
-        user = c.fetchone()
-        conn.close()
+        with app.app_context():
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("SELECT email, name FROM users WHERE email = ?", ('noname@example.com',))
+                user = c.fetchone()
 
         assert user is not None
         assert user[0] == 'noname@example.com'
@@ -162,7 +167,7 @@ class TestLoginRoute:
         assert b'Sign up free' in response.data
         assert b'/register' in response.data
 
-    def test_login_with_existing_user(self, client_with_user, tmpdir):
+    def test_login_with_existing_user(self, client_with_user, app):
         """Test login request for existing user."""
         response = client_with_user.post('/login', data={
             'email': 'test@example.com'
@@ -171,13 +176,12 @@ class TestLoginRoute:
         assert response.status_code == 200
 
         # Verify magic link was created in database
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
-        c = conn.cursor()
-        c.execute("SELECT COUNT(*) FROM magic_links WHERE user_id = (SELECT id FROM users WHERE email = ?)",
-                  ('test@example.com',))
-        count = c.fetchone()[0]
-        conn.close()
+        with app.app_context():
+            with get_db_connection() as conn:
+                c = conn.cursor()
+                c.execute("SELECT COUNT(*) FROM magic_links WHERE user_id = (SELECT id FROM users WHERE email = ?)",
+                          ('test@example.com',))
+                count = c.fetchone()[0]
 
         assert count > 0
 
@@ -195,26 +199,25 @@ class TestLoginRoute:
 class TestMagicLinkAuth:
     """Test magic link authentication."""
 
-    def test_valid_magic_link(self, client_with_user, tmpdir):
+    def test_valid_magic_link(self, client_with_user, app):
         """Test authentication with valid magic link."""
         # Create a magic link
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
-        c = conn.cursor()
+        with app.app_context():
+            with get_db_connection() as conn:
+                c = conn.cursor()
 
-        from services.auth_helpers import generate_magic_link_token, get_magic_link_expiry
-        token = generate_magic_link_token()
-        expires_at = get_magic_link_expiry(minutes=15)
+                from services.auth_helpers import generate_magic_link_token, get_magic_link_expiry
+                token = generate_magic_link_token()
+                expires_at = get_magic_link_expiry(minutes=15)
 
-        c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
-        user_id = c.fetchone()[0]
+                c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
+                user_id = c.fetchone()[0]
 
-        c.execute("""
-            INSERT INTO magic_links (user_id, token, expires_at, used)
-            VALUES (?, ?, ?, 0)
-        """, (user_id, token, expires_at))
-        conn.commit()
-        conn.close()
+                c.execute("""
+                    INSERT INTO magic_links (user_id, token, expires_at, used)
+                    VALUES (?, ?, ?, 0)
+                """, (user_id, token, expires_at))
+                conn.commit()
 
         # Test the magic link
         response = client_with_user.get(f'/auth/magic/{token}', follow_redirects=False)
@@ -229,26 +232,25 @@ class TestMagicLinkAuth:
         assert response.status_code == 302
         assert '/login' in response.location
 
-    def test_used_magic_link(self, client_with_user, tmpdir):
+    def test_used_magic_link(self, client_with_user, app):
         """Test that used magic links are rejected."""
         # Create a used magic link
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
-        c = conn.cursor()
+        with app.app_context():
+            with get_db_connection() as conn:
+                c = conn.cursor()
 
-        from services.auth_helpers import generate_magic_link_token, get_magic_link_expiry
-        token = generate_magic_link_token()
-        expires_at = get_magic_link_expiry(minutes=15)
+                from services.auth_helpers import generate_magic_link_token, get_magic_link_expiry
+                token = generate_magic_link_token()
+                expires_at = get_magic_link_expiry(minutes=15)
 
-        c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
-        user_id = c.fetchone()[0]
+                c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
+                user_id = c.fetchone()[0]
 
-        c.execute("""
-            INSERT INTO magic_links (user_id, token, expires_at, used)
-            VALUES (?, ?, ?, 1)
-        """, (user_id, token, expires_at))
-        conn.commit()
-        conn.close()
+                c.execute("""
+                    INSERT INTO magic_links (user_id, token, expires_at, used)
+                    VALUES (?, ?, ?, 1)
+                """, (user_id, token, expires_at))
+                conn.commit()
 
         # Test the used magic link
         response = client_with_user.get(f'/auth/magic/{token}', follow_redirects=True)
@@ -259,16 +261,15 @@ class TestMagicLinkAuth:
 class TestLogout:
     """Test logout functionality."""
 
-    def test_logout_clears_session(self, client_with_user, tmpdir):
+    def test_logout_clears_session(self, client_with_user, app):
         """Test that logout clears user session."""
         # Log in first
         with client_with_user.session_transaction() as sess:
-            db_path = tmpdir.join('test.db')
-            conn = sqlite3.connect(str(db_path))
-            c = conn.cursor()
-            c.execute("SELECT id, email FROM users WHERE email = ?", ('test@example.com',))
-            user = c.fetchone()
-            conn.close()
+            with app.app_context():
+                with get_db_connection() as conn:
+                    c = conn.cursor()
+                    c.execute("SELECT id, email FROM users WHERE email = ?", ('test@example.com',))
+                    user = c.fetchone()
 
             sess['user_id'] = user[0]
             sess['user_email'] = user[1]

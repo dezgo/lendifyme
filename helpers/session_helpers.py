@@ -2,8 +2,7 @@
 Session and user-related helper functions.
 """
 from flask import session
-import sqlite3
-from helpers.utils import get_db_path
+from helpers.db import get_db_connection
 
 
 def get_current_user_id():
@@ -17,7 +16,7 @@ def is_email_verified():
     if not user_id:
         return False
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT email_verified FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()
@@ -32,7 +31,7 @@ def get_unverified_loan_count():
     if not user_id:
         return 0
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (user_id,))
     count = c.fetchone()[0]
@@ -47,7 +46,7 @@ def get_user_encryption_salt():
     if not user_id:
         return None
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()

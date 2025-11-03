@@ -37,6 +37,7 @@ from services.feedback_service import (
 )
 
 from helpers.utils import get_db_path
+from helpers.db import get_db_connection
 
 
 # Load environment variables from .env
@@ -184,7 +185,7 @@ def format_date_filter(date_string):
 
 def filter_duplicate_transactions(matches):
     """Filter out transactions that have already been applied or rejected."""
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     filtered_matches = []
@@ -266,7 +267,7 @@ def is_user_admin():
     if not user_id:
         return False
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT role FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()
@@ -281,7 +282,7 @@ def is_email_verified():
     if not user_id:
         return False
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT email_verified FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()
@@ -296,7 +297,7 @@ def get_unverified_loan_count():
     if not user_id:
         return 0
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (user_id,))
     count = c.fetchone()[0]
@@ -315,7 +316,7 @@ def get_user_encryption_salt():
     if not user_id:
         return None
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()
@@ -354,7 +355,7 @@ def log_event(event_name, user_id=None, event_data=None):
         # Convert event_data to JSON if provided
         event_data_json = json.dumps(event_data) if event_data else None
 
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("""
             INSERT INTO events (event_name, user_id, session_id, event_data)
@@ -395,7 +396,7 @@ def init_db():
     from services import migrations
 
     db_path = get_db_path()  # uses current_app when context is active
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection()
     try:
         migrations.run_migrations(conn)
     finally:
@@ -469,7 +470,7 @@ def borrower_portal(token):
         flash("Invalid access link", "error")
         return redirect("/")
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
@@ -571,7 +572,7 @@ def borrower_toggle_notifications(token):
 
     action = request.form.get("action")  # 'enable' or 'disable'
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Find loan by access token
@@ -603,7 +604,7 @@ def borrower_toggle_notifications(token):
 @login_required
 def send_borrower_invite(loan_id):
     """Send invitation email to borrower with portal access link."""
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Verify loan ownership and get loan details
@@ -669,7 +670,7 @@ def send_borrower_invite(loan_id):
 def onboarding():
     """Onboarding flow for new users."""
     # Check if already completed
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT onboarding_completed FROM users WHERE id = ?", (get_current_user_id(),))
     user = c.fetchone()
@@ -707,7 +708,7 @@ def onboarding():
             flash("Session expired. Please log in again.", "error")
             return redirect("/login")
 
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("UPDATE users SET onboarding_completed = 1 WHERE id = ?", (user_id,))
         conn.commit()
@@ -730,7 +731,7 @@ def onboarding_update_email():
         flash("Email is required", "error")
         return redirect("/onboarding?step=1")
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Check if new email is already taken
@@ -757,7 +758,7 @@ def onboarding_update_email():
 @app.route("/pricing")
 def pricing():
     """Display pricing tiers and subscription options."""
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get all subscription plans
@@ -793,7 +794,7 @@ def pricing():
         current_loans, _, _ = check_loan_limit()
 
         # Check if user has manual override (admin-granted)
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT manual_override FROM users WHERE id = ?", (get_current_user_id(),))
         result = c.fetchone()
@@ -833,7 +834,7 @@ def subscribe(tier):
 
     # Get or create Stripe customer
     user_id = get_current_user_id()
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("SELECT stripe_customer_id, email FROM users WHERE id = ?", (user_id,))
@@ -980,7 +981,7 @@ def stripe_webhook():
 
     app.logger.info(f"Received Stripe webhook: {event_type}")
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     try:
@@ -1121,7 +1122,7 @@ def billing():
     import stripe
 
     user_id = get_current_user_id()
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get user's subscription info
@@ -1185,7 +1186,7 @@ def billing():
 @admin_required
 def admin_users():
     """Admin page to manage all users and their subscriptions."""
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get all users with their subscription info and usage stats
@@ -1232,7 +1233,7 @@ def admin_upgrade_user(user_id):
         flash("Invalid tier", "error")
         return redirect("/admin/users")
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Update user's tier and set manual override
@@ -1269,8 +1270,7 @@ def admin_delete_user(user_id):
         flash("You cannot delete your own account.", "error")
         return redirect("/admin/users")
 
-    conn = sqlite3.connect(get_db_path())
-    conn.execute("PRAGMA foreign_keys = ON")  # Enable foreign key constraints for CASCADE
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Check if user exists and get their info
@@ -1343,8 +1343,7 @@ def admin_cleanup_inactive():
     days_verified = int(request.form.get("days_verified", 90))
     dry_run = request.form.get("dry_run") == "1"
 
-    conn = sqlite3.connect(get_db_path())
-    conn.execute("PRAGMA foreign_keys = ON")
+    conn = get_db_connection()
     c = conn.cursor()
 
     deleted_users = []
@@ -1573,7 +1572,7 @@ def settings_password():
         confirm_password = request.form.get("confirm_password", "").strip()
         action = request.form.get("action")  # 'add', 'change', or 'remove'
 
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute("SELECT password_hash FROM users WHERE id = ?", (get_current_user_id(),))
@@ -1835,7 +1834,7 @@ def settings_password():
         conn.close()
 
     # GET request - show form
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT password_hash, encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
     user = c.fetchone()
@@ -1868,7 +1867,7 @@ def settings_recovery():
     if request.method == "POST":
         current_password = request.form.get("current_password", "").strip()
 
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute("SELECT password_hash, master_recovery_key_hash FROM users WHERE id = ?", (get_current_user_id(),))
@@ -1975,7 +1974,7 @@ def settings_recovery():
         return redirect("/auth/recovery-phrase?regenerated=1")
 
     # GET request - show form
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT password_hash, master_recovery_key_hash FROM users WHERE id = ?", (get_current_user_id(),))
     user = c.fetchone()
@@ -2012,7 +2011,7 @@ def settings_banks_add():
         return redirect("/settings/banks")
 
     # Require password for zero-knowledge encryption
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT password_hash, encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
     user = c.fetchone()
@@ -2102,7 +2101,7 @@ def settings_banks_configure(connector_type):
                 flash("Please log in with your password to connect bank accounts.", "error")
                 return redirect("/login")
 
-            conn = sqlite3.connect(get_db_path())
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute("SELECT encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
             user = c.fetchone()
@@ -2179,7 +2178,7 @@ def settings_banks_test(connection_id):
 @login_required
 def settings_banks_reset_sync(connection_id):
     """Reset last_synced_at to force full re-sync on next login."""
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Verify ownership before resetting
@@ -2213,7 +2212,7 @@ def settings_banks_reset_sync(connection_id):
 @login_required
 def settings_banks_delete(connection_id):
     """Delete a bank connection."""
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Verify ownership before deleting
@@ -2331,7 +2330,7 @@ def match_transactions():
             all_transactions_dicts = [t.to_dict() for t in all_transactions]
 
             # Get all loans for current user with calculated repaid amounts AND loan_type
-            conn = sqlite3.connect(get_db_path())
+            conn = get_db_connection()
             c = conn.cursor()
             c.execute("""
                 SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
@@ -2408,7 +2407,7 @@ def match_transactions():
             session_key = secrets.token_urlsafe(16)
             expires_at = (datetime.now() + timedelta(hours=24)).isoformat()
 
-            conn = sqlite3.connect(get_db_path())
+            conn = get_db_connection()
             c = conn.cursor()
 
             # Clean up any old expired data for this user
@@ -2466,7 +2465,7 @@ def review_matches():
         return redirect("/match")
 
     # Load directly from database (no session caching to avoid cookie size limits)
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -2500,7 +2499,7 @@ def apply_match():
     session_key = session.get('pending_matches_key')
 
     if match_id and session_key:
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Load matches from database
@@ -2612,7 +2611,7 @@ def reject_match():
     session_key = session.get('pending_matches_key')
 
     if match_id and session_key:
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Load matches from database
@@ -2672,7 +2671,7 @@ def analytics():
     """Analytics dashboard showing usage metrics. Admin only."""
     from datetime import datetime, timedelta
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Date calculations
@@ -2882,7 +2881,7 @@ def apply_pending_match():
     confidence = match['confidence']
 
     # Apply the match
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -2923,7 +2922,7 @@ def reject_pending_match():
     loan = match['loan']
 
     # Record rejection
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -2950,7 +2949,7 @@ def reject_pending_match():
 @login_required
 def undo_auto_match(transaction_id):
     """Undo an auto-applied match."""
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Verify ownership and that it was auto-applied
@@ -3034,7 +3033,7 @@ def unlock_with_password():
         flash("Please enter your password or recovery phrase", "error")
         return redirect("/")
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get user's password hash and recovery key hash
@@ -3175,7 +3174,7 @@ def _create_encrypted_loan(
         encrypt_dek_with_recovery_phrase,
     )
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     try:
         user_password = get_user_password_from_session()
@@ -3252,7 +3251,7 @@ def _build_dashboard_context():
       - dict for template context (loans, email_verified, has_password)
       - or a string URL to redirect to (e.g., '/login')
     """
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     try:

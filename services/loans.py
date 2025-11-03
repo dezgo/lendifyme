@@ -3,11 +3,10 @@ Loan-related helper functions.
 
 Contains encryption, decryption, and subscription limit checking for loans.
 """
-import sqlite3
 import json
 import secrets
 from flask import current_app, session
-from helpers.utils import get_db_path
+from helpers.db import get_db_connection
 
 
 def get_current_user_id():
@@ -21,7 +20,7 @@ def get_user_encryption_salt():
     if not user_id:
         return None
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()
@@ -111,7 +110,7 @@ def get_user_subscription_tier(user_id=None):
     if not user_id:
         return 'free'
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT subscription_tier FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()
@@ -130,7 +129,7 @@ def get_subscription_limits(tier):
     Returns:
         dict: Features and limits for the tier
     """
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("""
         SELECT max_loans, features_json
@@ -182,7 +181,7 @@ def check_loan_limit(user_id=None):
     max_loans = limits.get('max_loans')
 
     # Count current active loans
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (user_id,))
     current_count = c.fetchone()[0]
@@ -234,7 +233,7 @@ def is_trial_active(user_id=None):
     if not user_id:
         return False
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT trial_ends_at FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()
@@ -274,7 +273,7 @@ def get_loan_dek(loan_id, user_password=None, borrower_token=None):
         encrypt_dek_with_password
     )
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     if borrower_token:

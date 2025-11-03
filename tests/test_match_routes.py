@@ -1,14 +1,14 @@
 import pytest
 import sqlite3
 import json
+from helpers.db import get_db_connection
 
 
 @pytest.fixture
 def client_with_loan(app, logged_in_client):
     """Create logged-in client with a sample loan."""
     # Use the app's configured database, not a separate tmpdir
-    db_path = app.config['DATABASE']
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get user_id

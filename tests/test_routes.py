@@ -1,5 +1,5 @@
-import pytest
 import sqlite3
+from helpers.db import get_db_connection
 
 
 def test_form_submission(logged_in_client, app):
@@ -36,8 +36,7 @@ def test_loan_repayment(logged_in_client, app):
     assert response.status_code == 200
 
     # Get the loan ID from the database (borrower column is now encrypted)
-    db_path = app.config['DATABASE']
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT id FROM loans ORDER BY id DESC LIMIT 1")
     loan_id = c.fetchone()[0]
@@ -51,7 +50,7 @@ def test_loan_repayment(logged_in_client, app):
     assert response.status_code == 200
 
     # Verify the repayment was recorded
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection()
     c = conn.cursor()
     c.execute("SELECT SUM(amount) FROM applied_transactions WHERE loan_id = ?", (loan_id,))
     amount_repaid = c.fetchone()[0]

@@ -31,14 +31,8 @@ def _disable_csrf(app, monkeypatch):
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    """
-    Create a test app configured to use an isolated temp DB file.
-    Import AFTER env/test mode is set to avoid prod-side effects.
-    """
-    # Valid Fernet key for tests
     monkeypatch.setenv("ENCRYPTION_KEY", "ISO-GA14bRMefte-maLgDXga80SEn-M_Lz-MSLP5fhY=")
 
-    # Import the Flask app only now (after env is set)
     from app import app as flask_app
 
     db_path = tmp_path / "test.db"
@@ -49,18 +43,19 @@ def app(tmp_path, monkeypatch):
         DATABASE=str(db_path),
     )
 
-    # Initialize schema on the temp DB
+    # Initialize schema on the temp DB (inside app context so get_db_connection sees app.config)
     from services.migrations import run_migrations
-    conn = sqlite3.connect(str(db_path))
-    try:
-        conn.execute("PRAGMA foreign_keys = ON")
-        run_migrations(conn)
-    finally:
-        conn.close()
+    from helpers.db import get_db_connection
+
+    with flask_app.app_context():
+        conn = get_db_connection()
+        try:
+            run_migrations(conn)
+        finally:
+            conn.close()
 
     yield flask_app
 
-    # Cleanup env var
     monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
 
 

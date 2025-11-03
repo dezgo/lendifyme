@@ -16,6 +16,7 @@ from services.auth_helpers import (
 from services.email_sender import send_magic_link_email
 from helpers.decorators import login_required
 from helpers.utils import get_db_path, log_event, get_current_user_id
+from helpers.db import get_db_connection
 
 # Get ENV from environment
 ENV = os.environ.get("FLASK_ENV") or "production"
@@ -71,7 +72,7 @@ def register():
         client_ip = request.remote_addr or request.environ.get('HTTP_X_FORWARDED_FOR', 'unknown')
         rate_limit_key = f"register_attempts:{client_ip}"
 
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Check rate limit (stored in a simple table)
@@ -98,7 +99,7 @@ def register():
             flash("Email is required", "error")
             return render_template("register.html")
 
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
 
         # Check if email already exists
@@ -220,7 +221,7 @@ def login():
             flash("Email is required", "error")
             return render_template("login.html")
 
-        conn = sqlite3.connect(get_db_path())
+        conn = get_db_connection()
         c = conn.cursor()
 
         c.execute("SELECT id, email, name, password_hash, auth_provider FROM users WHERE email = ?", (email,))
@@ -416,7 +417,7 @@ LendifyMe
 def magic_link_auth(token):
     """Verify magic link and log user in."""
     current_app.logger.info(f"Magic link auth attempt with token: {token[:10]}...")
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     c.execute("""
@@ -482,7 +483,7 @@ def verify_email(token):
     """Verify user's email address via verification token."""
     from services.auth_helpers import is_verification_expired
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Find user by verification token
@@ -538,7 +539,7 @@ def resend_verification():
     """Resend verification email to current user."""
     from services.auth_helpers import generate_verification_token, get_verification_expiry
 
-    conn = sqlite3.connect(get_db_path())
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get user details

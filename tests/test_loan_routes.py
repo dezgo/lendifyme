@@ -1,14 +1,13 @@
 import pytest
 import sqlite3
-import json
+from helpers.db import get_db_connection
 
 
 @pytest.fixture
 def client_with_loan(app, logged_in_client):
     """Create logged-in client with a sample loan."""
     # Use the app's configured database, not a separate tmpdir
-    db_path = app.config['DATABASE']
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection()
     c = conn.cursor()
 
     # Get user_id
@@ -70,8 +69,7 @@ class TestDashboard:
         assert response.status_code == 200
 
         # Verify loan was created (data is now encrypted, so check encrypted columns)
-        db_path = tmpdir.join('test.db')
-        conn = sqlite3.connect(str(db_path))
+        conn = get_db_connection()
         c = conn.cursor()
         c.execute("SELECT id, borrower_encrypted, amount_encrypted, note_encrypted FROM loans ORDER BY id DESC LIMIT 1")
         loan = c.fetchone()

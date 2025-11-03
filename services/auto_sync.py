@@ -11,9 +11,10 @@ When users log in, this service:
 
 import sqlite3
 from datetime import datetime, timedelta
-from typing import List, Dict, Optional, Tuple
+from typing import Dict
 from services.connectors.registry import ConnectorRegistry
 from services.transaction_matcher import match_transactions_to_loans
+from helpers.db import get_db_connection
 
 
 def sync_all_bank_connections(db_path: str, user_id: int, user_password: str) -> Dict:
@@ -50,7 +51,7 @@ def sync_all_bank_connections(db_path: str, user_id: int, user_password: str) ->
     if not connections:
         return results
 
-    conn = sqlite3.connect(db_path)
+    conn = get_db_connection()
 
     for connection in connections:
         try:
