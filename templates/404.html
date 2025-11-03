@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Page Not Found – LendifyMe</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            margin: 0;
+        }
+        .error-container {
+            background: white;
+            padding: 3rem 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+        .error-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        h1 {
+            font-size: 1.75rem;
+            margin: 0 0 1rem 0;
+            color: #212529;
+        }
+        .error-code {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-bottom: 1.5rem;
+        }
+        .error-message {
+            color: #495057;
+            line-height: 1.6;
+            margin-bottom: 2rem;
+            font-size: 1rem;
+        }
+        .btn {
+            display: inline-block;
+            padding: 0.875rem 2rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+            margin: 0 0.5rem 0.5rem 0.5rem;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+            box-shadow: 0 4px 12px rgba(108,117,125,0.4);
+        }
+        .help-text {
+            margin-top: 1.5rem;
+            font-size: 0.875rem;
+            color: #6c757d;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">🔍</div>
+
+        <h1>Page Not Found</h1>
+        <p class="error-code">Error 404</p>
+
+        <div class="error-message">
+            The page you're looking for doesn't exist or has been moved.
+        </div>
+
+        <div>
+            <a href="javascript:history.back()" class="btn btn-secondary">← Go Back</a>
+            <a href="/" class="btn">Go to Dashboard</a>
+        </div>
+
+        <div class="help-text">
+            💡 Check the URL for typos or navigate from the dashboard
+        </div>
+    </div>
+</body>
+</html>

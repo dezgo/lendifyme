@@ -46,14 +46,14 @@ sentry_sdk.init(
 app = Flask(__name__)
 csrf = CSRFProtect(app)
 
-app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
+if os.getenv("FLASK_ENV") == "production":
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.config.update(
     SESSION_COOKIE_SECURE=(ENV == 'production'),  # only over HTTPS in production
     SESSION_COOKIE_HTTPONLY=True,     # JS can't read
     SESSION_COOKIE_SAMESITE="Lax",    # or "Strict" if OK
     PREFERRED_URL_SCHEME = "https",
 )
-
 
 # Config
 app.config['DATABASE'] = 'lendifyme.db'
@@ -368,6 +368,23 @@ def redirect_www():
     if request.host.startswith("www."):
         new_url = request.url.replace("://www.", "://", 1)
         return redirect(new_url, code=301)
+
+
+# Error handlers
+@app.errorhandler(400)
+def bad_request(e):
+    """Handle 400 Bad Request errors (primarily CSRF failures)."""
+    # Check if it's a CSRF error
+    error_description = str(e.description) if hasattr(e, 'description') else ""
+    is_csrf_error = "CSRF" in error_description or "csrf" in error_description.lower()
+
+    return render_template("400.html", is_csrf_error=is_csrf_error), 400
+
+
+@app.errorhandler(404)
+def not_found(e):
+    """Handle 404 Not Found errors."""
+    return render_template("404.html"), 404
 
 
 def init_db():

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Request Error – LendifyMe</title>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+            margin: 0;
+        }
+        .error-container {
+            background: white;
+            padding: 3rem 2.5rem;
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+            max-width: 500px;
+            width: 100%;
+            text-align: center;
+        }
+        .error-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        h1 {
+            font-size: 1.75rem;
+            margin: 0 0 1rem 0;
+            color: #212529;
+        }
+        .error-code {
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-bottom: 1.5rem;
+        }
+        .error-message {
+            color: #495057;
+            line-height: 1.6;
+            margin-bottom: 2rem;
+            font-size: 1rem;
+        }
+        .error-message strong {
+            color: #212529;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+        .error-reasons {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            text-align: left;
+        }
+        .error-reasons h3 {
+            margin: 0 0 1rem 0;
+            font-size: 1rem;
+            color: #212529;
+        }
+        .error-reasons ul {
+            margin: 0;
+            padding-left: 1.5rem;
+            color: #495057;
+        }
+        .error-reasons li {
+            margin-bottom: 0.5rem;
+            line-height: 1.5;
+        }
+        .btn {
+            display: inline-block;
+            padding: 0.875rem 2rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: all 0.2s;
+            border: none;
+            cursor: pointer;
+            margin: 0 0.5rem 0.5rem 0.5rem;
+        }
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102,126,234,0.4);
+        }
+        .btn-secondary {
+            background: #6c757d;
+        }
+        .btn-secondary:hover {
+            background: #5a6268;
+            box-shadow: 0 4px 12px rgba(108,117,125,0.4);
+        }
+        .help-text {
+            margin-top: 1.5rem;
+            font-size: 0.875rem;
+            color: #6c757d;
+        }
+        .help-text a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        .help-text a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="error-container">
+        <div class="error-icon">⚠️</div>
+
+        {% if is_csrf_error %}
+        <h1>Security Check Failed</h1>
+        <p class="error-code">Error 400 • CSRF Validation Error</p>
+
+        <div class="error-message">
+            <strong>Your request couldn't be processed</strong>
+            This usually happens when your session has expired or you've had the page open for too long.
+        </div>
+
+        <div class="error-reasons">
+            <h3>Common causes:</h3>
+            <ul>
+                <li>Your browser session expired (been idle for a while)</li>
+                <li>You submitted a form from a stale page</li>
+                <li>You clicked back and re-submitted an old form</li>
+                <li>Your browser is blocking cookies</li>
+            </ul>
+        </div>
+
+        <div>
+            <a href="javascript:history.back()" class="btn btn-secondary">← Go Back</a>
+            <a href="/" class="btn">Return to Dashboard</a>
+        </div>
+
+        <div class="help-text">
+            💡 <strong>Quick fix:</strong> Refresh the page you were on and try again
+        </div>
+
+        {% else %}
+        <h1>Invalid Request</h1>
+        <p class="error-code">Error 400 • Bad Request</p>
+
+        <div class="error-message">
+            <strong>Something went wrong with your request</strong>
+            The request couldn't be understood or was missing required information.
+        </div>
+
+        <div>
+            <a href="javascript:history.back()" class="btn btn-secondary">← Go Back</a>
+            <a href="/" class="btn">Return to Dashboard</a>
+        </div>
+
+        <div class="help-text">
+            Still having issues? <a href="https://github.com/anthropics/claude-code/issues">Contact support</a>
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>

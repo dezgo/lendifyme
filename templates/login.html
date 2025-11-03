@@ -133,10 +133,10 @@
         <form method="post">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <label>Email Address</label>
-            <input type="email" name="email" placeholder="your@email.com" required autofocus>
+            <input type="email" id="email" name="email" placeholder="your@email.com" autocomplete="username" required autofocus>
 
             <label>Password (Optional)</label>
-            <input type="password" name="password" placeholder="Leave blank for magic link">
+            <input type="password" id="password" name="password" placeholder="Leave blank for magic link" autocomplete="current-password">
 
             <button type="submit">Sign In</button>
         </form>
