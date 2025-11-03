@@ -25,6 +25,7 @@ import logging
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 
 # Load environment variables from .env
@@ -45,11 +46,14 @@ sentry_sdk.init(
 app = Flask(__name__)
 csrf = CSRFProtect(app)
 
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 app.config.update(
     SESSION_COOKIE_SECURE=(ENV == 'production'),  # only over HTTPS in production
     SESSION_COOKIE_HTTPONLY=True,     # JS can't read
     SESSION_COOKIE_SAMESITE="Lax",    # or "Strict" if OK
+    PREFERRED_URL_SCHEME = "https",
 )
+
 
 # Config
 app.config['DATABASE'] = 'lendifyme.db'
