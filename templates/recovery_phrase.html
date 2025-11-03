@@ -121,11 +121,19 @@
 </head>
 <body>
     <div class="recovery-container">
+        {% if request.args.get('regenerated') %}
+        <h1>🔄 New Recovery Phrase Generated</h1>
+        <p class="subtitle">
+            Your old recovery phrase has been replaced with this new one.
+            Your old phrase will no longer work to unlock your data.
+        </p>
+        {% else %}
         <h1>🔐 Save Your Recovery Phrase</h1>
         <p class="subtitle">
             We built LendifyMe around privacy — your data belongs to you, not us.
             That means <strong>only you</strong> hold the key to decrypt it.
         </p>
+        {% endif %}
 
         <div class="warning">
             <strong>⚠️ You'll only see this phrase once.</strong>

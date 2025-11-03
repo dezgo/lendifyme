@@ -1,17 +1,24 @@
 from flask_wtf import CSRFProtect
 import sys
-import sqlite3
 import json
-import secrets
+from flask import current_app, render_template, request, session, redirect, flash
+import sqlite3
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
+from services.loans import \
+    decrypt_loans, \
+    get_loan_dek, \
+    encrypt_loan_data, \
+    get_user_subscription_tier, \
+    check_loan_limit, \
+    has_feature
 from services import migrations
 from services.transaction_matcher import match_transactions_to_loans
 from services.connectors.registry import ConnectorRegistry
 from services.connectors.csv_connector import CSVConnector
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, session, flash, url_for, send_from_directory
-from flask_mail import Mail, Message
+from flask import Flask, url_for, send_from_directory
+from flask_mail import Mail
 from functools import wraps
 import os
 import logging
@@ -39,8 +46,8 @@ app = Flask(__name__)
 csrf = CSRFProtect(app)
 
 app.config.update(
-    SESSION_COOKIE_SECURE=True,       # only over HTTPS
-    SESSION_COOKIE_HTTPONLY=True,     # JS can’t read
+    SESSION_COOKIE_SECURE=(ENV == 'production'),  # only over HTTPS in production
+    SESSION_COOKIE_HTTPONLY=True,     # JS can't read
     SESSION_COOKIE_SAMESITE="Lax",    # or "Strict" if OK
 )
 
@@ -118,6 +125,11 @@ app.register_blueprint(auth_bp)
 init_mail(mail)  # Pass mail instance to auth blueprint
 app.logger.info("Registered auth blueprint")
 print("✅ Registered auth blueprint")  # Pretty output for console
+
+from routes.loan_routes import loan_bp
+app.register_blueprint(loan_bp)
+app.logger.info("Registered loan blueprint")
+print("✅ Registered loan blueprint")  # Pretty output for console
 
 
 # Custom Jinja2 filter for human-friendly date formatting
@@ -307,320 +319,9 @@ def get_user_password_from_session():
     return session.get('user_password')
 
 
-def encrypt_loan_data(loan_data, dek):
-    """
-    Encrypt sensitive loan fields using envelope encryption.
-
-    Args:
-        loan_data: Dict with loan fields
-        dek: Data encryption key (bytes)
-
-    Returns:
-        Dict with encrypted fields
-    """
-    from services.encryption import encrypt_field
-
-    return {
-        'borrower_encrypted': encrypt_field(loan_data.get('borrower'), dek) if loan_data.get('borrower') else None,
-        'amount_encrypted': encrypt_field(str(loan_data.get('amount')), dek) if loan_data.get('amount') is not None else None,
-        'note_encrypted': encrypt_field(loan_data.get('note'), dek) if loan_data.get('note') else None,
-        'bank_name_encrypted': encrypt_field(loan_data.get('bank_name'), dek) if loan_data.get('bank_name') else None,
-        'borrower_email_encrypted': encrypt_field(loan_data.get('borrower_email'), dek) if loan_data.get('borrower_email') else None,
-        'repayment_amount_encrypted': encrypt_field(str(loan_data.get('repayment_amount')), dek) if loan_data.get('repayment_amount') is not None else None,
-        'repayment_frequency_encrypted': encrypt_field(loan_data.get('repayment_frequency'), dek) if loan_data.get('repayment_frequency') else None,
-    }
-
-
-def decrypt_loan_data(loan_row, dek):
-    """
-    Decrypt loan data from database row.
-
-    Args:
-        loan_row: Database row (dict or tuple)
-        dek: Data encryption key (bytes)
-
-    Returns:
-        Dict with decrypted loan data
-    """
-    from services.encryption import decrypt_field
-
-    # Handle both dict and tuple row formats
-    if isinstance(loan_row, dict):
-        get_field = lambda key: loan_row.get(key)
-    else:
-        # Assume it's a row from c.fetchone() - need column names
-        # This will be handled by the calling code
-        return None
-
-    try:
-        return {
-            'borrower': decrypt_field(get_field('borrower_encrypted'), dek) if get_field('borrower_encrypted') else get_field('borrower'),
-            'amount': float(decrypt_field(get_field('amount_encrypted'), dek)) if get_field('amount_encrypted') else get_field('amount'),
-            'note': decrypt_field(get_field('note_encrypted'), dek) if get_field('note_encrypted') else get_field('note'),
-            'bank_name': decrypt_field(get_field('bank_name_encrypted'), dek) if get_field('bank_name_encrypted') else get_field('bank_name'),
-            'borrower_email': decrypt_field(get_field('borrower_email_encrypted'), dek) if get_field('borrower_email_encrypted') else get_field('borrower_email'),
-            'repayment_amount': float(decrypt_field(get_field('repayment_amount_encrypted'), dek)) if get_field('repayment_amount_encrypted') else get_field('repayment_amount'),
-            'repayment_frequency': decrypt_field(get_field('repayment_frequency_encrypted'), dek) if get_field('repayment_frequency_encrypted') else get_field('repayment_frequency'),
-        }
-    except Exception as e:
-        app.logger.error(f"Failed to decrypt loan data: {e}")
-        return None
-
-
-def get_loan_dek(loan_id, user_password=None, borrower_token=None):
-    """
-    Get the DEK for a specific loan.
-
-    Can decrypt using either:
-    - User's password (for lender access)
-    - Borrower access token (for borrower portal)
-
-    Args:
-        loan_id: The loan ID
-        user_password: User's password (optional if using token)
-        borrower_token: Borrower access token (optional if using password)
-
-    Returns:
-        bytes: The decrypted DEK, or None if unable to decrypt
-    """
-    from services.encryption import (
-        decrypt_dek_with_password,
-        extract_dek_from_token,
-        encrypt_dek_with_password
-    )
-
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-
-    if borrower_token:
-        # Borrower access: extract DEK directly from token
-        try:
-            dek = extract_dek_from_token(borrower_token)
-            conn.close()
-            return dek
-        except Exception as e:
-            app.logger.error(f"Failed to extract DEK from token: {e}")
-            conn.close()
-            return None
-
-    elif user_password:
-        # Lender access: decrypt DEK with password
-        c.execute("""
-            SELECT encrypted_dek, user_id
-            FROM loans
-            WHERE id = ?
-        """, (loan_id,))
-
-        result = c.fetchone()
-        if not result:
-            conn.close()
-            return None
-
-        encrypted_dek, user_id = result
-
-        # Check for migration placeholder
-        if encrypted_dek and encrypted_dek.startswith("MIGRATION_PENDING:"):
-            # Extract DEK from placeholder and re-encrypt it properly
-            dek_str = encrypted_dek.replace("MIGRATION_PENDING:", "")
-            dek = dek_str.encode('utf-8')
-
-            # Get user's encryption salt
-            c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
-            salt_result = c.fetchone()
-
-            if salt_result and salt_result[0]:
-                # Re-encrypt DEK with user's password
-                new_encrypted_dek = encrypt_dek_with_password(dek, user_password, salt_result[0])
-
-                # Update database
-                c.execute("UPDATE loans SET encrypted_dek = ? WHERE id = ?",
-                         (new_encrypted_dek, loan_id))
-                conn.commit()
-
-                app.logger.info(f"Finalized DEK encryption for loan {loan_id}")
-
-            conn.close()
-            return dek
-
-        # Normal case: decrypt DEK
-        c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
-        salt_result = c.fetchone()
-        conn.close()
-
-        if not salt_result or not salt_result[0]:
-            return None
-
-        try:
-            return decrypt_dek_with_password(encrypted_dek, user_password, salt_result[0])
-        except Exception as e:
-            app.logger.error(f"Failed to decrypt DEK for loan {loan_id}: {e}")
-            return None
-
-    conn.close()
-    return None
-
-
 # ============================================================================
 # SUBSCRIPTION HELPER FUNCTIONS
 # ============================================================================
-
-def get_user_subscription_tier(user_id=None):
-    """
-    Get user's current subscription tier (free/basic/pro).
-
-    Args:
-        user_id: User ID (defaults to current user)
-
-    Returns:
-        str: 'free', 'basic', or 'pro'
-    """
-    if user_id is None:
-        user_id = get_current_user_id()
-
-    if not user_id:
-        return 'free'
-
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-    c.execute("SELECT subscription_tier FROM users WHERE id = ?", (user_id,))
-    result = c.fetchone()
-    conn.close()
-
-    return result[0] if result else 'free'
-
-
-def get_subscription_limits(tier):
-    """
-    Get subscription limits and features for a tier.
-
-    Args:
-        tier: 'free', 'basic', or 'pro'
-
-    Returns:
-        dict: Features and limits for the tier
-    """
-    import json
-
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-    c.execute("""
-        SELECT max_loans, features_json
-        FROM subscription_plans
-        WHERE tier = ? AND active = 1
-    """, (tier,))
-    result = c.fetchone()
-    conn.close()
-
-    if not result:
-        # Fallback defaults
-        return {
-            'max_loans': 3,
-            'manual_repayment': True,
-            'csv_import': True,
-            'borrower_portal': True,
-            'email_notifications': False,
-            'transaction_export': False,
-            'bank_api': False,
-            'analytics': False
-        }
-
-    max_loans, features_json = result
-    features = json.loads(features_json)
-    features['max_loans'] = max_loans  # Ensure max_loans is in the dict
-
-    return features
-
-
-def check_loan_limit(user_id=None):
-    """
-    Check if user can create more loans.
-
-    Args:
-        user_id: User ID (defaults to current user)
-
-    Returns:
-        tuple: (current_count, max_allowed, can_create)
-    """
-    if user_id is None:
-        user_id = get_current_user_id()
-
-    if not user_id:
-        return (0, 3, False)
-
-    # Get user's tier
-    tier = get_user_subscription_tier(user_id)
-    limits = get_subscription_limits(tier)
-    max_loans = limits.get('max_loans')
-
-    # Count current active loans
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-    c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (user_id,))
-    current_count = c.fetchone()[0]
-    conn.close()
-
-    # None means unlimited
-    if max_loans is None:
-        return (current_count, None, True)
-
-    can_create = current_count < max_loans
-    return (current_count, max_loans, can_create)
-
-
-def has_feature(user_id, feature_name):
-    """
-    Check if user has access to a specific feature.
-
-    Args:
-        user_id: User ID
-        feature_name: Feature key (e.g., 'bank_api', 'email_notifications', 'transaction_export')
-
-    Returns:
-        bool: True if user has access to the feature
-    """
-    if not user_id:
-        return False
-
-    tier = get_user_subscription_tier(user_id)
-    limits = get_subscription_limits(tier)
-
-    return limits.get(feature_name, False)
-
-
-def is_trial_active(user_id=None):
-    """
-    Check if user is currently in a trial period.
-
-    Args:
-        user_id: User ID (defaults to current user)
-
-    Returns:
-        bool: True if trial is active
-    """
-    from datetime import datetime
-
-    if user_id is None:
-        user_id = get_current_user_id()
-
-    if not user_id:
-        return False
-
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-    c.execute("SELECT trial_ends_at FROM users WHERE id = ?", (user_id,))
-    result = c.fetchone()
-    conn.close()
-
-    if not result or not result[0]:
-        return False
-
-    trial_ends_at = datetime.fromisoformat(result[0])
-    return datetime.now() < trial_ends_at
-
-
-def generate_borrower_access_token():
-    """Generate a secure random token for borrower access."""
-    return secrets.token_urlsafe(32)
 
 
 def log_event(event_name, user_id=None, event_data=None):
@@ -928,517 +629,6 @@ def send_borrower_invite(loan_id):
 
     conn.close()
     return render_template("send_invite.html", loan=loan)
-
-
-@app.route("/", methods=["GET", "POST"])
-def index():
-    # Show landing page if not logged in
-    if not session.get('user_id'):
-        return render_template("landing.html")
-
-    if request.method == "POST":
-        borrower = request.form.get("borrower")
-        bank_name = request.form.get("bank_name")
-        date_borrowed = request.form.get("date_borrowed")
-        amount = request.form.get("amount")
-        note = request.form.get("note")
-        repayment_amount = request.form.get("repayment_amount")
-        repayment_frequency = request.form.get("repayment_frequency")
-        loan_type = request.form.get("loan_type", "lending")  # Default to lending
-        onboarding = request.form.get("onboarding")  # Check if this is during onboarding
-
-        # Check if user needs to verify email before creating more loans
-        if not is_email_verified():
-            loan_count = get_unverified_loan_count()
-            if loan_count >= 2:
-                flash("Please verify your email to create more loans. Check your inbox for the verification link.", "error")
-                return redirect("/")
-
-        # Check subscription loan limit
-        current_loans, max_loans, can_create = check_loan_limit()
-        if not can_create:
-            tier = get_user_subscription_tier()
-            tier_name = tier.title()
-            if max_loans is not None:
-                flash(f"You've reached the limit of {max_loans} loans on the {tier_name} plan. Upgrade to create more!", "error")
-            return redirect("/pricing")
-
-        if borrower and amount:
-            from services.encryption import (
-                generate_dek, create_token_from_dek, encrypt_dek_with_password,
-                encrypt_dek_with_recovery_phrase
-            )
-
-            conn = sqlite3.connect(get_db_path())
-            c = conn.cursor()
-
-            # Get user's password and encryption salt for encrypting DEK
-            user_password = get_user_password_from_session()
-            encryption_salt = get_user_encryption_salt()
-
-            if not user_password or not encryption_salt:
-                flash("Please set up a password to create encrypted loans.", "error")
-                conn.close()
-                return redirect("/settings/password?redirect=dashboard")
-
-            # Generate DEK for this loan
-            dek = generate_dek()
-
-            # Create borrower access token from DEK (enables passwordless borrower access)
-            access_token = create_token_from_dek(dek)
-
-            # Encrypt the DEK with user's password (enables lender access)
-            encrypted_dek = encrypt_dek_with_password(dek, user_password, encryption_salt)
-
-            # Encrypt the DEK with master recovery phrase (enables password reset without data loss)
-            master_recovery_key = session.get('master_recovery_key')
-            encrypted_dek_recovery = None
-            if master_recovery_key:
-                encrypted_dek_recovery = encrypt_dek_with_recovery_phrase(dek, master_recovery_key, encryption_salt)
-
-            # Prepare loan data for encryption
-            loan_data = {
-                'borrower': borrower,
-                'bank_name': bank_name if bank_name else None,
-                'amount': float(amount),
-                'note': note,
-                'borrower_email': None,  # Not collected during creation
-                'repayment_amount': float(repayment_amount) if repayment_amount else None,
-                'repayment_frequency': repayment_frequency if repayment_frequency else None,
-            }
-
-            # Encrypt sensitive fields
-            encrypted_fields = encrypt_loan_data(loan_data, dek)
-
-            # Insert loan with encrypted data
-            # Note: plaintext columns (borrower, amount, etc.) are intentionally NULL
-            # Migration v25 makes them nullable to support zero-knowledge encryption
-            try:
-                c.execute("""
-                    INSERT INTO loans (
-                        borrower_encrypted, bank_name_encrypted, amount_encrypted, note_encrypted,
-                        date_borrowed, repayment_amount_encrypted, repayment_frequency_encrypted,
-                        user_id, borrower_access_token, loan_type, encrypted_dek, encrypted_dek_recovery
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    encrypted_fields['borrower_encrypted'],
-                    encrypted_fields['bank_name_encrypted'],
-                    encrypted_fields['amount_encrypted'],
-                    encrypted_fields['note_encrypted'],
-                    date_borrowed,
-                    encrypted_fields['repayment_amount_encrypted'],
-                    encrypted_fields['repayment_frequency_encrypted'],
-                    get_current_user_id(),
-                    access_token,
-                    loan_type,
-                    encrypted_dek,
-                    encrypted_dek_recovery
-                ))
-            except sqlite3.IntegrityError as e:
-                # If this fails, it means the migration didn't run to make columns nullable
-                conn.close()
-                app.logger.error(f"Failed to create loan: {e}. Database may need migration.")
-                flash("Database error. Please restart the application to run migrations.", "error")
-                return redirect("/")
-            loan_id = c.lastrowid
-            conn.commit()
-            conn.close()
-
-            # Log analytics event (amount is logged, but this is for user's own analytics)
-            log_event('loan_created', event_data={'loan_type': loan_type, 'amount': float(amount)})
-
-        # If this was during onboarding, redirect to complete onboarding
-        if onboarding == "1":
-            return redirect("/onboarding?step=complete")
-
-        return redirect("/")
-
-    conn = sqlite3.connect(get_db_path())
-    conn.row_factory = sqlite3.Row  # Enable column name access
-    c = conn.cursor()
-
-    # Get user's password for decryption
-    user_password = get_user_password_from_session()
-
-    # Check if user has any loans first
-    c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (get_current_user_id(),))
-    loan_count = c.fetchone()[0]
-
-    if not user_password and loan_count > 0:
-        # User has loans but no password in session
-        # Check if they have a password_hash (already set up password) or not
-        c.execute("SELECT password_hash FROM users WHERE id = ?", (get_current_user_id(),))
-        user_row = c.fetchone()
-        has_password_in_db = user_row and user_row[0] is not None
-
-        if has_password_in_db:
-            # They have a password but it's not in session (e.g., logged in via email verification)
-            flash("Please log in with your password to access your encrypted loan data.", "error")
-            conn.close()
-            session.clear()  # Clear session to force proper login
-            return redirect("/login")
-        elif session.get('logged_in_via_recovery'):
-            # Logged in via recovery code but no password
-            flash("Please reset your password to access your encrypted loan data.", "error")
-            conn.close()
-            return redirect("/settings/password?redirect=dashboard")
-        else:
-            # No password at all
-            flash("Please set up a password to secure your loan data with encryption.", "error")
-            conn.close()
-            return redirect("/settings/password?redirect=dashboard")
-
-    if not user_password:
-        # No password and no loans - show empty state
-        conn.close()
-        email_verified = is_email_verified()
-        return render_template("index.html", loans=[], app_url=app.config['APP_URL'], email_verified=email_verified, has_password=False)
-
-    c.execute("""
-        SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
-               l.borrower_encrypted, l.amount_encrypted, l.note_encrypted,
-               l.bank_name, l.bank_name_encrypted,
-               l.repayment_amount, l.repayment_amount_encrypted,
-               l.repayment_frequency, l.repayment_frequency_encrypted,
-               l.borrower_email, l.borrower_email_encrypted,
-               l.created_at, l.borrower_access_token, l.loan_type, l.encrypted_dek
-        FROM loans l
-        WHERE l.user_id = ?
-        ORDER BY l.created_at DESC
-    """, (get_current_user_id(),))
-
-    encrypted_loans = c.fetchall()
-
-    # Decrypt loans and calculate amount_repaid
-    loans = []
-    for loan_row in encrypted_loans:
-        loan_id = loan_row['id']
-
-        # Get DEK for this loan
-        dek = get_loan_dek(loan_id, user_password=user_password)
-
-        if not dek:
-            app.logger.error(f"Failed to decrypt DEK for loan {loan_id}")
-            continue
-
-        # Decrypt loan fields
-        from services.encryption import decrypt_field
-
-        # Use encrypted fields if available, fall back to plaintext (for migration)
-        borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] else loan_row['borrower']
-        amount = float(decrypt_field(loan_row['amount_encrypted'], dek)) if loan_row['amount_encrypted'] else loan_row['amount']
-        note = decrypt_field(loan_row['note_encrypted'], dek) if loan_row['note_encrypted'] else loan_row['note']
-        bank_name = decrypt_field(loan_row['bank_name_encrypted'], dek) if loan_row['bank_name_encrypted'] else loan_row['bank_name']
-        borrower_email = decrypt_field(loan_row['borrower_email_encrypted'], dek) if loan_row['borrower_email_encrypted'] else loan_row['borrower_email']
-
-        repayment_amount = None
-        if loan_row['repayment_amount_encrypted']:
-            repayment_amount = float(decrypt_field(loan_row['repayment_amount_encrypted'], dek))
-        elif loan_row['repayment_amount'] is not None:
-            repayment_amount = loan_row['repayment_amount']
-
-        repayment_frequency = decrypt_field(loan_row['repayment_frequency_encrypted'], dek) if loan_row['repayment_frequency_encrypted'] else loan_row['repayment_frequency']
-
-        # Calculate amount_repaid from applied_transactions
-        c.execute("""
-            SELECT COALESCE(SUM(amount), 0) as amount_repaid
-            FROM applied_transactions
-            WHERE loan_id = ?
-        """, (loan_id,))
-        amount_repaid = c.fetchone()[0]
-
-        # Create decrypted loan tuple (matching original query structure)
-        loans.append((
-            loan_id,
-            borrower,
-            amount,
-            note,
-            loan_row['date_borrowed'],
-            amount_repaid,
-            repayment_amount,
-            repayment_frequency,
-            bank_name,
-            loan_row['created_at'],
-            loan_row['borrower_access_token'],
-            borrower_email,
-            loan_row['loan_type']
-        ))
-
-    # Get email verification status and password status
-    email_verified = is_email_verified()
-    has_password = user_password is not None
-    conn.close()
-
-    return render_template("index.html", loans=loans, app_url=app.config['APP_URL'], email_verified=email_verified, has_password=has_password)
-
-
-@app.route("/repay/<int:loan_id>", methods=["POST"])
-@login_required
-def repay(loan_id):
-    repayment_amount = request.form.get("repayment_amount")
-    if not repayment_amount:
-        return redirect("/")
-
-    conn = sqlite3.connect(get_db_path())
-    conn.row_factory = sqlite3.Row
-    c = conn.cursor()
-
-    # Load the loan row (including encrypted columns) and current repaid total
-    c.execute(
-        """
-        SELECT l.*,
-               COALESCE((
-                   SELECT SUM(amount) FROM applied_transactions at
-                   WHERE at.loan_id = l.id
-               ), 0) AS current_repaid
-        FROM loans l
-        WHERE l.id = ? AND l.user_id = ?
-        """,
-        (loan_id, get_current_user_id()),
-    )
-    loan_row = c.fetchone()
-
-    if not loan_row:
-        conn.close()
-        return redirect("/")
-
-    # Decrypt fields as needed
-    user_password = get_user_password_from_session()
-    dek = get_loan_dek(loan_id, user_password=user_password)
-    from services.encryption import decrypt_field  # local import to avoid circulars
-
-    borrower_name = (
-        decrypt_field(loan_row["borrower_encrypted"], dek)
-        if loan_row["borrower_encrypted"]
-        else loan_row["borrower"]
-    )
-    borrower_email = (
-        decrypt_field(loan_row["borrower_email_encrypted"], dek)
-        if loan_row["borrower_email_encrypted"]
-        else loan_row["borrower_email"]
-    )
-
-    access_token = loan_row["borrower_access_token"]
-    notifications_enabled = bool(loan_row["borrower_notifications_enabled"])
-
-    current_repaid = float(loan_row["current_repaid"] or 0.0)
-    if loan_row["amount_encrypted"]:
-        loan_amount = float(decrypt_field(loan_row["amount_encrypted"], dek))
-    else:
-        loan_amount = float(loan_row["amount"])
-
-    payment_amount = float(repayment_amount)
-
-    # Record manual repayment
-    c.execute(
-        """
-        INSERT INTO applied_transactions (date, description, amount, loan_id)
-        VALUES (date('now'), 'Manual repayment', ?, ?)
-        """,
-        (payment_amount, loan_id),
-    )
-    conn.commit()
-
-    # New balance (kept in case downstream logic uses it)
-    new_balance = loan_amount - (current_repaid + payment_amount)  # noqa: F841
-
-    conn.close()
-    return redirect("/")
-
-
-@app.route("/edit/<int:loan_id>", methods=["GET", "POST"])
-@login_required
-def edit_loan(loan_id):
-    if request.method == "POST":
-        borrower = request.form.get("borrower")
-        bank_name = request.form.get("bank_name")
-        amount = request.form.get("amount")
-        date_borrowed = request.form.get("date_borrowed")
-        note = request.form.get("note")
-        repayment_amount = request.form.get("repayment_amount")
-        repayment_frequency = request.form.get("repayment_frequency")
-
-        if borrower and amount:
-            conn = sqlite3.connect(get_db_path())
-            c = conn.cursor()
-            c.execute("""
-                UPDATE loans
-                SET borrower = ?, bank_name = ?, amount = ?, date_borrowed = ?, note = ?,
-                    repayment_amount = ?, repayment_frequency = ?
-                WHERE id = ? AND user_id = ?
-            """, (borrower,
-                  bank_name if bank_name else None,
-                  float(amount), date_borrowed, note,
-                  float(repayment_amount) if repayment_amount else None,
-                  repayment_frequency if repayment_frequency else None,
-                  loan_id, get_current_user_id()))
-            conn.commit()
-            conn.close()
-
-            # Log analytics event
-            log_event('loan_updated', event_data={'loan_id': loan_id})
-
-            flash("Loan updated successfully", "success")
-
-        return redirect("/")
-
-    # GET request - show edit form
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-    c.execute("""
-        SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
-               COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.repayment_amount, l.repayment_frequency, l.bank_name
-        FROM loans l
-        LEFT JOIN applied_transactions at ON l.id = at.loan_id
-        WHERE l.id = ? AND l.user_id = ?
-        GROUP BY l.id
-    """, (loan_id, get_current_user_id()))
-    loan = c.fetchone()
-    conn.close()
-
-    if not loan:
-        flash("Loan not found", "error")
-        return redirect("/")
-
-    return render_template("edit_loan.html", loan=loan)
-
-
-@app.route("/delete/<int:loan_id>", methods=["POST"])
-@login_required
-def delete_loan(loan_id):
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-    c.execute("DELETE FROM loans WHERE id = ? AND user_id = ?", (loan_id, get_current_user_id()))
-    conn.commit()
-    conn.close()
-
-    # Log analytics event
-    log_event('loan_deleted', event_data={'loan_id': loan_id})
-
-    flash("Loan deleted successfully", "success")
-    return redirect("/")
-
-
-@app.route("/loan/<int:loan_id>/transactions")
-@login_required
-def loan_transactions(loan_id):
-    """View all applied transactions for a specific loan."""
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-
-    # Get loan details with calculated repaid amount
-    c.execute("""
-        SELECT l.id, l.borrower, l.amount, l.date_borrowed,
-               COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.bank_name, l.note
-        FROM loans l
-        LEFT JOIN applied_transactions at ON l.id = at.loan_id
-        WHERE l.id = ? AND l.user_id = ?
-        GROUP BY l.id
-    """, (loan_id, get_current_user_id()))
-    loan = c.fetchone()
-
-    if not loan:
-        flash("Loan not found", "error")
-        return redirect("/")
-
-    # Get all applied transactions for this loan
-    c.execute("""
-        SELECT id, date, description, amount, applied_at, auto_applied, confidence_score
-        FROM applied_transactions
-        WHERE loan_id = ?
-        ORDER BY date DESC
-    """, (loan_id,))
-    transactions = c.fetchall()
-
-    conn.close()
-
-    has_export = has_feature(get_current_user_id(), 'transaction_export')
-    return render_template("loan_transactions.html", loan=loan, transactions=transactions, has_export=has_export)
-
-
-@app.route("/loan/<int:loan_id>/transactions/export")
-@login_required
-def export_loan_transactions(loan_id):
-    """Export loan transactions as CSV."""
-    # Check if user has transaction export feature
-    if not has_feature(get_current_user_id(), 'transaction_export'):
-        flash("Transaction export is available on Basic and Pro plans. Upgrade to export your transactions!", "error")
-        return redirect("/pricing")
-
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-
-    # Get loan details with calculated repaid amount
-    c.execute("""
-        SELECT l.id, l.borrower, l.amount, l.date_borrowed,
-               COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.bank_name, l.note
-        FROM loans l
-        LEFT JOIN applied_transactions at ON l.id = at.loan_id
-        WHERE l.id = ? AND l.user_id = ?
-        GROUP BY l.id
-    """, (loan_id, get_current_user_id()))
-    loan = c.fetchone()
-
-    if not loan:
-        flash("Loan not found", "error")
-        return redirect("/")
-
-    # Get all applied transactions for this loan
-    c.execute("""
-        SELECT id, date, description, amount, applied_at
-        FROM applied_transactions
-        WHERE loan_id = ?
-        ORDER BY date DESC
-    """, (loan_id,))
-    transactions = c.fetchall()
-
-    conn.close()
-
-    # Build CSV content
-    from io import StringIO
-    import csv
-
-    output = StringIO()
-    writer = csv.writer(output)
-
-    # Header section
-    writer.writerow(['Loan Transaction History'])
-    writer.writerow([])
-    writer.writerow(['Borrower:', loan[1]])
-    if loan[5]:
-        writer.writerow(['Bank Name:', loan[5]])
-    writer.writerow(['Original Amount:', f'${loan[2]:.2f}'])
-    writer.writerow(['Total Repaid:', f'${loan[4]:.2f}'])
-    writer.writerow(['Remaining:', f'${loan[2] - loan[4]:.2f}'])
-    writer.writerow([])
-
-    # Transaction table
-    writer.writerow(['Transaction Date', 'Description', 'Amount', 'Applied On'])
-    for transaction in transactions:
-        writer.writerow([
-            transaction[1],  # date
-            transaction[2],  # description
-            f'${transaction[3]:.2f}',  # amount
-            transaction[4].split('T')[0] if 'T' in transaction[4] else transaction[4]  # applied_at
-        ])
-
-    # Total
-    writer.writerow([])
-    writer.writerow(['Total:', '', f'${loan[4]:.2f}', ''])
-
-    # Create response
-    from flask import Response
-    csv_content = output.getvalue()
-    output.close()
-
-    response = Response(csv_content, mimetype='text/csv')
-    response.headers['Content-Disposition'] = f'attachment; filename=loan_{loan_id}_{loan[1].replace(" ", "_")}_transactions.csv'
-
-    return response
 
 
 @app.route("/onboarding")
@@ -2408,6 +1598,51 @@ def settings_password():
                 conn.close()
                 return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
 
+            # Re-encrypt all loan DEKs with new password
+            # Get user's encryption salt
+            c.execute("SELECT encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
+            salt_result = c.fetchone()
+
+            if salt_result and salt_result[0]:
+                encryption_salt = salt_result[0]
+
+                # Get all loans with encrypted DEKs
+                c.execute("""
+                    SELECT id, encrypted_dek
+                    FROM loans
+                    WHERE user_id = ? AND encrypted_dek IS NOT NULL
+                """, (get_current_user_id(),))
+                loans_to_reencrypt = c.fetchall()
+
+                if loans_to_reencrypt:
+                    from services.encryption import decrypt_dek_with_password, encrypt_dek_with_password
+
+                    # Use current password (or recovery phrase if logged in via recovery)
+                    old_password = current_password if not logged_in_via_recovery else session.get('user_password')
+
+                    reencrypted_count = 0
+                    for loan_id, encrypted_dek in loans_to_reencrypt:
+                        try:
+                            # Decrypt with old password
+                            dek = decrypt_dek_with_password(encrypted_dek, old_password, encryption_salt)
+
+                            # Re-encrypt with new password
+                            new_encrypted_dek = encrypt_dek_with_password(dek, new_password, encryption_salt)
+
+                            # Update loan
+                            c.execute("""
+                                UPDATE loans
+                                SET encrypted_dek = ?
+                                WHERE id = ?
+                            """, (new_encrypted_dek, loan_id))
+
+                            reencrypted_count += 1
+                        except Exception as e:
+                            current_app.logger.error(f"Failed to re-encrypt loan {loan_id}: {e}")
+
+                    if reencrypted_count > 0:
+                        current_app.logger.info(f"Re-encrypted {reencrypted_count} loans with new password for user {get_current_user_id()}")
+
             from werkzeug.security import generate_password_hash
             password_hash = generate_password_hash(new_password)
 
@@ -2425,6 +1660,101 @@ def settings_password():
 
             flash("Password changed successfully! Your data is now accessible.", "success")
             return redirect("/settings/password")
+
+        elif action == "regenerate_recovery":
+            # Regenerate recovery phrase
+            if not has_password:
+                flash("You need to set up a password first before generating a recovery phrase.", "error")
+                conn.close()
+                return redirect("/settings/password")
+
+            # Require current password to regenerate recovery phrase
+            if not current_password:
+                flash("Current password is required to regenerate recovery phrase", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
+
+            # Verify current password
+            from werkzeug.security import check_password_hash
+            if not check_password_hash(user[0], current_password):
+                flash("Current password is incorrect", "error")
+                conn.close()
+                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
+
+            # Get user's encryption salt
+            c.execute("SELECT encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
+            salt_result = c.fetchone()
+
+            if not salt_result or not salt_result[0]:
+                flash("Encryption not set up. Please contact support.", "error")
+                conn.close()
+                return redirect("/settings/password")
+
+            encryption_salt = salt_result[0]
+
+            # Re-encrypt all loan DEKs with new recovery phrase
+            # Get all loans with encrypted DEKs
+            c.execute("""
+                SELECT id, encrypted_dek
+                FROM loans
+                WHERE user_id = ? AND encrypted_dek IS NOT NULL
+            """, (get_current_user_id(),))
+            loans_to_reencrypt = c.fetchall()
+
+            from services.encryption import (
+                decrypt_dek_with_password,
+                encrypt_dek_with_recovery_phrase,
+                generate_master_recovery_phrase,
+                normalize_recovery_phrase
+            )
+            from werkzeug.security import generate_password_hash
+
+            # Generate new recovery phrase
+            new_recovery_phrase = generate_master_recovery_phrase(num_words=6)
+            new_recovery_phrase_hash = generate_password_hash(normalize_recovery_phrase(new_recovery_phrase))
+
+            # Re-encrypt all loans with new recovery phrase
+            reencrypted_count = 0
+            if loans_to_reencrypt:
+                for loan_id, encrypted_dek in loans_to_reencrypt:
+                    try:
+                        # Decrypt with current password
+                        dek = decrypt_dek_with_password(encrypted_dek, current_password, encryption_salt)
+
+                        # Re-encrypt with new recovery phrase
+                        new_encrypted_dek_recovery = encrypt_dek_with_recovery_phrase(dek, new_recovery_phrase, encryption_salt)
+
+                        # Update loan
+                        c.execute("""
+                            UPDATE loans
+                            SET encrypted_dek_recovery = ?
+                            WHERE id = ?
+                        """, (new_encrypted_dek_recovery, loan_id))
+
+                        reencrypted_count += 1
+                    except Exception as e:
+                        current_app.logger.error(f"Failed to re-encrypt loan {loan_id} with new recovery phrase: {e}")
+
+                if reencrypted_count > 0:
+                    current_app.logger.info(f"Re-encrypted {reencrypted_count} loans with new recovery phrase for user {get_current_user_id()}")
+
+            # Update user's recovery phrase hash
+            c.execute("""
+                UPDATE users
+                SET master_recovery_key_hash = ?
+                WHERE id = ?
+            """, (new_recovery_phrase_hash, get_current_user_id()))
+            conn.commit()
+            conn.close()
+
+            # Store new recovery phrase in session for dual-encrypting future loans
+            session['master_recovery_key'] = new_recovery_phrase
+
+            # Store recovery phrase for display (one-time view)
+            session['show_master_recovery_phrase'] = new_recovery_phrase
+
+            # Redirect to recovery phrase display page
+            return redirect("/auth/recovery-phrase?regenerated=1")
 
         elif action == "remove":
             # Password removal is no longer allowed due to zero-knowledge encryption
@@ -3130,46 +2460,6 @@ def reject_match():
     return ('', 400)  # Bad request
 
 
-@app.route("/remove-transaction/<int:transaction_id>", methods=["POST"])
-@login_required
-def remove_transaction(transaction_id):
-    """Remove an applied transaction and reverse its effect on the loan."""
-    conn = sqlite3.connect(get_db_path())
-    c = conn.cursor()
-
-    # Get the transaction details and verify ownership
-    c.execute("""
-        SELECT at.loan_id, at.amount, at.description, at.date
-        FROM applied_transactions at
-        JOIN loans l ON at.loan_id = l.id
-        WHERE at.id = ? AND l.user_id = ?
-    """, (transaction_id, get_current_user_id()))
-
-    transaction = c.fetchone()
-
-    if transaction:
-        loan_id, amount, description, date = transaction
-
-        # Delete the applied transaction (amount_repaid will recalculate automatically)
-        c.execute("""
-            DELETE FROM applied_transactions
-            WHERE id = ?
-        """, (transaction_id,))
-
-        conn.commit()
-        flash(f"Removed ${amount:.2f} transaction from {date}", "success")
-    else:
-        flash("Transaction not found", "error")
-
-    conn.close()
-
-    # Redirect back to the loan's transaction history
-    if transaction:
-        return redirect(f"/loan/{loan_id}/transactions")
-    else:
-        return redirect("/")
-
-
 @app.route("/analytics")
 @admin_required
 def analytics():
@@ -3498,6 +2788,331 @@ def favicon():
         'favicon.ico',
         mimetype='image/vnd.microsoft.icon'
     )
+
+
+@app.route("/", methods=["GET", "POST"])
+def index():
+    # Public landing
+    app.logger.info(f"Index route hit. Session user_id: {session.get('user_id')}")
+    if not session.get("user_id"):
+        app.logger.info("No user_id in session, showing landing page")
+        return render_template("landing.html")
+
+    # Create loan (POST)
+    if request.method == "POST":
+        redirect_to = _handle_index_post(request.form)
+        return redirect(redirect_to)
+
+    # Dashboard (GET)
+    context_or_redirect = _build_dashboard_context()
+    if isinstance(context_or_redirect, dict):
+        return render_template(
+            "index.html",
+            loans=context_or_redirect["loans"],
+            app_url=current_app.config["APP_URL"],
+            email_verified=context_or_redirect["email_verified"],
+            has_password=context_or_redirect["has_password"],
+            needs_password_unlock=context_or_redirect.get("needs_password_unlock", False),
+        )
+    # it's a redirect target
+    return redirect(context_or_redirect)
+
+
+@app.route("/unlock", methods=["POST"])
+@login_required
+def unlock_with_password():
+    """Unlock encrypted loan data by verifying password or recovery phrase."""
+    password = request.form.get("password")
+    recovery_phrase = request.form.get("recovery_phrase")
+
+    if not password and not recovery_phrase:
+        flash("Please enter your password or recovery phrase", "error")
+        return redirect("/")
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+
+    # Get user's password hash and recovery key hash
+    c.execute("SELECT password_hash, master_recovery_key_hash, encryption_salt FROM users WHERE id = ?",
+              (get_current_user_id(),))
+    user_row = c.fetchone()
+    conn.close()
+
+    if not user_row:
+        flash("User not found", "error")
+        return redirect("/")
+
+    password_hash, recovery_key_hash, encryption_salt = user_row
+
+    # Try password first
+    if password:
+        if not password_hash:
+            flash("No password set for this account", "error")
+            return redirect("/")
+
+        from werkzeug.security import check_password_hash
+        if check_password_hash(password_hash, password):
+            # Password correct - store in session for decryption
+            session['user_password'] = password
+            flash("Loans unlocked successfully!", "success")
+            return redirect("/")
+        else:
+            flash("Incorrect password", "error")
+            return redirect("/")
+
+    # Try recovery phrase
+    if recovery_phrase:
+        if not recovery_key_hash:
+            flash("No recovery phrase set for this account", "error")
+            return redirect("/")
+
+        from werkzeug.security import check_password_hash
+        from services.encryption import normalize_recovery_phrase
+
+        normalized_phrase = normalize_recovery_phrase(recovery_phrase)
+
+        if check_password_hash(recovery_key_hash, normalized_phrase):
+            # Recovery phrase correct - store in session for decryption
+            session['user_password'] = normalized_phrase
+            # Also store the recovery key itself for future loan creation
+            session['master_recovery_key'] = normalized_phrase
+            flash("Loans unlocked successfully with recovery phrase!", "success")
+            return redirect("/")
+        else:
+            flash("Incorrect recovery phrase", "error")
+            return redirect("/")
+
+    return redirect("/")
+
+
+# -----------------------------
+# Internal helpers (app.py only)
+# -----------------------------
+
+def _handle_index_post(form):
+    """Handle creating a loan from the dashboard form."""
+    borrower = form.get("borrower")
+    bank_name = form.get("bank_name")
+    date_borrowed = form.get("date_borrowed")
+    amount = form.get("amount")
+    note = form.get("note")
+    repayment_amount = form.get("repayment_amount")
+    repayment_frequency = form.get("repayment_frequency")
+    loan_type = form.get("loan_type", "lending")
+    onboarding = form.get("onboarding")
+
+    # Gate: email verification limits
+    if not is_email_verified():
+        if get_unverified_loan_count() >= 2:
+            flash(
+                "Please verify your email to create more loans. "
+                "Check your inbox for the verification link.",
+                "error",
+            )
+            return "/"
+
+    # Gate: subscription limits
+    current_loans, max_loans, can_create = check_loan_limit()
+    if not can_create:
+        tier_name = get_user_subscription_tier().title()
+        if max_loans is not None:
+            flash(
+                f"You've reached the limit of {max_loans} loans on the {tier_name} plan. "
+                "Upgrade to create more!",
+                "error",
+            )
+        return "/pricing"
+
+    # Create loan if required fields present
+    if borrower and amount:
+        if not _create_encrypted_loan(
+            borrower=borrower,
+            bank_name=bank_name,
+            date_borrowed=date_borrowed,
+            amount_str=amount,
+            note=note,
+            repayment_amount_str=repayment_amount,
+            repayment_frequency=repayment_frequency,
+            loan_type=loan_type,
+        ):
+            # creation failed with a user-facing flash already
+            return "/"
+
+        # analytics (for the user's own dashboard metrics)
+        try:
+            log_event("loan_created", event_data={"loan_type": loan_type, "amount": float(amount)})
+        except Exception:
+            current_app.logger.exception("Failed to log loan_created event")
+
+    # Complete onboarding flow if flagged
+    if onboarding == "1":
+        return "/onboarding?step=complete"
+
+    return "/"
+
+
+def _create_encrypted_loan(
+    *,
+    borrower: str,
+    bank_name: str | None,
+    date_borrowed: str | None,
+    amount_str: str,
+    note: str | None,
+    repayment_amount_str: str | None,
+    repayment_frequency: str | None,
+    loan_type: str,
+) -> bool:
+    """Do the encryption + insert. Returns True on success and flashes on failure."""
+    from services.encryption import (
+        generate_dek,
+        create_token_from_dek,
+        encrypt_dek_with_password,
+        encrypt_dek_with_recovery_phrase,
+    )
+
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    try:
+        user_password = get_user_password_from_session()
+        encryption_salt = get_user_encryption_salt()
+        if not user_password or not encryption_salt:
+            flash("Please set up a password to create encrypted loans.", "error")
+            return False
+
+        dek = generate_dek()
+        access_token = create_token_from_dek(dek)
+        encrypted_dek = encrypt_dek_with_password(dek, user_password, encryption_salt)
+
+        encrypted_dek_recovery = None
+        master_recovery_key = session.get("master_recovery_key")
+        if master_recovery_key:
+            encrypted_dek_recovery = encrypt_dek_with_recovery_phrase(dek, master_recovery_key, encryption_salt)
+
+        loan_data = {
+            "borrower": borrower,
+            "bank_name": bank_name or None,
+            "amount": float(amount_str),
+            "note": note,
+            "borrower_email": None,
+            "repayment_amount": float(repayment_amount_str) if repayment_amount_str else None,
+            "repayment_frequency": repayment_frequency or None,
+        }
+
+        encrypted_fields = encrypt_loan_data(loan_data, dek)
+
+        c.execute(
+            """
+            INSERT INTO loans (
+                borrower_encrypted, bank_name_encrypted, amount_encrypted, note_encrypted,
+                date_borrowed, repayment_amount_encrypted, repayment_frequency_encrypted,
+                user_id, borrower_access_token, loan_type, encrypted_dek, encrypted_dek_recovery
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                encrypted_fields["borrower_encrypted"],
+                encrypted_fields["bank_name_encrypted"],
+                encrypted_fields["amount_encrypted"],
+                encrypted_fields["note_encrypted"],
+                date_borrowed,
+                encrypted_fields["repayment_amount_encrypted"],
+                encrypted_fields["repayment_frequency_encrypted"],
+                get_current_user_id(),
+                access_token,
+                loan_type,
+                encrypted_dek,
+                encrypted_dek_recovery,
+            ),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError as e:
+        current_app.logger.error(
+            "Failed to create loan (likely needs migrations for nullable plaintext columns): %s",
+            e,
+        )
+        flash("Database error. Please restart the application to run migrations.", "error")
+        return False
+    except Exception:
+        current_app.logger.exception("Unhandled error creating encrypted loan")
+        flash("Unexpected error creating loan.", "error")
+        return False
+    finally:
+        conn.close()
+
+
+def _build_dashboard_context():
+    """
+    Returns either:
+      - dict for template context (loans, email_verified, has_password)
+      - or a string URL to redirect to (e.g., '/login')
+    """
+    conn = sqlite3.connect(get_db_path())
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    try:
+        user_password = get_user_password_from_session()
+
+        # Count loans first
+        c.execute("SELECT COUNT(*) FROM loans WHERE user_id = ?", (get_current_user_id(),))
+        loan_count = c.fetchone()[0]
+
+        if not user_password and loan_count > 0:
+            # Distinguish between "has password in DB" vs "recovery login only" vs "no password"
+            c.execute("SELECT password_hash FROM users WHERE id = ?", (get_current_user_id(),))
+            user_row = c.fetchone()
+            has_password_in_db = user_row and user_row[0] is not None
+
+            if has_password_in_db:
+                # User logged in via magic link but has encrypted loans
+                # Show dashboard with password unlock prompt
+                return {
+                    "loans": [],
+                    "email_verified": is_email_verified(),
+                    "has_password": True,
+                    "needs_password_unlock": True,  # Show password unlock form
+                }
+            if session.get("logged_in_via_recovery"):
+                flash("Please reset your password to access your encrypted loan data.", "error")
+                return "/settings/password?redirect=dashboard"
+
+            flash("Please set up a password to secure your loan data with encryption.", "error")
+            return "/settings/password?redirect=dashboard"
+
+        # No password and no loans: show empty dashboard
+        if not user_password:
+            return {
+                "loans": [],
+                "email_verified": is_email_verified(),
+                "has_password": False,
+            }
+
+        # Otherwise load + decrypt loans
+        c.execute(
+            """
+            SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
+                   l.borrower_encrypted, l.amount_encrypted, l.note_encrypted,
+                   l.bank_name, l.bank_name_encrypted,
+                   l.repayment_amount, l.repayment_amount_encrypted,
+                   l.repayment_frequency, l.repayment_frequency_encrypted,
+                   l.borrower_email, l.borrower_email_encrypted,
+                   l.created_at, l.borrower_access_token, l.loan_type, l.encrypted_dek
+            FROM loans l
+            WHERE l.user_id = ?
+            ORDER BY l.created_at DESC
+            """,
+            (get_current_user_id(),),
+        )
+        encrypted_rows = c.fetchall()
+        loans = decrypt_loans(c, encrypted_rows, user_password)
+
+        return {
+            "loans": loans,
+            "email_verified": is_email_verified(),
+            "has_password": True,
+        }
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":

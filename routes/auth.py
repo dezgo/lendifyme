@@ -9,8 +9,6 @@ import sqlite3
 import time
 import os
 from services.auth_helpers import (
-    generate_recovery_codes,
-    verify_recovery_code,
     generate_magic_link_token,
     get_magic_link_expiry,
     is_magic_link_expired
@@ -107,9 +105,65 @@ def register():
         c.execute("SELECT id FROM users WHERE email = ?", (email,))
         existing = c.fetchone()
         if existing:
-            flash("Email already registered. Use 'Login' to sign in.", "error")
-            conn.close()
-            return redirect(url_for('auth.login'))
+            # Check if email already exists
+            c.execute("SELECT id, name FROM users WHERE email = ?", (email,))
+            existing = c.fetchone()
+            if existing:
+                # Existing user: send a magic link instead of erroring
+                user_id, user_name = existing
+
+                token = generate_magic_link_token()
+                expires_at = get_magic_link_expiry(minutes=15)
+
+                c.execute(
+                    "INSERT INTO magic_links (user_id, token, expires_at) VALUES (?, ?, ?)",
+                    (user_id, token, expires_at)
+                )
+                conn.commit()
+                conn.close()
+
+                magic_link = f"{current_app.config['APP_URL']}/auth/magic/{token}"
+
+                # Try primary email sender
+                success, message = send_magic_link_email(email, user_name, magic_link)
+                if not success and current_app.config.get('MAIL_USERNAME') and current_app.config.get(
+                        'MAIL_DEFAULT_SENDER'):
+                    try:
+                        msg = Message(
+                            subject="Your LendifyMe Login Link",
+                            recipients=[email],
+                            body=f"""Hi {user_name or 'there'},
+
+            Click the link below to sign in to LendifyMe:
+
+            {magic_link}
+
+            This link will expire in 15 minutes.
+
+            If you didn't request this, you can safely ignore this email.
+
+            ---
+            LendifyMe
+            """
+                        )
+                        mail.send(msg)
+                        success = True
+                    except Exception as e:
+                        current_app.logger.error(f"SMTP failed for {email}: {str(e)}")
+
+                if not success:
+                    # Dev fallback: print to console without revealing existence to the end user
+                    current_app.logger.warning(f"No email provider configured. Magic link for {email}: {magic_link}")
+                    print("\n" + "=" * 70)
+                    print("🔗 MAGIC LINK (Development Mode - Email not configured)")
+                    print("=" * 70)
+                    print(f"User: {email}")
+                    print(f"Link: {magic_link}")
+                    print("=" * 70 + "\n")
+
+                # Generic message to avoid account enumeration
+                flash("Check your email! We’ve sent you a magic link to sign in.", "success")
+                return render_template("login.html")
 
         # Generate verification token
         from services.auth_helpers import generate_verification_token, get_verification_expiry
@@ -361,6 +415,7 @@ LendifyMe
 @auth_bp.route("/auth/magic/<token>")
 def magic_link_auth(token):
     """Verify magic link and log user in."""
+    current_app.logger.info(f"Magic link auth attempt with token: {token[:10]}...")
     conn = sqlite3.connect(get_db_path())
     c = conn.cursor()
 
@@ -374,20 +429,24 @@ def magic_link_auth(token):
     result = c.fetchone()
 
     if not result:
+        current_app.logger.warning(f"Magic link not found in database: {token[:10]}...")
         flash("Invalid or expired login link", "error")
         conn.close()
         return redirect(url_for('auth.login'))
 
     link_id, user_id, expires_at, used, user_email, user_name, user_role = result
+    current_app.logger.info(f"Magic link found for user: {user_email}")
 
     # Check if already used
     if used:
+        current_app.logger.warning(f"Magic link already used for user: {user_email}")
         flash("This login link has already been used", "error")
         conn.close()
         return redirect(url_for('auth.login'))
 
     # Check if expired
     if is_magic_link_expired(expires_at):
+        current_app.logger.warning(f"Magic link expired for user: {user_email}")
         flash("This login link has expired. Request a new one.", "error")
         conn.close()
         return redirect(url_for('auth.login'))
@@ -400,6 +459,7 @@ def magic_link_auth(token):
     conn.close()
 
     # Log user in
+    current_app.logger.info(f"Setting session for user: {user_email} (id={user_id})")
     session.permanent = True  # Ensure session persists
     session['user_id'] = user_id
     session['user_email'] = user_email
@@ -408,9 +468,12 @@ def magic_link_auth(token):
     # Clear recovery login flag (they logged in normally)
     session.pop('logged_in_via_recovery', None)
 
+    current_app.logger.info(f"Session set. user_id in session: {session.get('user_id')}")
+
     log_event('login_success', user_id=user_id, event_data={'method': 'magic_link'})
 
     flash(f"Welcome back, {user_name or user_email}!", "success")
+    current_app.logger.info(f"Redirecting to index for user: {user_email}")
     return redirect(url_for('index'))
 
 

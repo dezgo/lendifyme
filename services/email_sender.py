@@ -3,6 +3,8 @@ import os
 import requests
 import logging
 from typing import Optional
+from flask import current_app
+from flask_mail import Message
 
 logger = logging.getLogger(__name__)
 
@@ -230,9 +232,6 @@ LendifyMe - Simple Loan Tracking
     logger.info("Mailgun not configured, attempting SMTP...")
 
     try:
-        from flask import current_app
-        from flask_mail import Message
-
         msg = Message(
             subject=subject,
             sender=(sender_name, sender_email),
@@ -554,9 +553,6 @@ LendifyMe
     logger.info("Mailgun not configured, attempting SMTP...")
 
     try:
-        from flask import current_app
-        from flask_mail import Message
-
         msg = Message(
             subject=subject,
             sender=(sender_name, sender_email),

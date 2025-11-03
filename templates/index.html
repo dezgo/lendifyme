@@ -471,6 +471,9 @@
 .verification-banner-btn:hover {
     background: #e0a800;
 }
+.unlock-password-input::placeholder {
+    color: rgba(255, 255, 255, 0.6);
+}
 {% endblock %}
 
 {% block content %}
@@ -501,6 +504,73 @@
 </div>
 {% endif %}
 
+{% if needs_password_unlock %}
+<div class="verification-banner" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-color: #5568d3;">
+    <div class="verification-banner-icon" style="font-size: 2.5rem;">🔐</div>
+    <div class="verification-banner-content">
+        <div class="verification-banner-title" style="color: white;">Your loans are encrypted</div>
+        <div class="verification-banner-text" style="color: rgba(255,255,255,0.9);">Enter your password or recovery phrase to decrypt and view your loan data.</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <!-- Password Form -->
+        <form method="post" action="/unlock" id="password-unlock-form" style="margin: 0; display: flex; gap: 0.5rem; align-items: center;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="password" name="password" id="password-input" placeholder="Enter your password"
+                   class="unlock-password-input"
+                   style="padding: 0.5rem 1rem; border: 2px solid rgba(255,255,255,0.3); border-radius: 6px; background: rgba(255,255,255,0.15); color: white; font-size: 1rem; min-width: 200px; backdrop-filter: blur(10px);"
+                   onfocus="this.style.background='rgba(255,255,255,0.25)'; this.style.borderColor='white';"
+                   onblur="this.style.background='rgba(255,255,255,0.15)'; this.style.borderColor='rgba(255,255,255,0.3)';">
+            <button type="submit" class="verification-banner-btn" style="background: white; color: #667eea; padding: 0.5rem 1.5rem;">
+                Unlock
+            </button>
+        </form>
+        <!-- Toggle to Recovery Phrase -->
+        <button onclick="toggleUnlockMethod()" id="toggle-unlock-btn"
+                style="background: transparent; border: none; color: rgba(255,255,255,0.8); font-size: 0.875rem; cursor: pointer; text-decoration: underline; padding: 0; text-align: left;">
+            Forgot password? Use recovery phrase instead
+        </button>
+        <!-- Recovery Phrase Form (hidden by default) -->
+        <form method="post" action="/unlock" id="recovery-unlock-form" style="margin: 0; display: none; flex-direction: column; gap: 0.5rem;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+                <input type="text" name="recovery_phrase" id="recovery-phrase-input" placeholder="Enter your 6-word recovery phrase"
+                       class="unlock-password-input"
+                       style="padding: 0.5rem 1rem; border: 2px solid rgba(255,255,255,0.3); border-radius: 6px; background: rgba(255,255,255,0.15); color: white; font-size: 1rem; min-width: 300px; backdrop-filter: blur(10px);"
+                       onfocus="this.style.background='rgba(255,255,255,0.25)'; this.style.borderColor='white';"
+                       onblur="this.style.background='rgba(255,255,255,0.15)'; this.style.borderColor='rgba(255,255,255,0.3)';">
+                <button type="submit" class="verification-banner-btn" style="background: white; color: #667eea; padding: 0.5rem 1.5rem;">
+                    Unlock
+                </button>
+            </div>
+            <button type="button" onclick="toggleUnlockMethod()"
+                    style="background: transparent; border: none; color: rgba(255,255,255,0.8); font-size: 0.875rem; cursor: pointer; text-decoration: underline; padding: 0; text-align: left;">
+                ← Back to password
+            </button>
+        </form>
+    </div>
+</div>
+
+<script>
+function toggleUnlockMethod() {
+    const passwordForm = document.getElementById('password-unlock-form');
+    const recoveryForm = document.getElementById('recovery-unlock-form');
+    const toggleBtn = document.getElementById('toggle-unlock-btn');
+
+    if (passwordForm.style.display === 'none') {
+        // Show password form
+        passwordForm.style.display = 'flex';
+        recoveryForm.style.display = 'none';
+        toggleBtn.style.display = 'block';
+    } else {
+        // Show recovery form
+        passwordForm.style.display = 'none';
+        recoveryForm.style.display = 'flex';
+        toggleBtn.style.display = 'none';
+    }
+}
+</script>
+{% endif %}
+
 <!-- Action Bar -->
 <div class="action-bar">
     <h2 class="page-title">Your Loans</h2>
@@ -514,8 +584,8 @@
             <span>🔒</span> Set Up Password to Add Loans
         </a>
         {% endif %}
-        <a href="/match" class="btn btn-secondary">📊 Match Transactions</a>
         {% if session.user_password %}
+        <a href="/match" class="btn btn-secondary">📊 Match Transactions</a>
         <form method="post" action="/sync-banks" style="margin: 0;" id="sync-form">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-success" id="sync-btn">

@@ -133,14 +133,14 @@ class TestRegisterRoute:
         assert user[0] == 'noname@example.com'
 
     def test_duplicate_email_registration(self, client_with_user):
-        """Test that duplicate email registration is prevented."""
+        """Test that duplicate email registration just sends user their magic link """
         response = client_with_user.post('/register', data={
             'email': 'test@example.com',
             'name': 'Duplicate User'
         }, follow_redirects=True)
 
         assert response.status_code == 200
-        assert b'already registered' in response.data or b'exists' in response.data
+        assert b'magic link' in response.data or b'exists' in response.data
 
 
 class TestLoginRoute:
