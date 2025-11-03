@@ -1584,19 +1584,48 @@ def settings_password():
             # Check if user logged in via recovery code (password reset scenario)
             logged_in_via_recovery = session.get('logged_in_via_recovery', False)
 
+            # Check if user provided recovery phrase instead of password
+            recovery_phrase_provided = request.form.get("recovery_phrase_change", "").strip()
+            auth_credential = None  # Will store either password or recovery phrase for re-encryption
+
             if not logged_in_via_recovery:
-                # Normal password change - require current password
-                if not current_password:
-                    flash("Current password is required", "error")
+                # Normal password change - require current password OR recovery phrase
+                if not current_password and not recovery_phrase_provided:
+                    flash("Current password or recovery phrase is required", "error")
                     conn.close()
                     return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from, logged_in_via_recovery=False)
 
-                # Verify current password
                 from werkzeug.security import check_password_hash
-                if not check_password_hash(user[0], current_password):
-                    flash("Current password is incorrect", "error")
-                    conn.close()
-                    return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from, logged_in_via_recovery=False)
+
+                if recovery_phrase_provided:
+                    # Verify recovery phrase
+                    c.execute("SELECT master_recovery_key_hash FROM users WHERE id = ?", (get_current_user_id(),))
+                    recovery_hash_row = c.fetchone()
+
+                    if not recovery_hash_row or not recovery_hash_row[0]:
+                        flash("No recovery phrase set for this account", "error")
+                        conn.close()
+                        return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from, logged_in_via_recovery=False)
+
+                    from services.encryption import normalize_recovery_phrase
+                    normalized_phrase = normalize_recovery_phrase(recovery_phrase_provided)
+
+                    if not check_password_hash(recovery_hash_row[0], normalized_phrase):
+                        flash("Incorrect recovery phrase", "error")
+                        conn.close()
+                        return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from, logged_in_via_recovery=False)
+
+                    # Recovery phrase verified - use it for re-encryption
+                    auth_credential = normalized_phrase
+                else:
+                    # Verify current password
+                    if not check_password_hash(user[0], current_password):
+                        flash("Current password is incorrect", "error")
+                        conn.close()
+                        return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from, logged_in_via_recovery=False)
+
+                    # Password verified - use it for re-encryption
+                    auth_credential = current_password
 
             if not new_password:
                 flash("New password is required", "error")
@@ -1638,14 +1667,14 @@ def settings_password():
                 if loans_to_reencrypt:
                     from services.encryption import decrypt_dek_with_password, encrypt_dek_with_password
 
-                    # Use current password (or recovery phrase if logged in via recovery)
-                    old_password = current_password if not logged_in_via_recovery else session.get('user_password')
+                    # Use auth credential (password, recovery phrase, or session password)
+                    old_credential = auth_credential if auth_credential else session.get('user_password')
 
                     reencrypted_count = 0
                     for loan_id, encrypted_dek in loans_to_reencrypt:
                         try:
-                            # Decrypt with old password
-                            dek = decrypt_dek_with_password(encrypted_dek, old_password, encryption_salt)
+                            # Decrypt with old credential (password or recovery phrase)
+                            dek = decrypt_dek_with_password(encrypted_dek, old_credential, encryption_salt)
 
                             # Re-encrypt with new password
                             new_encrypted_dek = encrypt_dek_with_password(dek, new_password, encryption_salt)
@@ -1682,101 +1711,6 @@ def settings_password():
             flash("Password changed successfully! Your data is now accessible.", "success")
             return redirect("/settings/password")
 
-        elif action == "regenerate_recovery":
-            # Regenerate recovery phrase
-            if not has_password:
-                flash("You need to set up a password first before generating a recovery phrase.", "error")
-                conn.close()
-                return redirect("/settings/password")
-
-            # Require current password to regenerate recovery phrase
-            if not current_password:
-                flash("Current password is required to regenerate recovery phrase", "error")
-                conn.close()
-                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
-
-            # Verify current password
-            from werkzeug.security import check_password_hash
-            if not check_password_hash(user[0], current_password):
-                flash("Current password is incorrect", "error")
-                conn.close()
-                return render_template("settings_password.html", has_password=has_password, redirect_from=redirect_from)
-
-            # Get user's encryption salt
-            c.execute("SELECT encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
-            salt_result = c.fetchone()
-
-            if not salt_result or not salt_result[0]:
-                flash("Encryption not set up. Please contact support.", "error")
-                conn.close()
-                return redirect("/settings/password")
-
-            encryption_salt = salt_result[0]
-
-            # Re-encrypt all loan DEKs with new recovery phrase
-            # Get all loans with encrypted DEKs
-            c.execute("""
-                SELECT id, encrypted_dek
-                FROM loans
-                WHERE user_id = ? AND encrypted_dek IS NOT NULL
-            """, (get_current_user_id(),))
-            loans_to_reencrypt = c.fetchall()
-
-            from services.encryption import (
-                decrypt_dek_with_password,
-                encrypt_dek_with_recovery_phrase,
-                generate_master_recovery_phrase,
-                normalize_recovery_phrase
-            )
-            from werkzeug.security import generate_password_hash
-
-            # Generate new recovery phrase
-            new_recovery_phrase = generate_master_recovery_phrase(num_words=6)
-            new_recovery_phrase_hash = generate_password_hash(normalize_recovery_phrase(new_recovery_phrase))
-
-            # Re-encrypt all loans with new recovery phrase
-            reencrypted_count = 0
-            if loans_to_reencrypt:
-                for loan_id, encrypted_dek in loans_to_reencrypt:
-                    try:
-                        # Decrypt with current password
-                        dek = decrypt_dek_with_password(encrypted_dek, current_password, encryption_salt)
-
-                        # Re-encrypt with new recovery phrase
-                        new_encrypted_dek_recovery = encrypt_dek_with_recovery_phrase(dek, new_recovery_phrase, encryption_salt)
-
-                        # Update loan
-                        c.execute("""
-                            UPDATE loans
-                            SET encrypted_dek_recovery = ?
-                            WHERE id = ?
-                        """, (new_encrypted_dek_recovery, loan_id))
-
-                        reencrypted_count += 1
-                    except Exception as e:
-                        current_app.logger.error(f"Failed to re-encrypt loan {loan_id} with new recovery phrase: {e}")
-
-                if reencrypted_count > 0:
-                    current_app.logger.info(f"Re-encrypted {reencrypted_count} loans with new recovery phrase for user {get_current_user_id()}")
-
-            # Update user's recovery phrase hash
-            c.execute("""
-                UPDATE users
-                SET master_recovery_key_hash = ?
-                WHERE id = ?
-            """, (new_recovery_phrase_hash, get_current_user_id()))
-            conn.commit()
-            conn.close()
-
-            # Store new recovery phrase in session for dual-encrypting future loans
-            session['master_recovery_key'] = new_recovery_phrase
-
-            # Store recovery phrase for display (one-time view)
-            session['show_master_recovery_phrase'] = new_recovery_phrase
-
-            # Redirect to recovery phrase display page
-            return redirect("/auth/recovery-phrase?regenerated=1")
-
         elif action == "remove":
             # Password removal is no longer allowed due to zero-knowledge encryption
             # Without a password, users cannot decrypt their loan data
@@ -1804,6 +1738,136 @@ def settings_password():
                          needs_upgrade=needs_upgrade,
                          redirect_from=redirect_from,
                          logged_in_via_recovery=logged_in_via_recovery)
+
+
+@app.route("/settings/recovery", methods=["GET", "POST"])
+@login_required
+def settings_recovery():
+    """Manage recovery phrase - regenerate or view status."""
+    if request.method == "POST":
+        current_password = request.form.get("current_password", "").strip()
+
+        conn = sqlite3.connect(get_db_path())
+        c = conn.cursor()
+
+        c.execute("SELECT password_hash, master_recovery_key_hash FROM users WHERE id = ?", (get_current_user_id(),))
+        user = c.fetchone()
+
+        if not user:
+            flash("User not found", "error")
+            conn.close()
+            return redirect("/")
+
+        password_hash, recovery_key_hash = user
+
+        if not password_hash:
+            flash("You need to set up a password first before generating a recovery phrase.", "error")
+            conn.close()
+            return redirect("/settings/password")
+
+        # Require current password to regenerate recovery phrase
+        if not current_password:
+            flash("Current password is required to regenerate recovery phrase", "error")
+            conn.close()
+            return render_template("settings_recovery.html", has_recovery_phrase=(recovery_key_hash is not None))
+
+        # Verify current password
+        from werkzeug.security import check_password_hash
+        if not check_password_hash(password_hash, current_password):
+            flash("Current password is incorrect", "error")
+            conn.close()
+            return render_template("settings_recovery.html", has_recovery_phrase=(recovery_key_hash is not None))
+
+        # Get user's encryption salt
+        c.execute("SELECT encryption_salt FROM users WHERE id = ?", (get_current_user_id(),))
+        salt_result = c.fetchone()
+
+        if not salt_result or not salt_result[0]:
+            flash("Encryption not set up. Please contact support.", "error")
+            conn.close()
+            return redirect("/settings/recovery")
+
+        encryption_salt = salt_result[0]
+
+        # Re-encrypt all loan DEKs with new recovery phrase
+        # Get all loans with encrypted DEKs
+        c.execute("""
+            SELECT id, encrypted_dek
+            FROM loans
+            WHERE user_id = ? AND encrypted_dek IS NOT NULL
+        """, (get_current_user_id(),))
+        loans_to_reencrypt = c.fetchall()
+
+        from services.encryption import (
+            decrypt_dek_with_password,
+            encrypt_dek_with_recovery_phrase,
+            generate_master_recovery_phrase,
+            normalize_recovery_phrase
+        )
+        from werkzeug.security import generate_password_hash
+
+        # Generate new recovery phrase
+        new_recovery_phrase = generate_master_recovery_phrase(num_words=6)
+        new_recovery_phrase_hash = generate_password_hash(normalize_recovery_phrase(new_recovery_phrase))
+
+        # Re-encrypt all loans with new recovery phrase
+        reencrypted_count = 0
+        if loans_to_reencrypt:
+            for loan_id, encrypted_dek in loans_to_reencrypt:
+                try:
+                    # Decrypt with current password
+                    dek = decrypt_dek_with_password(encrypted_dek, current_password, encryption_salt)
+
+                    # Re-encrypt with new recovery phrase
+                    new_encrypted_dek_recovery = encrypt_dek_with_recovery_phrase(dek, new_recovery_phrase, encryption_salt)
+
+                    # Update loan
+                    c.execute("""
+                        UPDATE loans
+                        SET encrypted_dek_recovery = ?
+                        WHERE id = ?
+                    """, (new_encrypted_dek_recovery, loan_id))
+
+                    reencrypted_count += 1
+                except Exception as e:
+                    current_app.logger.error(f"Failed to re-encrypt loan {loan_id} with new recovery phrase: {e}")
+
+            if reencrypted_count > 0:
+                current_app.logger.info(f"Re-encrypted {reencrypted_count} loans with new recovery phrase for user {get_current_user_id()}")
+
+        # Update user's recovery phrase hash
+        c.execute("""
+            UPDATE users
+            SET master_recovery_key_hash = ?
+            WHERE id = ?
+        """, (new_recovery_phrase_hash, get_current_user_id()))
+        conn.commit()
+        conn.close()
+
+        # Store new recovery phrase in session for dual-encrypting future loans
+        session['master_recovery_key'] = new_recovery_phrase
+
+        # Store recovery phrase for display (one-time view)
+        session['show_master_recovery_phrase'] = new_recovery_phrase
+
+        # Redirect to recovery phrase display page
+        return redirect("/auth/recovery-phrase?regenerated=1")
+
+    # GET request - show form
+    conn = sqlite3.connect(get_db_path())
+    c = conn.cursor()
+    c.execute("SELECT password_hash, master_recovery_key_hash FROM users WHERE id = ?", (get_current_user_id(),))
+    user = c.fetchone()
+    conn.close()
+
+    has_password = user and user[0] is not None
+    has_recovery_phrase = user and user[1] is not None
+
+    if not has_password:
+        flash("Please set up a password first before managing recovery phrases.", "error")
+        return redirect("/settings/password")
+
+    return render_template("settings_recovery.html", has_recovery_phrase=has_recovery_phrase)
 
 
 @app.route("/settings/banks")
