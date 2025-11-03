@@ -1708,8 +1708,8 @@ def settings_password():
             session.pop('logged_in_via_recovery', None)
             session['user_password'] = new_password
 
-            flash("Password changed successfully! Your data is now accessible.", "success")
-            return redirect("/settings/password")
+            # Redirect to success page
+            return redirect("/settings/password/success")
 
         elif action == "remove":
             # Password removal is no longer allowed due to zero-knowledge encryption
@@ -1738,6 +1738,13 @@ def settings_password():
                          needs_upgrade=needs_upgrade,
                          redirect_from=redirect_from,
                          logged_in_via_recovery=logged_in_via_recovery)
+
+
+@app.route("/settings/password/success")
+@login_required
+def password_change_success():
+    """Show success page after password change."""
+    return render_template("password_success.html")
 
 
 @app.route("/settings/recovery", methods=["GET", "POST"])
