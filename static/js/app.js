@@ -1,3 +1,65 @@
+
+// Robust parser for server timestamps
+function parseServerTime(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+
+  // 1) Pure numeric → epoch (sec or ms)
+  if (/^\d+$/.test(s)) {
+    const n = Number(s);
+    return new Date(n < 1e12 ? n * 1000 : n);
+  }
+
+  // 2) Already ISO with timezone (Z or ±hh:mm) → pass through
+  if (/[zZ]|[+\-]\d{2}:\d{2}$/.test(s)) {
+    const d = new Date(s);
+    return isNaN(d) ? null : d;
+  }
+
+  // 3) "YYYY-MM-DD" only → assume midnight UTC
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const d = new Date(`${s}T00:00:00Z`);
+    return isNaN(d) ? null : d;
+  }
+
+  // 4) "YYYY-MM-DD HH:MM:SS(.ffffff)?" → normalize
+  //    - replace space with T
+  //    - trim fractional seconds to max 3 digits for Safari
+  let norm = s.replace(' ', 'T');
+
+  // fractional seconds handling
+  norm = norm.replace(
+    /(\.\d+)(?=$|[Zz]|[+\-]\d{2}:\d{2})/,
+    (_, frac) => '.' + frac.slice(1, 4) // keep up to 3 digits
+  );
+
+  // append Z (assume UTC) only if no tz present
+  if (!/[+\-]\d{2}:\d{2}$/.test(norm) && !/[zZ]$/.test(norm)) {
+    norm += 'Z';
+  }
+
+  const d = new Date(norm);
+  return isNaN(d) ? null : d;
+}
+
+function getRelativeTime(date) {
+  const now = new Date();
+  const diffMs = now - date;
+  const sec = Math.floor(diffMs / 1000);
+  const min = Math.floor(sec / 60);
+  const hr  = Math.floor(min / 60);
+  const day = Math.floor(hr / 24);
+
+  if (sec < 60) return 'just now';
+  if (min < 60) return `${min}m ago`;
+  if (hr  < 24) return `${hr}h ago`;
+  if (day < 7) return `${day}d ago`;
+
+  return date.toLocaleString(undefined, {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+  });
+}
+
 // Toast notification system
 function showToast(message, type = 'success') {
     const container = document.getElementById('toast-container');
@@ -32,71 +94,34 @@ function dismissToast(button) {
 
 // Global utility: Convert server timestamps to local time
 window.convertTimestamps = function() {
-    const timeElements = document.querySelectorAll('[data-timestamp]');
+  const els = document.querySelectorAll('[data-timestamp]');
+  const tz  = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
-    function getRelativeTime(date) {
-        const now = new Date();
-        const diffMs = now - date;
-        const diffSec = Math.floor(diffMs / 1000);
-        const diffMin = Math.floor(diffSec / 60);
-        const diffHour = Math.floor(diffMin / 60);
-        const diffDay = Math.floor(diffHour / 24);
+  els.forEach(el => {
+    const raw = el.getAttribute('data-timestamp');
+    const d = parseServerTime(raw);
 
-        if (diffSec < 60) return 'just now';
-        if (diffMin < 60) return `${diffMin}m ago`;
-        if (diffHour < 24) return `${diffHour}h ago`;
-        if (diffDay < 7) return `${diffDay}d ago`;
-
-        // For older dates, show formatted date
-        const options = {
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit'
-        };
-        return date.toLocaleString(undefined, options);
+    if (!d) {
+      el.textContent = '—';
+      el.title = `Unable to parse: ${raw ?? '(empty)'}`;
+      el.style.cursor = 'help';
+      // Optional inline debug without desktop console:
+      if (new URLSearchParams(location.search).has('debug')) {
+        showToast(`Invalid date: ${raw}`, 'error');
+      }
+      return;
     }
 
-    timeElements.forEach(function(element) {
-        const serverTime = element.getAttribute('data-timestamp');
-        if (!serverTime) return;
-
-        // Parse the server timestamp (assuming format: "YYYY-MM-DD HH:MM:SS")
-        // SQLite default timestamp format is UTC
-        // Convert to ISO 8601 format for Safari compatibility
-        const date = new Date(serverTime.replace(' ', 'T') + 'Z');
-
-        // Check if date is valid
-        if (isNaN(date.getTime())) {
-            element.textContent = serverTime;  // Fallback to original string
-            element.title = 'Unable to parse date';
-            return;
-        }
-
-        // Format to full local time for tooltip
-        const fullOptions = {
-            year: 'numeric',
-            month: 'short',
-            day: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false
-        };
-        const fullLocalTime = date.toLocaleString(undefined, fullOptions);
-
-        // Get timezone
-        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-
-        // Check if element wants relative time (default) or absolute time
-        const useRelative = element.getAttribute('data-time-format') !== 'absolute';
-
-        // Display time
-        element.textContent = useRelative ? getRelativeTime(date) : fullLocalTime;
-        element.title = `${fullLocalTime} (${timezone})`;
-        element.style.cursor = 'help';
+    const full = d.toLocaleString(undefined, {
+      year:'numeric', month:'short', day:'numeric',
+      hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
     });
+
+    const useRelative = el.getAttribute('data-time-format') !== 'absolute';
+    el.textContent = useRelative ? getRelativeTime(d) : full;
+    el.title = `${full} (${tz})`;
+    el.style.cursor = 'help';
+  });
 };
 
-// Auto-convert on page load
 document.addEventListener('DOMContentLoaded', window.convertTimestamps);
