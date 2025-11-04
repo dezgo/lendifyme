@@ -214,7 +214,7 @@ tr:hover {
                             <td class="transaction-date">{{ transaction[1]|format_date }}</td>
                             <td>{{ transaction[2] }}</td>
                             <td class="amount">${{ '%.2f'|format(transaction[3]) }}</td>
-                            <td class="applied-date"><span data-timestamp="{{ transaction[4]|format_date }}"></span></td>
+                            <td class="applied-date"><span data-timestamp="{{ transaction[4] }}"></span></td>
                         </tr>
                     {% endfor %}
                 </tbody>

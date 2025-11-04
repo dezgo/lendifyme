@@ -63,7 +63,15 @@ window.convertTimestamps = function() {
 
         // Parse the server timestamp (assuming format: "YYYY-MM-DD HH:MM:SS")
         // SQLite default timestamp format is UTC
-        const date = new Date(serverTime + ' UTC');
+        // Convert to ISO 8601 format for Safari compatibility
+        const date = new Date(serverTime.replace(' ', 'T') + 'Z');
+
+        // Check if date is valid
+        if (isNaN(date.getTime())) {
+            element.textContent = serverTime;  // Fallback to original string
+            element.title = 'Unable to parse date';
+            return;
+        }
 
         // Format to full local time for tooltip
         const fullOptions = {
