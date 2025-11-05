@@ -2685,34 +2685,37 @@ def analytics():
     c.execute("SELECT COUNT(*) FROM users")
     metrics['total_users'] = c.fetchone()[0]
 
-    # New signups (last 7 days, last 30 days)
-    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'user_signed_up' AND created_at >= date('now', '-7 days')")
+    # New signups (last 7 days, last 30 days) (excluding admin)
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'user_signed_up' AND created_at >= date('now', '-7 days') AND user_id != 1")
     metrics['new_users_7d'] = c.fetchone()[0]
 
-    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'user_signed_up' AND created_at >= date('now', '-30 days')")
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'user_signed_up' AND created_at >= date('now', '-30 days') AND user_id != 1")
     metrics['new_users_30d'] = c.fetchone()[0]
 
-    # DAU (Daily Active Users) - users with any event today
+    # DAU (Daily Active Users) - users with any event today (excluding admin)
     c.execute("""
         SELECT COUNT(DISTINCT user_id)
         FROM events
         WHERE date(created_at) = date('now')
+          AND user_id != 1
     """)
     metrics['dau'] = c.fetchone()[0]
 
-    # WAU (Weekly Active Users)
+    # WAU (Weekly Active Users) (excluding admin)
     c.execute("""
         SELECT COUNT(DISTINCT user_id)
         FROM events
         WHERE created_at >= date('now', '-7 days')
+          AND user_id != 1
     """)
     metrics['wau'] = c.fetchone()[0]
 
-    # MAU (Monthly Active Users)
+    # MAU (Monthly Active Users) (excluding admin)
     c.execute("""
         SELECT COUNT(DISTINCT user_id)
         FROM events
         WHERE created_at >= date('now', '-30 days')
+          AND user_id != 1
     """)
     metrics['mau'] = c.fetchone()[0]
 
@@ -2720,34 +2723,36 @@ def analytics():
     c.execute("SELECT COUNT(*) FROM loans")
     metrics['total_loans'] = c.fetchone()[0]
 
-    # Loans created (last 7 days, last 30 days)
-    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'loan_created' AND created_at >= date('now', '-7 days')")
+    # Loans created (last 7 days, last 30 days) (excluding admin)
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'loan_created' AND created_at >= date('now', '-7 days') AND user_id != 1")
     metrics['loans_7d'] = c.fetchone()[0]
 
-    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'loan_created' AND created_at >= date('now', '-30 days')")
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'loan_created' AND created_at >= date('now', '-30 days') AND user_id != 1")
     metrics['loans_30d'] = c.fetchone()[0]
 
-    # Bank link funnel
-    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'bank_link_started' AND created_at >= date('now', '-30 days')")
+    # Bank link funnel (excluding admin)
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'bank_link_started' AND created_at >= date('now', '-30 days') AND user_id != 1")
     bank_started = c.fetchone()[0]
 
-    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'bank_link_success' AND created_at >= date('now', '-30 days')")
+    c.execute("SELECT COUNT(*) FROM events WHERE event_name = 'bank_link_success' AND created_at >= date('now', '-30 days') AND user_id != 1")
     bank_success = c.fetchone()[0]
 
     metrics['bank_link_started'] = bank_started
     metrics['bank_link_success'] = bank_success
     metrics['bank_link_conversion'] = (bank_success / bank_started * 100) if bank_started > 0 else 0
 
-    # Retention: users active this week who were also active last week
+    # Retention: users active this week who were also active last week (excluding admin)
     c.execute("""
         SELECT COUNT(DISTINCT e1.user_id)
         FROM events e1
         WHERE e1.created_at >= date('now', '-7 days')
+          AND e1.user_id != 1
           AND e1.user_id IN (
               SELECT DISTINCT user_id
               FROM events
               WHERE created_at >= date('now', '-14 days')
                 AND created_at < date('now', '-7 days')
+                AND user_id != 1
           )
     """)
     retained_users = c.fetchone()[0]
@@ -2757,16 +2762,18 @@ def analytics():
         FROM events
         WHERE created_at >= date('now', '-14 days')
           AND created_at < date('now', '-7 days')
+          AND user_id != 1
     """)
     previous_week_users = c.fetchone()[0]
 
     metrics['retention_rate'] = (retained_users / previous_week_users * 100) if previous_week_users > 0 else 0
 
-    # Recent events (last 20)
+    # Recent events (last 20) (excluding admin)
     c.execute("""
         SELECT e.event_name, e.created_at, u.email, e.event_data
         FROM events e
         LEFT JOIN users u ON e.user_id = u.id
+        WHERE e.user_id != 1
         ORDER BY e.created_at DESC
         LIMIT 20
     """)
@@ -2780,11 +2787,12 @@ def analytics():
             'event_data': json.loads(event_data) if event_data else {}
         })
 
-    # Event counts by type (last 30 days)
+    # Event counts by type (last 30 days) (excluding admin)
     c.execute("""
         SELECT event_name, COUNT(*) as count
         FROM events
         WHERE created_at >= date('now', '-30 days')
+          AND user_id != 1
         GROUP BY event_name
         ORDER BY count DESC
     """)
