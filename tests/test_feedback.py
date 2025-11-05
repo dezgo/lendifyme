@@ -38,7 +38,7 @@ class TestFeedbackSubmission:
     def test_feedback_submit_authenticated_success(self, logged_in_client, app):
         """Test authenticated feedback submission."""
         response = logged_in_client.post('/feedback/submit', data={
-            'feedback_type': 'feature',
+            'feedback_type': 'suggestion',  # Use valid type: suggestion, bug, praise, or other
             'message': 'Please add dark mode',
             'page_url': 'http://localhost/settings',
             'page_title': 'Settings',
@@ -56,22 +56,22 @@ class TestFeedbackSubmission:
                 feedback = c.fetchone()
 
         assert feedback is not None
-        assert feedback[0] == 'feature'
+        assert feedback[0] == 'suggestion'
         assert feedback[1] == 'Please add dark mode'
         assert feedback[2] is not None  # has user_id
 
     def test_feedback_submit_missing_type(self, client):
-        """Test that missing feedback type is rejected."""
+        """Test that missing feedback type defaults to 'other' (not rejected)."""
         response = client.post('/feedback/submit', data={
             'message': 'This is feedback',
             'page_url': 'http://localhost/',
             'page_title': 'Home',
         })
 
-        assert response.status_code == 400
+        # Missing type defaults to "other" per validation logic
+        assert response.status_code == 200
         data = json.loads(response.data)
-        assert data['success'] is False
-        assert 'error' in data
+        assert data['success'] is True
 
     def test_feedback_submit_missing_message(self, client):
         """Test that missing message is rejected."""
@@ -118,7 +118,8 @@ class TestFeedbackSubmission:
 
     def test_feedback_submit_valid_types(self, client):
         """Test that all valid feedback types are accepted."""
-        valid_types = ['bug', 'feature', 'praise', 'other']
+        # Valid types per schemas/feedback.py: suggestion, bug, praise, other
+        valid_types = ['suggestion', 'bug', 'praise', 'other']
 
         for feedback_type in valid_types:
             response = client.post('/feedback/submit', data={

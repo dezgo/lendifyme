@@ -268,14 +268,14 @@ class TestAdminFeedback:
 
     def test_admin_feedback_shows_submissions(self, admin_client, app):
         """Test that feedback page shows submissions."""
-        # Create some feedback first
+        # Create some feedback first (page_url is NOT NULL)
         with app.app_context():
             with get_db_connection() as conn:
                 c = conn.cursor()
                 c.execute("""
-                    INSERT INTO feedback (feedback_type, message, created_at)
-                    VALUES (?, ?, datetime('now'))
-                """, ('bug', 'Test bug report'))
+                    INSERT INTO feedback (feedback_type, message, page_url, created_at)
+                    VALUES (?, ?, ?, datetime('now'))
+                """, ('bug', 'Test bug report', 'http://localhost/dashboard'))
                 conn.commit()
 
         response = admin_client.get('/admin/feedback')
@@ -306,14 +306,14 @@ class TestAdminFeedbackUpdate:
 
     def test_update_feedback_success(self, admin_client, app):
         """Test successfully updating feedback status."""
-        # Create feedback first
+        # Create feedback first (page_url is NOT NULL)
         with app.app_context():
             with get_db_connection() as conn:
                 c = conn.cursor()
                 c.execute("""
-                    INSERT INTO feedback (feedback_type, message, status, created_at)
-                    VALUES (?, ?, ?, datetime('now'))
-                """, ('bug', 'Test feedback', 'new'))
+                    INSERT INTO feedback (feedback_type, message, page_url, status, created_at)
+                    VALUES (?, ?, ?, ?, datetime('now'))
+                """, ('bug', 'Test feedback', 'http://localhost/test', 'new'))
                 feedback_id = c.lastrowid
                 conn.commit()
 

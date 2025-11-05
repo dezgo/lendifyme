@@ -6,10 +6,38 @@ from helpers.db import get_db_connection
 
 
 @pytest.fixture
-def client_with_pending_matches(logged_in_client):
-    """Create client with pending matches in session."""
+def client_with_pending_matches(logged_in_client, app):
+    """Create client with pending matches in session AND actual loans in database."""
+    # First, create actual loans in the database
+    with app.app_context():
+        with get_db_connection() as conn:
+            c = conn.cursor()
+
+            # Get user_id from session
+            with logged_in_client.session_transaction() as sess:
+                user_id = sess.get('user_id', 1)
+
+            # Create loan 1
+            c.execute("""
+                INSERT INTO loans (user_id, borrower, amount, date_borrowed, created_at)
+                VALUES (?, ?, ?, date('now'), datetime('now'))
+            """, (user_id, 'Alice Smith', 100.00))
+            loan_id_1 = c.lastrowid
+
+            # Create loan 2
+            c.execute("""
+                INSERT INTO loans (user_id, borrower, amount, date_borrowed, created_at)
+                VALUES (?, ?, ?, date('now'), datetime('now'))
+            """, (user_id, 'Bob Jones', 100.00))
+            loan_id_2 = c.lastrowid
+
+            # Note: amount_repaid was removed in migration v9
+            # Repayment tracking is now in applied_transactions table, not loans table
+
+            conn.commit()
+
+    # Now set up pending matches with the actual loan IDs
     with logged_in_client.session_transaction() as sess:
-        sess['user_id'] = sess.get('user_id', 1)
         sess['pending_matches'] = [
             {
                 'transaction': {
@@ -18,10 +46,11 @@ def client_with_pending_matches(logged_in_client):
                     'amount': 50.00
                 },
                 'loan': {
-                    'id': 1,
+                    'id': loan_id_1,
                     'borrower': 'Alice Smith',
                     'amount': 100.00,
-                    'amount_repaid': 0.00
+                    'amount_repaid': 0.00,
+                    'remaining': 100.00  # Template expects this field
                 },
                 'confidence': 85
             },
@@ -32,10 +61,11 @@ def client_with_pending_matches(logged_in_client):
                     'amount': 25.00
                 },
                 'loan': {
-                    'id': 2,
+                    'id': loan_id_2,
                     'borrower': 'Bob Jones',
                     'amount': 100.00,
-                    'amount_repaid': 50.00
+                    'amount_repaid': 50.00,
+                    'remaining': 50.00  # Template expects this field
                 },
                 'confidence': 70
             }
@@ -136,6 +166,22 @@ class TestApplyPendingMatch:
 
     def test_apply_last_match_redirects_to_dashboard(self, logged_in_client, app):
         """Test that applying the last match redirects to dashboard."""
+        # Create a loan first
+        with app.app_context():
+            with get_db_connection() as conn:
+                c = conn.cursor()
+
+                # Get user_id
+                with logged_in_client.session_transaction() as sess:
+                    user_id = sess.get('user_id', 1)
+
+                c.execute("""
+                    INSERT INTO loans (user_id, borrower, amount, date_borrowed, created_at)
+                    VALUES (?, ?, ?, date('now'), datetime('now'))
+                """, (user_id, 'Alice', 100.00))
+                loan_id = c.lastrowid
+                conn.commit()
+
         # Set up session with only one match
         with logged_in_client.session_transaction() as sess:
             sess['pending_matches'] = [
@@ -146,7 +192,7 @@ class TestApplyPendingMatch:
                         'amount': 100.00
                     },
                     'loan': {
-                        'id': 1,
+                        'id': loan_id,
                         'borrower': 'Alice',
                         'amount': 100.00,
                         'amount_repaid': 0.00
@@ -214,8 +260,24 @@ class TestRejectPendingMatch:
         assert response.status_code == 302
         assert '/match/review-pending' in response.location
 
-    def test_reject_last_match_redirects_to_dashboard(self, logged_in_client):
+    def test_reject_last_match_redirects_to_dashboard(self, logged_in_client, app):
         """Test that rejecting the last match redirects to dashboard."""
+        # Create a loan first
+        with app.app_context():
+            with get_db_connection() as conn:
+                c = conn.cursor()
+
+                # Get user_id
+                with logged_in_client.session_transaction() as sess:
+                    user_id = sess.get('user_id', 1)
+
+                c.execute("""
+                    INSERT INTO loans (user_id, borrower, amount, date_borrowed, created_at)
+                    VALUES (?, ?, ?, date('now'), datetime('now'))
+                """, (user_id, 'Alice', 100.00))
+                loan_id = c.lastrowid
+                conn.commit()
+
         # Set up session with only one match
         with logged_in_client.session_transaction() as sess:
             sess['pending_matches'] = [
@@ -226,7 +288,7 @@ class TestRejectPendingMatch:
                         'amount': 100.00
                     },
                     'loan': {
-                        'id': 1,
+                        'id': loan_id,
                         'borrower': 'Alice',
                         'amount': 100.00,
                         'amount_repaid': 0.00
