@@ -255,10 +255,15 @@ def bank_connected(bank_id):
 
     User is redirected here after successfully logging into their bank.
     """
+    current_app.logger.info(f"bank_connected callback hit for bank_id: {bank_id}")
+
     user_id = get_current_user_id()
     user = get_user_info(user_id)
 
+    current_app.logger.info(f"User info: id={user_id}, basiq_user_id={user.get('basiq_user_id') if user else 'None'}")
+
     if not user or not user['basiq_user_id']:
+        current_app.logger.error("Bank connection failed - user not found or no basiq_user_id")
         flash('Bank connection failed - user not found', 'error')
         return redirect(url_for('bank_connection.connect_bank'))
 
@@ -269,12 +274,15 @@ def bank_connected(bank_id):
     )
 
     if not connector:
+        current_app.logger.error(f"Bank connector not available for {bank_id}")
         flash('Bank connector not available', 'error')
         return redirect(url_for('bank_connection.connect_bank'))
 
     # Check if they successfully connected
     try:
+        current_app.logger.info(f"Fetching connections for basiq_user_id: {user['basiq_user_id']}")
         connections = connector.get_user_connections(user['basiq_user_id'])
+        current_app.logger.info(f"Found {len(connections)} connections: {connections}")
 
         if connections and any(c['status'] == 'active' for c in connections):
             # Store which bank they connected
