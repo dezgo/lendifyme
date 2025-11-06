@@ -33,21 +33,13 @@ class BasiqConnector(BankConnector):
 
         Args:
             api_key: Basiq API key (get from https://dashboard.basiq.io)
-                    Can be either raw UUID or base64-encoded format
+                    Can be raw UUID or already base64-encoded
         """
-        # Basiq sometimes gives base64-encoded API keys
-        # If the key is base64 encoded (ends with = or ==), decode it first
-        if api_key.endswith('==') or api_key.endswith('='):
-            try:
-                decoded_key = base64.b64decode(api_key).decode('utf-8')
-                logger.info("Decoded base64-encoded Basiq API key")
-                api_key = decoded_key
-            except Exception as e:
-                logger.warning(f"Failed to decode API key, using as-is: {e}")
-
         super().__init__(api_key)
         self._access_token = None
         self._token_expiry = None
+        # Store whether the key is already base64 encoded
+        self._key_is_encoded = api_key.endswith('==') or api_key.endswith('=')
 
     @property
     def connector_name(self) -> str:
@@ -90,8 +82,16 @@ class BasiqConnector(BankConnector):
 
         # Encode API key as Basic auth
         # Basiq expects: "Basic {base64(api_key:)}"
-        auth_string = f"{self.api_key}:"
-        encoded_auth = base64.b64encode(auth_string.encode()).decode()
+        # If the key is already base64 encoded (ends with = or ==), use it directly
+        if self._key_is_encoded:
+            # Key from dashboard is already base64 encoded, use as-is
+            encoded_auth = self.api_key
+            logger.info("Using pre-encoded Basiq API key")
+        else:
+            # Raw key (UUID format), encode it
+            auth_string = f"{self.api_key}:"
+            encoded_auth = base64.b64encode(auth_string.encode()).decode()
+            logger.info("Encoded raw Basiq API key")
 
         headers = {
             "Authorization": f"Basic {encoded_auth}",
