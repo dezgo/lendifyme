@@ -17,10 +17,11 @@ class BasiqConnector(BankConnector):
     Unlike direct bank APIs, Basiq works with a "user" model where users connect their bank accounts,
     and you fetch transactions for those users.
 
-    This connector will:
-    1. Authenticate with your Basiq API key to get an access token
-    2. Fetch all users that have connected their banks
-    3. Retrieve transactions from all connected users
+    This connector provides:
+    1. User management (create users programmatically for your LendifyMe users)
+    2. Consent link generation (for embedded bank connection flow)
+    3. Transaction fetching from all connected banks
+    4. Connection status monitoring
     """
 
     BASE_URL = "https://au-api.basiq.io"
@@ -317,3 +318,300 @@ class BasiqConnector(BankConnector):
         """
         all_transactions = self.get_transactions(since_date, limit)
         return self.filter_incoming_only(all_transactions)
+
+    # ========================================
+    # User Management Methods (for seamless UX)
+    # ========================================
+
+    def create_user(self, email: str, mobile: Optional[str] = None, first_name: Optional[str] = None) -> dict:
+        """
+        Create a new user in Basiq programmatically.
+
+        This should be called when a LendifyMe user wants to connect their bank.
+        The user is created in Basiq but never sees the Basiq branding.
+
+        Args:
+            email: User's email address (required by Basiq)
+            mobile: User's mobile number (optional, format: +61412345678)
+            first_name: User's first name (optional)
+
+        Returns:
+            Dict with user info including:
+            {
+                'id': 'user-id',
+                'email': 'user@example.com',
+                'created_at': '2024-01-01T00:00:00Z'
+            }
+
+        Raises:
+            ConnectionError: If API request fails
+        """
+        payload = {"email": email}
+
+        if mobile:
+            payload["mobile"] = mobile
+        if first_name:
+            payload["firstName"] = first_name
+
+        try:
+            response = requests.post(
+                f"{self.BASE_URL}/users",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=15
+            )
+
+            if response.status_code == 400:
+                # User might already exist with this email
+                error_data = response.json()
+                raise ValueError(f"Failed to create user: {error_data}")
+
+            response.raise_for_status()
+            data = response.json()
+
+            user_data = data.get("data", {})
+            logger.info(f"Created Basiq user: {user_data.get('id')}")
+
+            return {
+                'id': user_data.get('id'),
+                'email': user_data.get('email'),
+                'created_at': user_data.get('createdAt')
+            }
+
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to create Basiq user: {str(e)}")
+
+    def get_user_by_id(self, user_id: str) -> dict:
+        """
+        Get user details by Basiq user ID.
+
+        Args:
+            user_id: Basiq user ID
+
+        Returns:
+            Dict with user information
+
+        Raises:
+            ConnectionError: If API request fails
+        """
+        try:
+            response = requests.get(
+                f"{self.BASE_URL}/users/{user_id}",
+                headers=self._get_headers(),
+                timeout=15
+            )
+            response.raise_for_status()
+            data = response.json()
+            return data.get("data", {})
+
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to fetch user: {str(e)}")
+
+    def create_consent_link(self, user_id: str, redirect_url: Optional[str] = None) -> dict:
+        """
+        Generate a consent link for a user to connect their bank.
+
+        This is the key method for seamless UX! After creating a user,
+        generate this link and either:
+        1. Redirect user to it (opens Basiq Connect UI)
+        2. Use Basiq Connect JS widget to embed it in your app
+
+        Args:
+            user_id: Basiq user ID (from create_user)
+            redirect_url: Optional URL to redirect back to after connection
+                         (e.g., 'https://lendifyme.com/bank-connected')
+
+        Returns:
+            Dict with:
+            {
+                'consent_url': 'https://consent.basiq.io/...',
+                'token': 'consent-token'
+            }
+
+        Raises:
+            ConnectionError: If API request fails
+        """
+        payload = {
+            "scope": "TRANSACTION_DETAILS",  # Permission to read transactions
+            "userId": user_id
+        }
+
+        if redirect_url:
+            payload["redirectUrl"] = redirect_url
+
+        try:
+            response = requests.post(
+                f"{self.BASE_URL}/consents",
+                headers=self._get_headers(),
+                json=payload,
+                timeout=15
+            )
+
+            if response.status_code == 400:
+                error_data = response.json()
+                raise ValueError(f"Failed to create consent: {error_data}")
+
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract consent URL from response
+            consent_data = data.get("data", {})
+            consent_url = consent_data.get("url")
+            consent_token = consent_data.get("id")
+
+            logger.info(f"Created consent link for user {user_id}")
+
+            return {
+                'consent_url': consent_url,
+                'token': consent_token
+            }
+
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to create consent link: {str(e)}")
+
+    def get_user_connections(self, user_id: str) -> List[dict]:
+        """
+        Get all bank connections for a user.
+
+        Use this to check if user has successfully connected their bank
+        and what the connection status is.
+
+        Args:
+            user_id: Basiq user ID
+
+        Returns:
+            List of connection dicts with:
+            {
+                'id': 'connection-id',
+                'institution': {'name': 'Commonwealth Bank'},
+                'status': 'active' | 'inactive' | 'credentials-invalid',
+                'lastUsed': '2024-01-01T00:00:00Z'
+            }
+
+        Raises:
+            ConnectionError: If API request fails
+        """
+        try:
+            response = requests.get(
+                f"{self.BASE_URL}/users/{user_id}/connections",
+                headers=self._get_headers(),
+                timeout=15
+            )
+
+            if response.status_code == 404:
+                # User has no connections yet
+                return []
+
+            response.raise_for_status()
+            data = response.json()
+
+            connections = []
+            for item in data.get("data", []):
+                attributes = item.get("attributes", {})
+                institution = attributes.get("institution", {})
+
+                connections.append({
+                    'id': item.get('id'),
+                    'institution': {
+                        'name': institution.get('name', 'Unknown'),
+                        'short_name': institution.get('shortName', ''),
+                        'logo': institution.get('logo', '')
+                    },
+                    'status': attributes.get('status'),
+                    'last_used': attributes.get('lastUsed'),
+                    'created_at': attributes.get('createdAt')
+                })
+
+            return connections
+
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to fetch connections: {str(e)}")
+
+    def get_available_institutions(self, search: Optional[str] = None) -> List[dict]:
+        """
+        Get list of available banks/institutions that users can connect.
+
+        Use this to show a nice bank selection UI to your users.
+
+        Args:
+            search: Optional search term to filter institutions
+
+        Returns:
+            List of institution dicts with:
+            {
+                'id': 'AU00000',
+                'name': 'Commonwealth Bank',
+                'short_name': 'CommBank',
+                'logo': 'https://...',
+                'tier': 1  # 1 = major bank, 2 = regional, 3 = other
+            }
+
+        Raises:
+            ConnectionError: If API request fails
+        """
+        try:
+            params = {}
+            if search:
+                params["filter"] = search
+
+            response = requests.get(
+                f"{self.BASE_URL}/institutions",
+                headers=self._get_headers(),
+                params=params if params else None,
+                timeout=15
+            )
+
+            response.raise_for_status()
+            data = response.json()
+
+            institutions = []
+            for item in data.get("data", []):
+                attributes = item.get("attributes", {})
+
+                institutions.append({
+                    'id': item.get('id'),
+                    'name': attributes.get('name', 'Unknown'),
+                    'short_name': attributes.get('shortName', ''),
+                    'logo': attributes.get('logo', ''),
+                    'tier': attributes.get('tier', 3),
+                    'service_status': attributes.get('serviceStatus', 'up')
+                })
+
+            # Sort by tier (major banks first)
+            institutions.sort(key=lambda x: (x['tier'], x['name']))
+
+            return institutions
+
+        except requests.exceptions.RequestException as e:
+            raise ConnectionError(f"Failed to fetch institutions: {str(e)}")
+
+    def refresh_connection(self, user_id: str, connection_id: str) -> bool:
+        """
+        Refresh a bank connection to fetch latest data.
+
+        Call this periodically or when user manually requests a refresh.
+
+        Args:
+            user_id: Basiq user ID
+            connection_id: Connection ID to refresh
+
+        Returns:
+            True if refresh initiated successfully
+
+        Raises:
+            ConnectionError: If API request fails
+        """
+        try:
+            response = requests.post(
+                f"{self.BASE_URL}/users/{user_id}/connections/{connection_id}/refresh",
+                headers=self._get_headers(),
+                timeout=15
+            )
+
+            response.raise_for_status()
+            logger.info(f"Refreshed connection {connection_id} for user {user_id}")
+            return True
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Failed to refresh connection: {str(e)}")
+            raise ConnectionError(f"Failed to refresh connection: {str(e)}")
