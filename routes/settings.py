@@ -555,11 +555,19 @@ def settings_banks_configure(connector_type):
 
     # Get connector info for form
     try:
-        instance = connector_class(api_key="dummy")
+        # Get schema first to determine auth type
         schema = connector_class.get_credential_schema()
+        auth_type = schema.get('auth_type', 'api_key')
+
+        # Instantiate based on auth type
+        if auth_type == 'oauth':
+            instance = connector_class(api_key="dummy", basiq_user_id=None)
+        else:
+            instance = connector_class(api_key="dummy")
+
         connector_info = {
             'name': instance.connector_name,
-            'auth_type': schema['auth_type'],
+            'auth_type': auth_type,
             'fields': schema['fields']
         }
     except Exception as e:
