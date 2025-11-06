@@ -173,70 +173,70 @@ class CommBankConnector(AggregatorBackedBank):
     """Commonwealth Bank connector (backed by Basiq)."""
     BANK_NAME = "Commonwealth Bank"
     BANK_SHORT_NAME = "CommBank"
-    BASIQ_INSTITUTION_ID = "AU00000"  # CommBank's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU04301"  # Commonwealth Bank Australia
 
 
 class NABConnector(AggregatorBackedBank):
     """NAB connector (backed by Basiq)."""
     BANK_NAME = "NAB"
     BANK_SHORT_NAME = "NAB"
-    BASIQ_INSTITUTION_ID = "AU00001"  # NAB's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU01001"  # National Australia Bank Limited
 
 
 class WestpacConnector(AggregatorBackedBank):
     """Westpac connector (backed by Basiq)."""
     BANK_NAME = "Westpac"
     BANK_SHORT_NAME = "Westpac"
-    BASIQ_INSTITUTION_ID = "AU00002"  # Westpac's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU14201"  # Westpac Banking Corporation
 
 
 class ANZConnector(AggregatorBackedBank):
     """ANZ connector (backed by Basiq)."""
     BANK_NAME = "ANZ"
     BANK_SHORT_NAME = "ANZ"
-    BASIQ_INSTITUTION_ID = "AU00003"  # ANZ's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU00601"  # Australia and New Zealand Banking Group Limited
 
 
 class INGConnector(AggregatorBackedBank):
     """ING connector (backed by Basiq)."""
     BANK_NAME = "ING"
     BANK_SHORT_NAME = "ING"
-    BASIQ_INSTITUTION_ID = "AU00004"  # ING's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU00201"  # ING Bank (Australia) Limited (trading as ING Direct)
 
 
 class MacquarieConnector(AggregatorBackedBank):
     """Macquarie Bank connector (backed by Basiq)."""
     BANK_NAME = "Macquarie Bank"
     BANK_SHORT_NAME = "Macquarie"
-    BASIQ_INSTITUTION_ID = "AU00005"  # Macquarie's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU00301"  # Macquarie Bank Limited
 
 
 class BankOfMelbourneConnector(AggregatorBackedBank):
     """Bank of Melbourne connector (backed by Basiq)."""
     BANK_NAME = "Bank of Melbourne"
     BANK_SHORT_NAME = "Bank Melbourne"
-    BASIQ_INSTITUTION_ID = "AU00006"  # Bank of Melbourne's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU03001"  # Bank of Melbourne (a subsidiary of Westpac)
 
 
 class BankSAConnector(AggregatorBackedBank):
     """BankSA connector (backed by Basiq)."""
     BANK_NAME = "BankSA"
     BANK_SHORT_NAME = "BankSA"
-    BASIQ_INSTITUTION_ID = "AU00007"  # BankSA's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU03201"  # BankSA (a subsidiary of Westpac)
 
 
 class StGeorgeConnector(AggregatorBackedBank):
     """St.George Bank connector (backed by Basiq)."""
     BANK_NAME = "St.George Bank"
     BANK_SHORT_NAME = "St.George"
-    BASIQ_INSTITUTION_ID = "AU00008"  # St.George's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU12301"  # St. George Bank (a subsidiary of Westpac)
 
 
 class BendigoBankConnector(AggregatorBackedBank):
     """Bendigo Bank connector (backed by Basiq)."""
     BANK_NAME = "Bendigo Bank"
     BANK_SHORT_NAME = "Bendigo"
-    BASIQ_INSTITUTION_ID = "AU00009"  # Bendigo's Basiq ID
+    BASIQ_INSTITUTION_ID = "AU00101"  # Bendigo and Adelaide Bank Limited
 
 
 class OtherBankConnector(AggregatorBackedBank):
