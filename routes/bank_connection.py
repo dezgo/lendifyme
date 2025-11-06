@@ -471,6 +471,34 @@ def disconnect_bank():
     return redirect(url_for('bank_connection.connect_bank'))
 
 
+@bp.route('/debug-connections')
+@login_required
+def debug_connections():
+    """Debug endpoint to see raw connection data from Basiq."""
+    user_id = get_current_user_id()
+    user = get_user_info(user_id)
+
+    if not user or not user['basiq_user_id']:
+        return jsonify({'error': 'No Basiq user ID found'})
+
+    try:
+        # Create connector
+        connector = ConnectorRegistry.create_from_env('other_bank', basiq_user_id=user['basiq_user_id'])
+        if not connector:
+            return jsonify({'error': 'Could not create connector'})
+
+        # Get raw connections
+        connections = connector.get_user_connections(user['basiq_user_id'])
+
+        return jsonify({
+            'basiq_user_id': user['basiq_user_id'],
+            'connection_count': len(connections),
+            'connections': connections
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
 @bp.route('/bank-status')
 @login_required
 def bank_status():
