@@ -27,6 +27,29 @@ def main():
 
     try:
         connector = BasiqConnector(api_key)
+
+        # First, let's see the raw API response
+        print("\nFetching raw API response...\n")
+        import requests
+        token = connector._get_access_token()
+        response = requests.get(
+            f"{connector.BASE_URL}/institutions",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "basiq-version": connector.API_VERSION
+            },
+            timeout=15
+        )
+        raw_data = response.json()
+
+        print("RAW API RESPONSE (first institution):")
+        print("-" * 80)
+        if raw_data.get('data') and len(raw_data['data']) > 0:
+            import json
+            print(json.dumps(raw_data['data'][0], indent=2))
+        print("\n")
+
         institutions = connector.get_available_institutions()
 
         print(f"\nFound {len(institutions)} institutions:\n")
