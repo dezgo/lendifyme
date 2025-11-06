@@ -606,15 +606,25 @@ class BasiqConnector(BankConnector):
 
             institutions = []
             for item in data.get("data", []):
-                attributes = item.get("attributes", {})
+                # In API v3.0, data is directly on item, not nested in "attributes"
+                # Get logo URL from nested structure
+                logo_url = ''
+                logo_obj = item.get('logo', {})
+                if isinstance(logo_obj, dict):
+                    links = logo_obj.get('links', {})
+                    logo_url = links.get('square', '') or links.get('full', '')
+
+                # Tier is returned as string "1", "2", "3" - convert to int
+                tier_str = item.get('tier', '3')
+                tier = int(tier_str) if tier_str else 3
 
                 institutions.append({
                     'id': item.get('id'),
-                    'name': attributes.get('name', 'Unknown'),
-                    'short_name': attributes.get('shortName', ''),
-                    'logo': attributes.get('logo', ''),
-                    'tier': attributes.get('tier', 3),
-                    'service_status': attributes.get('serviceStatus', 'up')
+                    'name': item.get('name', 'Unknown'),
+                    'short_name': item.get('shortName', ''),
+                    'logo': logo_url,
+                    'tier': tier,
+                    'service_status': item.get('status', 'up')
                 })
 
             # Sort by tier (major banks first)
