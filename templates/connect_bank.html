@@ -303,15 +303,39 @@ function connectBank(bankId, authType, bankName) {
                     overlay.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 9998;';
                     const message = document.createElement('div');
                     message.style.cssText = 'position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 2rem 3rem; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); text-align: center; z-index: 9999;';
-                    message.innerHTML = '<h3 style="margin: 0 0 1rem 0;">Verifying Connection...</h3><p style="color: #666; margin: 0 0 1.5rem 0;">Please wait while we check your bank connection status.</p><div style="border: 3px solid #f3f3f3; border-top: 3px solid #007bff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div><style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); }}</style>';
+                    message.innerHTML = '<h3 style="margin: 0 0 1rem 0;">Verifying Connection...</h3><p id="status-message" style="color: #666; margin: 0 0 1.5rem 0;">Checking if your bank was connected successfully...</p><div style="border: 3px solid #f3f3f3; border-top: 3px solid #007bff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto;"></div><style>@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); }}</style>';
                     document.body.appendChild(overlay);
                     document.body.appendChild(message);
 
-                    // Reload page to show connection status
-                    console.log('Bank connection popup closed, reloading...');
-                    setTimeout(() => {
-                        window.location.reload();
-                    }, 1500);
+                    // Check connection status via AJAX
+                    console.log('Bank connection popup closed, checking status...');
+                    fetch('/check-connection-status/' + bankId)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.connected) {
+                                // Success!
+                                document.getElementById('status-message').textContent = '✓ Successfully connected ' + data.bank_name + '!';
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 1500);
+                            } else if (data.pending) {
+                                // Pending or invalid credentials
+                                overlay.remove();
+                                message.remove();
+                                alert('Connection is pending or credentials were invalid. Please try again.');
+                            } else {
+                                // Not connected
+                                overlay.remove();
+                                message.remove();
+                                alert(data.message || 'No active connection found. Please try connecting again.');
+                            }
+                        })
+                        .catch(error => {
+                            console.error('Error checking connection:', error);
+                            overlay.remove();
+                            message.remove();
+                            alert('Error verifying connection. Please refresh the page.');
+                        });
                 }
             }, 500);
         } else {

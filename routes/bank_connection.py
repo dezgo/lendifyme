@@ -247,6 +247,62 @@ def connect_bank_oauth(bank_id):
         return redirect(url_for('bank_connection.connect_bank'))
 
 
+@bp.route('/check-connection-status/<bank_id>')
+@login_required
+def check_connection_status(bank_id):
+    """
+    AJAX endpoint to check if user has successfully connected a bank.
+    Called when popup closes to verify connection without relying on Basiq redirect.
+    """
+    user_id = get_current_user_id()
+    user = get_user_info(user_id)
+
+    if not user or not user['basiq_user_id']:
+        return jsonify({'connected': False, 'error': 'User not found'})
+
+    try:
+        connector = ConnectorRegistry.create_from_env(bank_id, basiq_user_id=user['basiq_user_id'])
+        if not connector:
+            return jsonify({'connected': False, 'error': 'Connector not available'})
+
+        connections = connector.get_user_connections(user['basiq_user_id'])
+        current_app.logger.info(f"Check connection status for {bank_id}: found {len(connections)} connections")
+
+        # Check if there's an active connection for this bank
+        has_active = any(c['status'] == 'active' for c in connections)
+
+        if has_active:
+            # Store the connection
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute("UPDATE users SET connected_bank = ? WHERE id = ?", (bank_id, user_id))
+            conn.commit()
+            conn.close()
+
+            log_event('bank_connected', {'bank': bank_id, 'auth_type': 'oauth'})
+
+            return jsonify({
+                'connected': True,
+                'bank_name': connector.connector_name,
+                'institution': connections[0]['institution']['name'] if connections else None
+            })
+        else:
+            # Check if connection is pending
+            has_pending = any(c['status'] in ['pending', 'credentials-invalid'] for c in connections)
+            if has_pending:
+                return jsonify({
+                    'connected': False,
+                    'pending': True,
+                    'message': 'Connection is pending or credentials are invalid'
+                })
+
+            return jsonify({'connected': False, 'message': 'No active connection found'})
+
+    except Exception as e:
+        current_app.logger.error(f"Error checking connection status: {str(e)}")
+        return jsonify({'connected': False, 'error': str(e)})
+
+
 @bp.route('/bank-connected/<bank_id>')
 @login_required
 def bank_connected(bank_id):
