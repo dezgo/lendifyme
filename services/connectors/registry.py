@@ -121,10 +121,18 @@ class ConnectorRegistry:
                 continue
 
             try:
-                instance = connector_class(api_key="dummy")
+                # Get schema first to determine auth type
                 schema = connector_class.get_credential_schema()
-
                 auth_type = schema.get('auth_type', 'api_key')
+
+                # Instantiate based on auth type
+                if auth_type == 'oauth':
+                    # OAuth banks need api_key and basiq_user_id parameters
+                    instance = connector_class(api_key="dummy", basiq_user_id=None)
+                else:
+                    # API key banks just need api_key
+                    instance = connector_class(api_key="dummy")
+
                 if auth_type == 'api_key':
                     description = 'Enter your API key'
                 else:
@@ -136,7 +144,10 @@ class ConnectorRegistry:
                     'auth_type': auth_type,
                     'description': description
                 })
-            except Exception:
+            except Exception as e:
+                # Log but continue - don't break the whole list
+                import logging
+                logging.error(f"Failed to load connector {connector_id}: {e}")
                 pass
 
         return banks

@@ -82,12 +82,22 @@ def connect_bank():
         try:
             connector_class = ConnectorRegistry.get_connector_class(user['connected_bank'])
             if connector_class:
-                instance = connector_class(api_key="dummy")
+                # Get credential schema to determine if it needs special instantiation
+                schema = connector_class.get_credential_schema()
+                if schema.get('auth_type') == 'oauth':
+                    # OAuth banks (aggregator-backed) need api_key and optionally basiq_user_id
+                    instance = connector_class(api_key="dummy", basiq_user_id=None)
+                else:
+                    # API key banks just need api_key
+                    instance = connector_class(api_key="dummy")
+
                 current_connection = {
                     'id': user['connected_bank'],
                     'name': instance.connector_name
                 }
-        except:
+        except Exception as e:
+            # Silently fail - just won't show current connection
+            app.logger.error(f"Failed to get connector name: {e}")
             pass
 
     log_event('bank_connection_page_viewed')
