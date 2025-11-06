@@ -115,6 +115,7 @@ class ConnectorRegistry:
                     'name': 'Up Bank',
                     'auth_type': 'api_key',  # or 'oauth'
                     'description': 'Enter your API key',  # or 'Connect via secure login'
+                    'recommended': True,  # Primary option to show
                 },
                 ...
             ]
@@ -144,11 +145,16 @@ class ConnectorRegistry:
                 else:
                     description = 'Connect via secure login'
 
+                # Mark "other_bank" as recommended (it shows all banks)
+                # Bank-specific connectors require higher-tier Basiq access
+                recommended = connector_id in ['up_bank', 'other_bank']
+
                 banks.append({
                     'id': connector_id,
                     'name': instance.connector_name,
                     'auth_type': auth_type,
-                    'description': description
+                    'description': description,
+                    'recommended': recommended
                 })
             except Exception as e:
                 # Log but continue - don't break the whole list

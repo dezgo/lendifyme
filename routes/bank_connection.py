@@ -72,9 +72,13 @@ def connect_bank():
     # Get all available banks for selection
     banks = ConnectorRegistry.get_banks_for_selection()
 
-    # Group by auth type for better UI
-    api_key_banks = [b for b in banks if b['auth_type'] == 'api_key']
-    oauth_banks = [b for b in banks if b['auth_type'] == 'oauth']
+    # Split into recommended and other banks
+    recommended_banks = [b for b in banks if b.get('recommended', False)]
+    other_banks = [b for b in banks if not b.get('recommended', False)]
+
+    # Also keep old groupings for backward compatibility
+    api_key_banks = [b for b in recommended_banks if b['auth_type'] == 'api_key']
+    oauth_banks = [b for b in recommended_banks if b['auth_type'] == 'oauth']
 
     # Check if user already has a bank connected
     current_connection = None
@@ -105,6 +109,8 @@ def connect_bank():
     return render_template('connect_bank.html',
                          api_key_banks=api_key_banks,
                          oauth_banks=oauth_banks,
+                         recommended_banks=recommended_banks,
+                         other_banks=other_banks,
                          current_connection=current_connection)
 
 

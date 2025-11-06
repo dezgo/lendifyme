@@ -44,6 +44,16 @@
     transform: translateY(-2px);
 }
 
+.bank-card.featured-bank {
+    border-color: #007bff;
+    background: linear-gradient(135deg, #f8f9ff 0%, #ffffff 100%);
+    box-shadow: 0 2px 8px rgba(0,123,255,0.1);
+}
+
+.bank-card.featured-bank:hover {
+    box-shadow: 0 6px 16px rgba(0,123,255,0.2);
+}
+
 .bank-card h3 {
     margin: 0 0 0.5rem 0;
     font-size: 1.25rem;
@@ -211,15 +221,20 @@
     </div>
     {% endif %}
 
-    {% if api_key_banks %}
-    <h2 class="section-title">Banks with API Access</h2>
-    <p style="color: #666; margin-bottom: 1rem;">These banks require an API key (you can get one from their website)</p>
+    {% if recommended_banks %}
+    <h2 class="section-title">Connect Your Bank</h2>
 
     <div class="bank-grid">
-        {% for bank in api_key_banks %}
-        <div class="bank-card" data-bank-id="{{ bank.id }}" data-auth-type="{{ bank.auth_type }}">
+        {% for bank in recommended_banks %}
+        <div class="bank-card {% if bank.id == 'other_bank' %}featured-bank{% endif %}" data-bank-id="{{ bank.id }}" data-auth-type="{{ bank.auth_type }}">
             <h3>{{ bank.name }}</h3>
-            <p class="auth-type">{{ bank.description }}</p>
+            <p class="auth-type">
+                {% if bank.id == 'other_bank' %}
+                    Connect to 100+ Australian banks
+                {% else %}
+                    {{ bank.description }}
+                {% endif %}
+            </p>
             <button onclick="connectBank('{{ bank.id }}', '{{ bank.auth_type }}', '{{ bank.name }}')">
                 Connect
             </button>
@@ -228,21 +243,28 @@
     </div>
     {% endif %}
 
-    {% if oauth_banks %}
-    <h2 class="section-title">Australian Banks</h2>
-    <p style="color: #666; margin-bottom: 1rem;">Connect securely using your online banking login</p>
+    {% if other_banks %}
+    <details style="margin-top: 2rem;">
+        <summary style="cursor: pointer; font-weight: bold; color: #666; padding: 1rem 0;">
+            Advanced: Pre-select Specific Bank (requires Basiq Business plan)
+        </summary>
 
-    <div class="bank-grid">
-        {% for bank in oauth_banks %}
-        <div class="bank-card" data-bank-id="{{ bank.id }}" data-auth-type="{{ bank.auth_type }}">
-            <h3>{{ bank.name }}</h3>
-            <p class="auth-type">{{ bank.description }}</p>
-            <button onclick="connectBank('{{ bank.id }}', '{{ bank.auth_type }}', '{{ bank.name }}')">
-                Connect
-            </button>
+        <div class="info-box" style="margin-top: 1rem; background: #fff3cd; border: 1px solid #ffc107;">
+            <p><strong>⚠️ Note:</strong> Bank-specific connectors require a paid Basiq account with institution-level access permissions. Most users should use "Other Bank" above, which works with the free Basiq sandbox.</p>
         </div>
-        {% endfor %}
-    </div>
+
+        <div class="bank-grid" style="margin-top: 1rem;">
+            {% for bank in other_banks %}
+            <div class="bank-card" data-bank-id="{{ bank.id }}" data-auth-type="{{ bank.auth_type }}">
+                <h3>{{ bank.name }}</h3>
+                <p class="auth-type">{{ bank.description }}</p>
+                <button onclick="connectBank('{{ bank.id }}', '{{ bank.auth_type }}', '{{ bank.name }}')">
+                    Connect
+                </button>
+            </div>
+            {% endfor %}
+        </div>
+    </details>
     {% endif %}
 
     <div class="info-box" style="margin-top: 3rem;">
