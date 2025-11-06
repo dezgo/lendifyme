@@ -550,10 +550,18 @@ class BasiqConnector(BankConnector):
             response.raise_for_status()
             data = response.json()
 
+            # Log raw response for debugging
+            logger.info(f"Raw connections API response: {data}")
+
             connections = []
             for item in data.get("data", []):
+                logger.info(f"Processing connection item: {item}")
+
                 attributes = item.get("attributes", {})
+                logger.info(f"Attributes: {attributes}")
+
                 institution = attributes.get("institution", {})
+                logger.info(f"Institution: {institution}")
 
                 connections.append({
                     'id': item.get('id'),
