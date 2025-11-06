@@ -1,7 +1,7 @@
 """
 Bank connection routes - Connect banks for automatic transaction fetching.
 """
-from flask import Blueprint, render_template, request, session, redirect, flash, url_for, jsonify
+from flask import Blueprint, render_template, request, session, redirect, flash, url_for, jsonify, current_app
 from helpers.decorators import login_required, get_current_user_id
 from helpers.db import get_db_connection
 from helpers.utils import get_db_path
@@ -97,7 +97,7 @@ def connect_bank():
                 }
         except Exception as e:
             # Silently fail - just won't show current connection
-            app.logger.error(f"Failed to get connector name: {e}")
+            current_app.logger.error(f"Failed to get connector name: {e}")
             pass
 
     log_event('bank_connection_page_viewed')
@@ -190,18 +190,18 @@ def connect_bank_oauth(bank_id):
     # Create or get Basiq user for this LendifyMe user
     basiq_user_id = user.get('basiq_user_id')
 
-    app.logger.info(f"OAuth flow for bank {bank_id}, existing basiq_user_id: {basiq_user_id}")
+    current_app.logger.info(f"OAuth flow for bank {bank_id}, existing basiq_user_id: {basiq_user_id}")
 
     if not basiq_user_id:
         try:
-            app.logger.info(f"Creating new Basiq user for email: {user['email']}")
+            current_app.logger.info(f"Creating new Basiq user for email: {user['email']}")
             basiq_user = connector.create_user(
                 email=user['email'],
                 first_name=user['name']
             )
             basiq_user_id = basiq_user['id']
 
-            app.logger.info(f"Created Basiq user with ID: {basiq_user_id}")
+            current_app.logger.info(f"Created Basiq user with ID: {basiq_user_id}")
 
             # Store Basiq user ID
             conn = get_db_connection()
@@ -217,19 +217,19 @@ def connect_bank_oauth(bank_id):
             log_event('basiq_user_created', {'basiq_user_id': basiq_user_id})
 
         except Exception as e:
-            app.logger.error(f"Failed to create Basiq user: {str(e)}")
+            current_app.logger.error(f"Failed to create Basiq user: {str(e)}")
             flash(f'Failed to create bank connection: {str(e)}', 'error')
             return redirect(url_for('bank_connection.connect_bank'))
 
     # Validate we have a basiq_user_id
     if not basiq_user_id:
-        app.logger.error("basiq_user_id is still None after creation attempt")
+        current_app.logger.error("basiq_user_id is still None after creation attempt")
         flash('Failed to get or create Basiq user ID', 'error')
         return redirect(url_for('bank_connection.connect_bank'))
 
     # Generate consent link for this specific bank
     try:
-        app.logger.info(f"Creating consent link for basiq_user_id: {basiq_user_id}")
+        current_app.logger.info(f"Creating consent link for basiq_user_id: {basiq_user_id}")
         consent = connector.create_consent_link(
             basiq_user_id=basiq_user_id,
             redirect_url=url_for('bank_connection.bank_connected',
