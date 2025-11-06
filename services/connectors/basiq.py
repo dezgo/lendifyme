@@ -406,13 +406,22 @@ class BasiqConnector(BankConnector):
             response.raise_for_status()
             data = response.json()
 
+            logger.info(f"Basiq create_user response: {data}")
+
             user_data = data.get("data", {})
-            logger.info(f"Created Basiq user: {user_data.get('id')}")
+            logger.info(f"Extracted user_data: {user_data}")
+
+            # Try different possible response structures
+            user_id = user_data.get('id') or data.get('id')
+            user_email = user_data.get('email') or data.get('email')
+            created_at = user_data.get('createdAt') or data.get('createdAt')
+
+            logger.info(f"Created Basiq user with ID: {user_id}")
 
             return {
-                'id': user_data.get('id'),
-                'email': user_data.get('email'),
-                'created_at': user_data.get('createdAt')
+                'id': user_id,
+                'email': user_email,
+                'created_at': created_at
             }
 
         except requests.exceptions.RequestException as e:
