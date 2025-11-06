@@ -62,12 +62,16 @@ class BasiqConnector(BankConnector):
             ]
         }
 
-    def _get_access_token(self) -> str:
+    def _get_access_token(self, scope: str = "SERVER_ACCESS", user_id: Optional[str] = None) -> str:
         """
         Authenticate and get access token.
 
         Basiq uses OAuth 2.0 with client credentials flow.
         Tokens expire after 60 minutes, so we cache and reuse.
+
+        Args:
+            scope: Either "SERVER_ACCESS" (for backend API calls) or "CLIENT_ACCESS" (for consent UI)
+            user_id: Required when scope is "CLIENT_ACCESS" to bind token to specific user
 
         Returns:
             Access token string
@@ -75,10 +79,15 @@ class BasiqConnector(BankConnector):
         Raises:
             ValueError: If authentication fails
         """
-        # Return cached token if still valid
-        if self._access_token and self._token_expiry:
-            if datetime.now() < self._token_expiry:
-                return self._access_token
+        # For CLIENT_ACCESS tokens, don't cache (they're user-specific)
+        if scope == "CLIENT_ACCESS":
+            if not user_id:
+                raise ValueError("user_id is required for CLIENT_ACCESS tokens")
+        else:
+            # Return cached SERVER_ACCESS token if still valid
+            if self._access_token and self._token_expiry:
+                if datetime.now() < self._token_expiry:
+                    return self._access_token
 
         # Encode API key as Basic auth
         # Basiq expects: "Basic {base64(api_key:)}"
@@ -95,15 +104,20 @@ class BasiqConnector(BankConnector):
 
         headers = {
             "Authorization": f"Basic {encoded_auth}",
-            "Content-Type": "application/json",
+            "Content-Type": "application/x-www-form-urlencoded",
             "basiq-version": self.API_VERSION
         }
+
+        # Build form data
+        payload = {"scope": scope}
+        if user_id:
+            payload["userId"] = user_id
 
         try:
             response = requests.post(
                 f"{self.BASE_URL}/token",
                 headers=headers,
-                json={"scope": "SERVER_ACCESS"},
+                data=payload,  # Use form data, not JSON
                 timeout=15
             )
 
@@ -122,13 +136,16 @@ class BasiqConnector(BankConnector):
             response.raise_for_status()
             data = response.json()
 
-            self._access_token = data.get("access_token")
+            token = data.get("access_token")
 
-            # Tokens expire in 60 minutes, cache for 55 to be safe
-            self._token_expiry = datetime.now() + timedelta(minutes=55)
+            # Only cache SERVER_ACCESS tokens
+            if scope == "SERVER_ACCESS":
+                self._access_token = token
+                # Tokens expire in 60 minutes, cache for 55 to be safe
+                self._token_expiry = datetime.now() + timedelta(minutes=55)
 
-            logger.info("Successfully authenticated with Basiq API")
-            return self._access_token
+            logger.info(f"Successfully authenticated with Basiq API (scope: {scope})")
+            return token
 
         except requests.exceptions.RequestException as e:
             raise ConnectionError(f"Failed to authenticate with Basiq: {str(e)}")
@@ -427,66 +444,60 @@ class BasiqConnector(BankConnector):
         except requests.exceptions.RequestException as e:
             raise ConnectionError(f"Failed to fetch user: {str(e)}")
 
-    def create_consent_link(self, user_id: str, redirect_url: Optional[str] = None) -> dict:
+    def create_consent_link(self, user_id: str, redirect_url: Optional[str] = None,
+                           institution_id: Optional[str] = None) -> dict:
         """
         Generate a consent link for a user to connect their bank.
 
         This is the key method for seamless UX! After creating a user,
-        generate this link and either:
-        1. Redirect user to it (opens Basiq Connect UI)
-        2. Use Basiq Connect JS widget to embed it in your app
+        generate this link and redirect the user to it to connect their bank.
+
+        Basiq API v3.0 uses a CLIENT_ACCESS token bound to the user ID
+        to access the Consent UI at https://consent.basiq.io/home
 
         Args:
             user_id: Basiq user ID (from create_user)
             redirect_url: Optional URL to redirect back to after connection
                          (e.g., 'https://lendifyme.com/bank-connected')
+            institution_id: Optional institution ID to pre-select a specific bank
 
         Returns:
             Dict with:
             {
-                'consent_url': 'https://consent.basiq.io/...',
-                'token': 'consent-token'
+                'consent_url': 'https://consent.basiq.io/home?token=...',
+                'token': 'client-access-token'
             }
 
         Raises:
             ConnectionError: If API request fails
         """
-        payload = {
-            "scope": "TRANSACTION_DETAILS",  # Permission to read transactions
-            "userId": user_id
-        }
-
-        if redirect_url:
-            payload["redirectUrl"] = redirect_url
+        logger.info(f"Creating consent link for user {user_id}")
 
         try:
-            response = requests.post(
-                f"{self.BASE_URL}/consents",
-                headers=self._get_headers(),
-                json=payload,
-                timeout=15
-            )
+            # Get CLIENT_ACCESS token bound to this user
+            client_token = self._get_access_token(scope="CLIENT_ACCESS", user_id=user_id)
 
-            if response.status_code == 400:
-                error_data = response.json()
-                raise ValueError(f"Failed to create consent: {error_data}")
+            # Build consent UI URL
+            consent_url = f"https://consent.basiq.io/home?token={client_token}"
 
-            response.raise_for_status()
-            data = response.json()
+            # Add optional parameters
+            if institution_id:
+                consent_url += f"&institution={institution_id}"
 
-            # Extract consent URL from response
-            consent_data = data.get("data", {})
-            consent_url = consent_data.get("url")
-            consent_token = consent_data.get("id")
+            if redirect_url:
+                # URL-encode the redirect URL
+                from urllib.parse import quote
+                consent_url += f"&redirect_uri={quote(redirect_url)}"
 
             logger.info(f"Created consent link for user {user_id}")
 
             return {
                 'consent_url': consent_url,
-                'token': consent_token
+                'token': client_token
             }
 
-        except requests.exceptions.RequestException as e:
+        except Exception as e:
+            logger.error(f"Failed to create consent link: {str(e)}")
             raise ConnectionError(f"Failed to create consent link: {str(e)}")
 
     def get_user_connections(self, user_id: str) -> List[dict]:

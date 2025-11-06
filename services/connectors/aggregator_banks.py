@@ -133,18 +133,12 @@ class AggregatorBackedBank(BankConnector):
         # Use provided institution ID or class default
         inst_id = institution_id or self.BASIQ_INSTITUTION_ID
 
-        consent = self._basiq.create_consent_link(basiq_user_id, redirect_url)
-
-        # If we have a specific institution, we could modify the consent URL
-        # to pre-select that bank (Basiq may support this via query params)
-        if inst_id:
-            # Append institution filter to URL
-            consent_url = consent['consent_url']
-            if '?' in consent_url:
-                consent_url += f"&institution={inst_id}"
-            else:
-                consent_url += f"?institution={inst_id}"
-            consent['consent_url'] = consent_url
+        # Pass institution_id directly to Basiq connector (it now supports it)
+        consent = self._basiq.create_consent_link(
+            user_id=basiq_user_id,
+            redirect_url=redirect_url,
+            institution_id=inst_id
+        )
 
         return consent
 
