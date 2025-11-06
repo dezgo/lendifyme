@@ -493,6 +493,8 @@ class BasiqConnector(BankConnector):
             if institution_id:
                 consent_url += f"&institution={institution_id}"
                 logger.info(f"Pre-selecting institution: {institution_id}")
+            else:
+                logger.warning("No institution_id provided - user will see full bank list")
 
             if redirect_url:
                 # URL-encode the redirect URL
@@ -501,6 +503,7 @@ class BasiqConnector(BankConnector):
                 logger.info(f"Setting redirect URL: {redirect_url}")
 
             logger.info(f"Created consent link for user {user_id}: {consent_url}")
+            logger.info(f"Institution ID being used: {institution_id if institution_id else 'NONE - showing all banks'}")
 
             return {
                 'consent_url': consent_url,
