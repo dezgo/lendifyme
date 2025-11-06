@@ -6,6 +6,19 @@ from .base import BankConnector
 from .up_bank import UpBankConnector
 from .csv_connector import CSVConnector
 from .basiq import BasiqConnector
+from .aggregator_banks import (
+    CommBankConnector,
+    NABConnector,
+    WestpacConnector,
+    ANZConnector,
+    INGConnector,
+    MacquarieConnector,
+    BankOfMelbourneConnector,
+    BankSAConnector,
+    StGeorgeConnector,
+    BendigoBankConnector,
+    OtherBankConnector
+)
 from ..encryption import encrypt_credentials, decrypt_credentials, decrypt_credentials_with_password
 
 
@@ -13,9 +26,25 @@ class ConnectorRegistry:
     """Registry for managing bank connectors."""
 
     _connectors: Dict[str, Type[BankConnector]] = {
+        # Direct API connectors (user provides credentials)
         'up_bank': UpBankConnector,
-        'basiq': BasiqConnector,
-        'csv': CSVConnector,
+
+        # Aggregator-backed banks (OAuth flow, powered by Basiq behind the scenes)
+        'commbank': CommBankConnector,
+        'nab': NABConnector,
+        'westpac': WestpacConnector,
+        'anz': ANZConnector,
+        'ing': INGConnector,
+        'macquarie': MacquarieConnector,
+        'bank_of_melbourne': BankOfMelbourneConnector,
+        'banksa': BankSAConnector,
+        'stgeorge': StGeorgeConnector,
+        'bendigo': BendigoBankConnector,
+        'other_bank': OtherBankConnector,
+
+        # Legacy/admin connectors (not shown to users in bank selection)
+        'basiq': BasiqConnector,  # Direct Basiq access (for admin/testing)
+        'csv': CSVConnector,  # Manual CSV upload fallback
     }
 
     @classmethod
@@ -52,8 +81,8 @@ class ConnectorRegistry:
         """
         available = {}
         for connector_id, connector_class in cls._connectors.items():
-            # Skip CSV from "bank" connectors (it's always available)
-            if connector_id == 'csv':
+            # Skip legacy/admin connectors
+            if connector_id in ['csv', 'basiq']:
                 continue
 
             # Instantiate to get name (with dummy API key)
@@ -64,6 +93,53 @@ class ConnectorRegistry:
                 pass
 
         return available
+
+    @classmethod
+    def get_banks_for_selection(cls) -> List[dict]:
+        """
+        Get list of banks formatted for UI selection.
+
+        Returns banks grouped by type with auth method info.
+
+        Returns:
+            List of dicts:
+            [
+                {
+                    'id': 'up_bank',
+                    'name': 'Up Bank',
+                    'auth_type': 'api_key',  # or 'oauth'
+                    'description': 'Enter your API key',  # or 'Connect via secure login'
+                },
+                ...
+            ]
+        """
+        banks = []
+
+        for connector_id, connector_class in cls._connectors.items():
+            # Skip legacy/admin connectors
+            if connector_id in ['csv', 'basiq']:
+                continue
+
+            try:
+                instance = connector_class(api_key="dummy")
+                schema = connector_class.get_credential_schema()
+
+                auth_type = schema.get('auth_type', 'api_key')
+                if auth_type == 'api_key':
+                    description = 'Enter your API key'
+                else:
+                    description = 'Connect via secure login'
+
+                banks.append({
+                    'id': connector_id,
+                    'name': instance.connector_name,
+                    'auth_type': auth_type,
+                    'description': description
+                })
+            except Exception:
+                pass
+
+        return banks
 
     @classmethod
     def create_connector(cls, connector_id: str, **kwargs) -> Optional[BankConnector]:
@@ -84,36 +160,47 @@ class ConnectorRegistry:
         return connector_class(**kwargs)
 
     @classmethod
-    def create_from_env(cls, connector_id: str) -> Optional[BankConnector]:
+    def create_from_env(cls, connector_id: str, basiq_user_id: Optional[str] = None) -> Optional[BankConnector]:
         """
         Create a connector using environment variables for credentials.
 
         Expected environment variables:
         - UP_BANK_API_KEY for Up Bank
-        - Add more as needed for other banks
+        - BASIQ_API_KEY for all aggregator-backed banks (CommBank, NAB, etc.)
 
         Args:
             connector_id: Connector identifier
+            basiq_user_id: Optional Basiq user ID for aggregator-backed banks
 
         Returns:
             Connector instance or None if credentials not found
         """
+        # Direct API connectors (user provides credentials)
         if connector_id == 'up_bank':
             api_key = os.getenv('UP_BANK_API_KEY')
             if not api_key:
                 return None
             return UpBankConnector(api_key=api_key)
 
+        # Aggregator-backed banks (all use BASIQ_API_KEY)
+        elif connector_id in ['commbank', 'nab', 'westpac', 'anz', 'ing', 'macquarie',
+                             'bank_of_melbourne', 'banksa', 'stgeorge', 'bendigo', 'other_bank']:
+            api_key = os.getenv('BASIQ_API_KEY')
+            if not api_key:
+                return None
+
+            connector_class = cls.get_connector_class(connector_id)
+            if not connector_class:
+                return None
+
+            return connector_class(api_key=api_key, basiq_user_id=basiq_user_id)
+
+        # Direct Basiq connector (for admin/testing)
         elif connector_id == 'basiq':
             api_key = os.getenv('BASIQ_API_KEY')
             if not api_key:
                 return None
             return BasiqConnector(api_key=api_key)
-
-        # Add more connectors here as they're implemented
-        # elif connector_id == 'commonwealth_bank':
-        #     api_key = os.getenv('CBA_API_KEY')
-        #     ...
 
         return None
 
