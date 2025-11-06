@@ -239,6 +239,27 @@ class BendigoBankConnector(AggregatorBackedBank):
     BASIQ_INSTITUTION_ID = "AU00101"  # Bendigo and Adelaide Bank Limited
 
 
+class BankwestConnector(AggregatorBackedBank):
+    """Bankwest connector (backed by Basiq)."""
+    BANK_NAME = "Bankwest"
+    BANK_SHORT_NAME = "Bankwest"
+    BASIQ_INSTITUTION_ID = "AU00401"  # Bankwest Bank (a subsidiary of Commonwealth Bank)
+
+
+class RAMSConnector(AggregatorBackedBank):
+    """RAMS connector (backed by Basiq)."""
+    BANK_NAME = "RAMS"
+    BANK_SHORT_NAME = "RAMS"
+    BASIQ_INSTITUTION_ID = "AU11301"  # RAMS (a subsidiary of Westpac)
+
+
+class SuncorpConnector(AggregatorBackedBank):
+    """Suncorp Bank connector (backed by Basiq)."""
+    BANK_NAME = "Suncorp Bank"
+    BANK_SHORT_NAME = "Suncorp"
+    BASIQ_INSTITUTION_ID = "AU01101"  # Suncorp Bank
+
+
 class OtherBankConnector(AggregatorBackedBank):
     """
     Generic connector for any other bank supported by Basiq.

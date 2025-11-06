@@ -17,6 +17,9 @@ from .aggregator_banks import (
     BankSAConnector,
     StGeorgeConnector,
     BendigoBankConnector,
+    BankwestConnector,
+    RAMSConnector,
+    SuncorpConnector,
     OtherBankConnector
 )
 from ..encryption import encrypt_credentials, decrypt_credentials, decrypt_credentials_with_password
@@ -40,6 +43,9 @@ class ConnectorRegistry:
         'banksa': BankSAConnector,
         'stgeorge': StGeorgeConnector,
         'bendigo': BendigoBankConnector,
+        'bankwest': BankwestConnector,
+        'rams': RAMSConnector,
+        'suncorp': SuncorpConnector,
         'other_bank': OtherBankConnector,
 
         # Legacy/admin connectors (not shown to users in bank selection)
