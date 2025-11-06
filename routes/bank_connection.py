@@ -475,6 +475,7 @@ def disconnect_bank():
 @login_required
 def debug_connections():
     """Debug endpoint to see raw connection data from Basiq."""
+    import requests
     user_id = get_current_user_id()
     user = get_user_info(user_id)
 
@@ -482,21 +483,39 @@ def debug_connections():
         return jsonify({'error': 'No Basiq user ID found'})
 
     try:
-        # Create connector
+        # Create connector to get auth token
         connector = ConnectorRegistry.create_from_env('other_bank', basiq_user_id=user['basiq_user_id'])
         if not connector:
             return jsonify({'error': 'Could not create connector'})
 
-        # Get raw connections
+        # Make direct API call to see raw response
+        basiq_connector = connector._basiq
+        token = basiq_connector._get_access_token()
+
+        response = requests.get(
+            f"https://au-api.basiq.io/users/{user['basiq_user_id']}/connections",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+                "basiq-version": "3.0"
+            },
+            timeout=15
+        )
+
+        raw_data = response.json() if response.status_code == 200 else {'error': response.text}
+
+        # Also get parsed connections
         connections = connector.get_user_connections(user['basiq_user_id'])
 
         return jsonify({
             'basiq_user_id': user['basiq_user_id'],
-            'connection_count': len(connections),
-            'connections': connections
+            'raw_api_response': raw_data,
+            'parsed_connections': connections,
+            'connection_count': len(connections)
         })
     except Exception as e:
-        return jsonify({'error': str(e)})
+        import traceback
+        return jsonify({'error': str(e), 'traceback': traceback.format_exc()})
 
 
 @bp.route('/bank-status')
