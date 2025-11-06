@@ -384,9 +384,18 @@ def match_transactions():
         try:
             connector_class = ConnectorRegistry.get_connector_class(connected_bank['bank_id'])
             if connector_class:
-                instance = connector_class(api_key="dummy")
+                # Get credential schema to determine instantiation method
+                schema = connector_class.get_credential_schema()
+                if schema.get('auth_type') == 'oauth':
+                    # OAuth banks need basiq_user_id parameter
+                    instance = connector_class(api_key="dummy", basiq_user_id=None)
+                else:
+                    # API key banks just need api_key
+                    instance = connector_class(api_key="dummy")
                 connected_bank_name = instance.connector_name
-        except:
+        except Exception as e:
+            from flask import current_app as app
+            app.logger.error(f"Failed to get connected bank name: {e}")
             pass
 
     return render_template("match_upload.html",
