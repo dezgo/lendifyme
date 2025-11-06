@@ -550,31 +550,52 @@ class BasiqConnector(BankConnector):
             response.raise_for_status()
             data = response.json()
 
-            # Log raw response for debugging
-            logger.info(f"Raw connections API response: {data}")
-
             connections = []
             for item in data.get("data", []):
-                logger.info(f"Processing connection item: {item}")
+                # In Basiq API v3.0, fields are directly on the item, not nested in "attributes"
+                institution_data = item.get("institution", {})
+                institution_id = institution_data.get("id")
 
-                attributes = item.get("attributes", {})
-                logger.info(f"Attributes: {attributes}")
+                # Fetch institution details to get the actual bank name
+                institution_name = "Unknown"
+                institution_short_name = ""
+                institution_logo = ""
 
-                institution = attributes.get("institution", {})
-                logger.info(f"Institution: {institution}")
+                if institution_id:
+                    try:
+                        inst_response = requests.get(
+                            f"{self.BASE_URL}/institutions/{institution_id}",
+                            headers=self._get_headers(),
+                            timeout=10
+                        )
+                        if inst_response.status_code == 200:
+                            inst_data = inst_response.json()
+                            institution_name = inst_data.get('name', f'Institution {institution_id}')
+                            institution_short_name = inst_data.get('shortName', '')
+
+                            # Extract logo URL from nested structure
+                            logo_obj = inst_data.get('logo', {})
+                            if isinstance(logo_obj, dict):
+                                links = logo_obj.get('links', {})
+                                institution_logo = links.get('square', '') or links.get('full', '')
+                    except Exception as e:
+                        logger.warning(f"Could not fetch institution details for {institution_id}: {e}")
+                        institution_name = f"Institution {institution_id}"
 
                 connections.append({
                     'id': item.get('id'),
                     'institution': {
-                        'name': institution.get('name', 'Unknown'),
-                        'short_name': institution.get('shortName', ''),
-                        'logo': institution.get('logo', '')
+                        'id': institution_id,
+                        'name': institution_name,
+                        'short_name': institution_short_name,
+                        'logo': institution_logo
                     },
-                    'status': attributes.get('status'),
-                    'last_used': attributes.get('lastUsed'),
-                    'created_at': attributes.get('createdAt')
+                    'status': item.get('status'),  # Directly on item, not in attributes
+                    'last_used': item.get('lastUsed'),  # Note: different field name
+                    'created_at': item.get('createdDate')  # Note: different field name
                 })
 
+            logger.info(f"Parsed {len(connections)} connections from Basiq API")
             return connections
 
         except requests.exceptions.RequestException as e:
