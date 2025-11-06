@@ -492,13 +492,15 @@ class BasiqConnector(BankConnector):
             # Add optional parameters
             if institution_id:
                 consent_url += f"&institution={institution_id}"
+                logger.info(f"Pre-selecting institution: {institution_id}")
 
             if redirect_url:
                 # URL-encode the redirect URL
                 from urllib.parse import quote
                 consent_url += f"&redirect_uri={quote(redirect_url)}"
+                logger.info(f"Setting redirect URL: {redirect_url}")
 
-            logger.info(f"Created consent link for user {user_id}")
+            logger.info(f"Created consent link for user {user_id}: {consent_url}")
 
             return {
                 'consent_url': consent_url,
