@@ -74,13 +74,27 @@ def main():
         # Look for specific banks we're using
         print("\n\nBANKS WE'RE USING IN LENDIFYME:")
         print("-" * 80)
-        target_banks = [
-            "Commonwealth Bank", "NAB", "Westpac", "ANZ", "ING",
-            "Macquarie", "Bank of Melbourne", "BankSA", "St.George", "Bendigo Bank"
-        ]
 
-        for target in target_banks:
-            matches = [i for i in institutions if target.lower() in i['name'].lower()]
+        # Map target names to search criteria (check shortName or specific name patterns)
+        target_banks = {
+            "Commonwealth Bank": lambda i: "commonwealth bank" in i['name'].lower(),
+            "NAB": lambda i: i['short_name'] == "NAB" or "national australia bank" in i['name'].lower(),
+            "Westpac": lambda i: i['short_name'] == "Westpac" or (
+                "westpac" in i['name'].lower() and "new zealand" not in i['name'].lower()
+            ),
+            "ANZ": lambda i: i['short_name'] == "ANZ" or (
+                "australia and new zealand" in i['name'].lower() and "new zealand" not in i['id']
+            ),
+            "ING": lambda i: i['short_name'] == "ING" or i['name'].startswith("ING "),
+            "Macquarie": lambda i: "macquarie" in i['name'].lower() and "business" not in i['name'].lower(),
+            "Bank of Melbourne": lambda i: "bank of melbourne" in i['name'].lower(),
+            "BankSA": lambda i: "banksa" in i['name'].lower(),
+            "St.George": lambda i: "st. george" in i['name'].lower() or "st.george" in i['name'].lower(),
+            "Bendigo Bank": lambda i: "bendigo" in i['name'].lower() and "adelaide" in i['name'].lower()
+        }
+
+        for target, match_func in target_banks.items():
+            matches = [i for i in institutions if match_func(i)]
             if matches:
                 for match in matches:
                     print(f"{target:20} -> ID: {match['id']:15} | Full name: {match['name']}")
