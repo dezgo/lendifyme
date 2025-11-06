@@ -33,7 +33,18 @@ class BasiqConnector(BankConnector):
 
         Args:
             api_key: Basiq API key (get from https://dashboard.basiq.io)
+                    Can be either raw UUID or base64-encoded format
         """
+        # Basiq sometimes gives base64-encoded API keys
+        # If the key is base64 encoded (ends with = or ==), decode it first
+        if api_key.endswith('==') or api_key.endswith('='):
+            try:
+                decoded_key = base64.b64decode(api_key).decode('utf-8')
+                logger.info("Decoded base64-encoded Basiq API key")
+                api_key = decoded_key
+            except Exception as e:
+                logger.warning(f"Failed to decode API key, using as-is: {e}")
+
         super().__init__(api_key)
         self._access_token = None
         self._token_expiry = None
