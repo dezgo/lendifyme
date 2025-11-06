@@ -358,6 +358,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 31:
+        try:
+            migrate_v31_add_bank_connection_fields(conn)
+            _set_user_version(conn, 31)
+            conn.commit()
+            print("✅ Migration v31 applied.")
+        except Exception as e:
+            print(f"❌ Migration v31 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -1695,3 +1708,31 @@ def migrate_v30_feedback_throttle(conn):
     """)
     conn.commit()
     print("  Created feedback throttle table with indexes.")
+
+
+def migrate_v31_add_bank_connection_fields(conn):
+    """
+    Add fields to users table for bank connection tracking.
+
+    Enables users to connect their banks (Up Bank, CommBank, NAB, etc.)
+    for automatic transaction matching.
+    """
+    c = conn.cursor()
+
+    # Add basiq_user_id for OAuth bank connections (all banks except Up)
+    c.execute("""
+        ALTER TABLE users ADD COLUMN basiq_user_id TEXT
+    """)
+
+    # Add connected_bank to track which bank connector user is using
+    c.execute("""
+        ALTER TABLE users ADD COLUMN connected_bank TEXT
+    """)
+
+    # Add encrypted credentials for API-key based banks (like Up Bank)
+    c.execute("""
+        ALTER TABLE users ADD COLUMN bank_credentials_encrypted TEXT
+    """)
+
+    conn.commit()
+    print("  Added bank connection fields: basiq_user_id, connected_bank, bank_credentials_encrypted")

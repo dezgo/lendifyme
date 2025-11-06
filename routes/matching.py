@@ -99,6 +99,27 @@ def filter_duplicate_transactions(matches):
 matching_bp = Blueprint('matching', __name__, url_prefix='/match')
 
 
+def get_user_connected_bank():
+    """Get user's connected bank info (from simplified bank connection system)."""
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("""
+        SELECT connected_bank, basiq_user_id, bank_credentials_encrypted
+        FROM users
+        WHERE id = ?
+    """, (get_current_user_id(),))
+    result = c.fetchone()
+    conn.close()
+
+    if result and result[0]:
+        return {
+            'bank_id': result[0],
+            'basiq_user_id': result[1],
+            'credentials_encrypted': result[2]
+        }
+    return None
+
+
 @matching_bp.route("", methods=["GET", "POST"])
 @login_required
 def match_transactions():
@@ -112,8 +133,58 @@ def match_transactions():
         connector = None
         transactions = []
 
-        # Check if trying to use bank API without access
-        if import_source != "csv" and not has_feature(get_current_user_id(), 'bank_api'):
+        # Check if using the simplified connected bank system
+        if import_source == "connected_bank":
+            connected_bank = get_user_connected_bank()
+
+            if not connected_bank:
+                flash("No bank connected. Please connect your bank first.", "error")
+                return redirect("/connect-bank")
+
+            # Check if trying to use bank API without access
+            if not has_feature(get_current_user_id(), 'bank_api'):
+                flash("Bank API connections are only available on the Pro plan. Upgrade to access this feature!", "error")
+                return redirect("/pricing")
+
+            try:
+                bank_id = connected_bank['bank_id']
+                basiq_user_id = connected_bank.get('basiq_user_id')
+                credentials_encrypted = connected_bank.get('credentials_encrypted')
+
+                # For API key banks (like Up Bank), decrypt credentials
+                if credentials_encrypted:
+                    from services.encryption import decrypt_credentials
+                    import os
+                    encryption_key = os.getenv('ENCRYPTION_KEY')
+                    creds = decrypt_credentials(credentials_encrypted, encryption_key)
+                    connector = ConnectorRegistry.create_connector(bank_id, api_key=creds['api_key'])
+                # For OAuth banks, use Basiq user ID
+                elif basiq_user_id:
+                    connector = ConnectorRegistry.create_from_env(bank_id, basiq_user_id=basiq_user_id)
+                else:
+                    flash("Bank connection misconfigured", "error")
+                    return redirect("/connect-bank")
+
+                if not connector:
+                    flash("Failed to create bank connector", "error")
+                    return redirect("/connect-bank")
+
+                # Get transactions
+                since_date = request.form.get("since_date")
+                if not since_date:
+                    # Default to last 30 days
+                    from datetime import datetime, timedelta
+                    since_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+
+                all_transactions = connector.get_incoming_transactions(since_date=since_date)
+                transactions = all_transactions
+
+            except Exception as e:
+                flash(f"Error fetching transactions: {str(e)}", "error")
+                return redirect("/match")
+
+        # Check if trying to use bank API without access (for old bank_connections system)
+        elif import_source != "csv" and not has_feature(get_current_user_id(), 'bank_api'):
             flash("Bank API connections are only available on the Pro plan. Upgrade to access this feature!", "error")
             return redirect("/pricing")
 
@@ -306,10 +377,24 @@ def match_transactions():
     user_connections = ConnectorRegistry.get_user_connections(get_db_path(), user_id) if has_bank_api_access else []
     tier = get_user_subscription_tier(user_id)
 
+    # Get user's connected bank (from simplified system)
+    connected_bank = get_user_connected_bank()
+    connected_bank_name = None
+    if connected_bank:
+        try:
+            connector_class = ConnectorRegistry.get_connector_class(connected_bank['bank_id'])
+            if connector_class:
+                instance = connector_class(api_key="dummy")
+                connected_bank_name = instance.connector_name
+        except:
+            pass
+
     return render_template("match_upload.html",
                          user_connections=user_connections,
                          has_bank_api=has_bank_api_access,
-                         current_tier=tier)
+                         current_tier=tier,
+                         connected_bank=connected_bank,
+                         connected_bank_name=connected_bank_name)
 
 
 @matching_bp.route("/review")

@@ -178,6 +178,12 @@ app.register_blueprint(subscription_bp)
 app.logger.info("Registered subscription blueprint")
 print("✅ Registered subscription blueprint")
 
+# Bank connection routes blueprint
+from routes.bank_connection import bp as bank_connection_bp
+app.register_blueprint(bank_connection_bp)
+app.logger.info("Registered bank connection blueprint")
+print("✅ Registered bank connection blueprint")
+
 # Register analytics route separately (at /analytics, not /admin/analytics)
 @app.route("/analytics")
 @admin_required_decorator

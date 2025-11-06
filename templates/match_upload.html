@@ -140,6 +140,32 @@ label {
     <h2>Choose Import Method</h2>
 
     <div class="connector-options">
+        <!-- Simplified Connected Bank (new system) -->
+        {% if connected_bank %}
+            <div class="connector-option" data-connector="connected_bank">
+                <label class="connector-label">
+                    <input type="radio" name="import_source" value="connected_bank" required>
+                    {{ connected_bank_name }}
+                </label>
+                <div class="connector-description">
+                    ✓ Connected • Fetch latest transactions
+                </div>
+            </div>
+        {% elif not has_bank_api %}
+            <!-- Show Connect Bank option for free users -->
+            <div class="connector-option" style="border-color: #28a745; background: #d4edda; cursor: default;">
+                <div style="color: #155724;">
+                    <strong>Connect Your Bank</strong>
+                    <p style="margin: 0.5rem 0 0 0; font-size: 0.9rem;">
+                        Connect your bank (Up, CommBank, NAB, etc.) for automatic transaction import.
+                    </p>
+                    <p style="margin: 0.5rem 0 0 0;">
+                        <a href="/connect-bank" style="color: #28a745; font-weight: bold;">Connect Bank →</a>
+                    </p>
+                </div>
+            </div>
+        {% endif %}
+
         <!-- User's Bank Connections -->
         {% if has_bank_api %}
             {% if user_connections %}
