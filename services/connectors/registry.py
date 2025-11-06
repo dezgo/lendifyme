@@ -5,6 +5,7 @@ from typing import Dict, Type, Optional, List
 from .base import BankConnector
 from .up_bank import UpBankConnector
 from .csv_connector import CSVConnector
+from .basiq import BasiqConnector
 from ..encryption import encrypt_credentials, decrypt_credentials, decrypt_credentials_with_password
 
 
@@ -13,6 +14,7 @@ class ConnectorRegistry:
 
     _connectors: Dict[str, Type[BankConnector]] = {
         'up_bank': UpBankConnector,
+        'basiq': BasiqConnector,
         'csv': CSVConnector,
     }
 
@@ -102,6 +104,12 @@ class ConnectorRegistry:
                 return None
             return UpBankConnector(api_key=api_key)
 
+        elif connector_id == 'basiq':
+            api_key = os.getenv('BASIQ_API_KEY')
+            if not api_key:
+                return None
+            return BasiqConnector(api_key=api_key)
+
         # Add more connectors here as they're implemented
         # elif connector_id == 'commonwealth_bank':
         #     api_key = os.getenv('CBA_API_KEY')
@@ -186,6 +194,8 @@ class ConnectorRegistry:
             # Create connector instance
             if connector_type == 'up_bank':
                 return UpBankConnector(api_key=credentials['api_key'])
+            elif connector_type == 'basiq':
+                return BasiqConnector(api_key=credentials['api_key'])
             # Add more connector types here
             # elif connector_type == 'plaid':
             #     return PlaidConnector(access_token=credentials['access_token'])
