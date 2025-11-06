@@ -130,10 +130,15 @@ class AggregatorBackedBank(BankConnector):
         Returns:
             {'consent_url': '...', 'token': '...'}
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"AggregatorBackedBank.create_consent_link called with basiq_user_id={basiq_user_id}, institution_id={institution_id}")
+
         # Use provided institution ID or class default
         inst_id = institution_id or self.BASIQ_INSTITUTION_ID
 
         # Pass institution_id directly to Basiq connector (it now supports it)
+        logger.info(f"Calling Basiq connector with user_id={basiq_user_id}, inst_id={inst_id}")
         consent = self._basiq.create_consent_link(
             user_id=basiq_user_id,
             redirect_url=redirect_url,
