@@ -233,6 +233,33 @@ def connect_bank_oauth(bank_id):
         flash('Failed to get or create Basiq user ID', 'error')
         return redirect(url_for('bank_connection.connect_bank'))
 
+    # Check if user already has a connection for this bank
+    try:
+        existing_connections = connector.get_user_connections(basiq_user_id)
+        connected_statuses = ['active', 'available']
+
+        if existing_connections:
+            current_app.logger.info(f"User already has {len(existing_connections)} connection(s)")
+            for conn in existing_connections:
+                current_app.logger.info(f"  - Status: {conn.get('status')}, Institution: {conn.get('institution', {}).get('name')}")
+
+            # If already connected, update DB and redirect to success
+            if any(c['status'] in connected_statuses for c in existing_connections):
+                current_app.logger.info("User already has active connection, skipping consent flow")
+
+                # Update database
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute("UPDATE users SET connected_bank = ? WHERE id = ?", (bank_id, user_id))
+                conn.commit()
+                conn.close()
+
+                flash(f"Your {connector.connector_name} account is already connected!", 'success')
+                return redirect(url_for('match'))
+    except Exception as e:
+        current_app.logger.warning(f"Could not check existing connections: {e}")
+        # Continue with consent flow if check fails
+
     # Generate consent link for this specific bank
     try:
         current_app.logger.info(f"Creating consent link for basiq_user_id: {basiq_user_id}")
@@ -274,10 +301,16 @@ def check_connection_status(bank_id):
         connections = connector.get_user_connections(user['basiq_user_id'])
         current_app.logger.info(f"Check connection status for {bank_id}: found {len(connections)} connections")
 
-        # Check if there's an active connection for this bank
-        has_active = any(c['status'] == 'active' for c in connections)
+        # Log detailed connection info
+        for i, conn in enumerate(connections):
+            current_app.logger.info(f"Connection {i+1}: status={conn.get('status')}, institution={conn.get('institution', {}).get('name')}, id={conn.get('id')}")
 
-        if has_active:
+        # Check connection status - treat "active" and "available" as connected
+        # Basiq statuses: active, available, pending, credentials-invalid, unavailable
+        connected_statuses = ['active', 'available']
+        has_connection = any(c['status'] in connected_statuses for c in connections)
+
+        if has_connection:
             # Store the connection
             conn = get_db_connection()
             c = conn.cursor()
@@ -285,24 +318,30 @@ def check_connection_status(bank_id):
             conn.commit()
             conn.close()
 
-            log_event('bank_connected', {'bank': bank_id, 'auth_type': 'oauth'})
+            # Get the connected connection
+            connected_conn = next((c for c in connections if c['status'] in connected_statuses), connections[0])
+
+            log_event('bank_connected', {'bank': bank_id, 'auth_type': 'oauth', 'status': connected_conn['status']})
 
             return jsonify({
                 'connected': True,
                 'bank_name': connector.connector_name,
-                'institution': connections[0]['institution']['name'] if connections else None
+                'institution': connected_conn['institution']['name'] if connected_conn.get('institution') else None,
+                'status': connected_conn['status']
             })
         else:
-            # Check if connection is pending
+            # Check if connection is pending or invalid
             has_pending = any(c['status'] in ['pending', 'credentials-invalid'] for c in connections)
             if has_pending:
+                pending_conn = next(c for c in connections if c['status'] in ['pending', 'credentials-invalid'])
                 return jsonify({
                     'connected': False,
                     'pending': True,
-                    'message': 'Connection is pending or credentials are invalid'
+                    'message': f"Connection status: {pending_conn['status']}. Please try again or check credentials.",
+                    'status': pending_conn['status']
                 })
 
-            return jsonify({'connected': False, 'message': 'No active connection found'})
+            return jsonify({'connected': False, 'message': 'No active connection found', 'connections_found': len(connections)})
 
     except Exception as e:
         current_app.logger.error(f"Error checking connection status: {str(e)}")
@@ -344,9 +383,15 @@ def bank_connected(bank_id):
     try:
         current_app.logger.info(f"Fetching connections for basiq_user_id: {user['basiq_user_id']}")
         connections = connector.get_user_connections(user['basiq_user_id'])
-        current_app.logger.info(f"Found {len(connections)} connections: {connections}")
+        current_app.logger.info(f"Found {len(connections)} connections")
 
-        if connections and any(c['status'] == 'active' for c in connections):
+        # Log each connection's status
+        for conn in connections:
+            current_app.logger.info(f"  - Connection: status={conn.get('status')}, institution={conn.get('institution', {}).get('name')}")
+
+        # Check for active or available connections
+        connected_statuses = ['active', 'available']
+        if connections and any(c['status'] in connected_statuses for c in connections):
             # Store which bank they connected
             conn = get_db_connection()
             c = conn.cursor()
