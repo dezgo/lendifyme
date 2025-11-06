@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bank Connection {% if success %}Complete{% else %}Failed{% endif %}</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
+            background: {% if success %}#e7f5e7{% else %}#f8d7da{% endif %};
+        }
+        .message {
+            text-align: center;
+            padding: 2rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            max-width: 400px;
+        }
+        .icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+        .success-icon { color: #28a745; }
+        .error-icon { color: #dc3545; }
+        h1 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.5rem;
+            color: #333;
+        }
+        p {
+            color: #666;
+            margin: 0;
+        }
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto 0;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="message">
+        {% if success %}
+            <div class="icon success-icon">✓</div>
+            <h1>Bank Connected!</h1>
+            <p>Your bank has been successfully connected.</p>
+        {% else %}
+            <div class="icon error-icon">✗</div>
+            <h1>Connection Failed</h1>
+            <p>{{ error or 'Unable to connect your bank. Please try again.' }}</p>
+        {% endif %}
+        <div class="spinner"></div>
+        <p style="margin-top: 1rem; font-size: 0.9rem; color: #999;">Closing...</p>
+    </div>
+
+    <script>
+        // Close the popup window after a short delay
+        setTimeout(function() {
+            window.close();
+
+            // If window.close() didn't work (some browsers block it),
+            // try to tell the parent window
+            if (window.opener && !window.closed) {
+                window.opener.postMessage('bankConnectionComplete', '*');
+                // Try closing again
+                setTimeout(function() {
+                    window.close();
+                }, 500);
+            }
+        }, 1500);
+    </script>
+</body>
+</html>

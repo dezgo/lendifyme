@@ -281,8 +281,31 @@ function connectBank(bankId, authType, bankName) {
         document.getElementById('apiKeyInput').value = '';
         document.getElementById('apiKeyModal').style.display = 'block';
     } else {
-        // Redirect to OAuth flow
-        window.location.href = '/connect-bank/' + bankId + '/oauth';
+        // Open OAuth flow in popup window
+        const width = 600;
+        const height = 700;
+        const left = (screen.width - width) / 2;
+        const top = (screen.height - height) / 2;
+
+        const popup = window.open(
+            '/connect-bank/' + bankId + '/oauth',
+            'BankConnection',
+            `width=${width},height=${height},left=${left},top=${top},resizable=yes,scrollbars=yes`
+        );
+
+        if (popup) {
+            // Check if popup closed every 500ms
+            const checkPopup = setInterval(() => {
+                if (popup.closed) {
+                    clearInterval(checkPopup);
+                    // Reload page to show connection status
+                    console.log('Bank connection popup closed, reloading...');
+                    window.location.reload();
+                }
+            }, 500);
+        } else {
+            alert('Please allow popups for this site to connect your bank');
+        }
     }
 }
 

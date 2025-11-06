@@ -297,13 +297,29 @@ def bank_connected(bank_id):
             })
 
             flash(f"Successfully connected {connector.connector_name}!", 'success')
+
+            # Check if opened in popup (for OAuth flow)
+            if request.args.get('popup') or 'popup' in request.referrer if request.referrer else False:
+                # Return HTML that closes the popup
+                return render_template('bank_connected_popup.html', success=True)
+
             return redirect(url_for('match'))
         else:
             flash("Connection failed or was cancelled. Please try again.", 'error')
+
+            # Check if opened in popup
+            if request.args.get('popup') or ('popup' in request.referrer if request.referrer else False):
+                return render_template('bank_connected_popup.html', success=False, error='Connection failed or was cancelled')
+
             return redirect(url_for('bank_connection.connect_bank'))
 
     except Exception as e:
         flash(f"Failed to verify connection: {str(e)}", 'error')
+
+        # Check if opened in popup
+        if request.args.get('popup') or ('popup' in request.referrer if request.referrer else False):
+            return render_template('bank_connected_popup.html', success=False, error=str(e))
+
         return redirect(url_for('bank_connection.connect_bank'))
 
 
