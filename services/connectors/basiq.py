@@ -99,6 +99,15 @@ class BasiqConnector(BankConnector):
             if response.status_code == 401:
                 raise ValueError("Authentication failed. Check your Basiq API key.")
 
+            if response.status_code == 400:
+                # Log the actual error from Basiq
+                try:
+                    error_detail = response.json()
+                    logger.error(f"Basiq 400 error: {error_detail}")
+                    raise ValueError(f"Bad request to Basiq API. Response: {error_detail}")
+                except:
+                    raise ValueError(f"Bad request to Basiq API. Status: {response.status_code}, Response: {response.text}")
+
             response.raise_for_status()
             data = response.json()
 
