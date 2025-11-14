@@ -120,6 +120,13 @@ h1 {
             <button id="end-btn" class="btn btn-danger" style="display: none;">End Session</button>
         </div>
     </div>
+
+    <!-- Preview of what's being shared -->
+    <div class="support-card" id="preview-container" style="display: none;">
+        <h3>Preview: What the agent sees</h3>
+        <p style="color: #666; margin-bottom: 1rem;">This is what the agent is currently viewing:</p>
+        <video id="preview-video" autoplay muted playsinline style="width: 100%; border-radius: 8px; background: #000;"></video>
+    </div>
 </div>
 
 <!-- Socket.IO Client -->
@@ -197,11 +204,24 @@ function requestSupport() {
 
 async function shareScreen() {
     try {
+        // Show helpful instructions
+        alert('⚠️ IMPORTANT: When selecting what to share, make sure to select THIS TAB (your loan dashboard), NOT the admin support dashboard!\n\nLook for the tab that shows your loans.');
+
         // Request screen sharing
+        console.log('Requesting screen share...');
         localStream = await navigator.mediaDevices.getDisplayMedia({
             video: { cursor: "always" },
             audio: false
         });
+
+        console.log('Screen share granted. Stream:', localStream);
+        console.log('Video tracks:', localStream.getVideoTracks());
+
+        // Show preview of what's being shared
+        const previewVideo = document.getElementById('preview-video');
+        const previewContainer = document.getElementById('preview-container');
+        previewVideo.srcObject = localStream;
+        previewContainer.style.display = 'block';
 
         updateStatus('connected', 'Screen sharing active - Agent can see your screen');
 
@@ -214,12 +234,14 @@ async function shareScreen() {
 
         // Add screen share track to peer connection
         localStream.getTracks().forEach(track => {
+            console.log('Adding track to peer connection:', track);
             peerConnection.addTrack(track, localStream);
         });
 
         // Handle ICE candidates
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
+                console.log('Sending ICE candidate:', event.candidate);
                 socket.emit('webrtc_ice_candidate', {
                     candidate: event.candidate
                 });
@@ -231,12 +253,15 @@ async function shareScreen() {
             updateStatus('connected', 'Screen sharing stopped');
             shareBtn.disabled = false;
             shareBtn.textContent = 'Share My Screen';
+            previewContainer.style.display = 'none';
         };
 
         // Create and send offer
+        console.log('Creating WebRTC offer...');
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
 
+        console.log('Sending offer to agent:', offer);
         socket.emit('webrtc_offer', {
             offer: offer
         });
@@ -246,7 +271,11 @@ async function shareScreen() {
 
     } catch (err) {
         console.error('Error sharing screen:', err);
-        updateStatus('connected', 'Failed to share screen. Please try again.');
+        if (err.name === 'NotAllowedError') {
+            updateStatus('connected', 'Screen sharing cancelled. Click "Share My Screen" to try again.');
+        } else {
+            updateStatus('connected', 'Failed to share screen. Please try again.');
+        }
     }
 }
 

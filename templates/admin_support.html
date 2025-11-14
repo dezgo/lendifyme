@@ -338,7 +338,8 @@ function joinSession(userId) {
 }
 
 async function handleOffer(userId, offer) {
-    console.log('Handling offer from user', userId);
+    console.log('=== ADMIN: Handling offer from user', userId, '===');
+    console.log('Offer SDP:', offer);
 
     // Create peer connection for this user
     const peerConnection = new RTCPeerConnection({
@@ -348,24 +349,53 @@ async function handleOffer(userId, offer) {
     });
 
     peerConnections[userId] = peerConnection;
+    console.log('Created peer connection for user', userId);
 
     // Handle ICE candidates
     peerConnection.onicecandidate = (event) => {
         if (event.candidate) {
+            console.log('ADMIN: Sending ICE candidate:', event.candidate);
             socket.emit('webrtc_ice_candidate', {
                 candidate: event.candidate,
                 user_id: userId
             });
+        } else {
+            console.log('ADMIN: All ICE candidates sent');
         }
+    };
+
+    // Handle connection state changes
+    peerConnection.onconnectionstatechange = () => {
+        console.log('ADMIN: Connection state:', peerConnection.connectionState);
+    };
+
+    peerConnection.oniceconnectionstatechange = () => {
+        console.log('ADMIN: ICE connection state:', peerConnection.iceConnectionState);
     };
 
     // Handle incoming stream
     peerConnection.ontrack = (event) => {
-        console.log('Received stream from user', userId);
+        console.log('ADMIN: ✅ Received track from user', userId);
+        console.log('Stream:', event.streams[0]);
+        console.log('Track:', event.track);
+        console.log('Track kind:', event.track.kind);
+        console.log('Track settings:', event.track.getSettings());
+
         const videoContainer = document.getElementById(`video-${userId}`);
         const video = videoContainer.querySelector('video');
+
+        console.log('Setting video srcObject...');
         video.srcObject = event.streams[0];
         videoContainer.classList.add('active');
+
+        // Verify video is playing
+        video.onloadedmetadata = () => {
+            console.log('Video metadata loaded. Dimensions:', video.videoWidth, 'x', video.videoHeight);
+        };
+
+        video.onplay = () => {
+            console.log('Video started playing');
+        };
 
         // Update status
         const sessionCard = document.querySelector(`.session-card[data-user-id="${userId}"]`);
@@ -376,11 +406,15 @@ async function handleOffer(userId, offer) {
     };
 
     // Set remote description and create answer
+    console.log('ADMIN: Setting remote description...');
     await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    console.log('ADMIN: Creating answer...');
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
+    console.log('ADMIN: Answer created:', answer);
 
     // Send answer back to user
+    console.log('ADMIN: Sending answer to user', userId);
     socket.emit('webrtc_answer', {
         answer: answer,
         user_id: userId
