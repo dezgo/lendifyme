@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+
+{% block title %}Get Support – LendifyMe{% endblock %}
+
+{% block extra_css %}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1rem;
+    color: #007bff;
+    text-decoration: none;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+h1 {
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #666;
+    margin-bottom: 2rem;
+}
+.support-container {
+    max-width: 800px;
+    margin: 0 auto;
+}
+.support-card {
+    background: white;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+}
+.status-indicator {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+}
+.status-waiting { background: #ffc107; }
+.status-connected { background: #28a745; }
+.status-disconnected { background: #dc3545; }
+.status-message {
+    font-size: 1.1rem;
+    margin-bottom: 1rem;
+    padding: 1rem;
+    background: #f8f9fa;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+}
+.btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-right: 0.5rem;
+}
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+.btn-primary:hover {
+    background: #0056b3;
+}
+.btn-danger {
+    background: #dc3545;
+    color: white;
+}
+.btn-danger:hover {
+    background: #c82333;
+}
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.info-box {
+    background: #e7f3ff;
+    border-left: 4px solid #007bff;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-radius: 4px;
+}
+.info-box h3 {
+    margin: 0 0 0.5rem 0;
+    color: #007bff;
+}
+.info-box p {
+    margin: 0;
+    color: #333;
+}
+{% endblock %}
+
+{% block content %}
+<a href="/" class="back-link">← Back to Dashboard</a>
+
+<div class="support-container">
+    <h1>Get Support</h1>
+    <p class="subtitle">Connect with an agent and share your screen for help</p>
+
+    <div class="support-card">
+        <div class="info-box">
+            <h3>How it works</h3>
+            <p>1. Click "Request Support" below<br>
+               2. Wait for an agent to join<br>
+               3. Click "Share My Screen" when prompted<br>
+               4. The agent can now see your screen to help you</p>
+        </div>
+
+        <div id="status-message" class="status-message">
+            <span class="status-indicator status-disconnected"></span>
+            <span id="status-text">Click "Request Support" to get started</span>
+        </div>
+
+        <div id="controls">
+            <button id="request-btn" class="btn btn-primary">Request Support</button>
+            <button id="share-btn" class="btn btn-primary" style="display: none;" disabled>Share My Screen</button>
+            <button id="end-btn" class="btn btn-danger" style="display: none;">End Session</button>
+        </div>
+    </div>
+</div>
+
+<!-- Socket.IO Client -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+<script>
+const userId = {{ user_id }};
+let socket = null;
+let peerConnection = null;
+let localStream = null;
+
+const statusIndicator = document.querySelector('.status-indicator');
+const statusText = document.getElementById('status-text');
+const requestBtn = document.getElementById('request-btn');
+const shareBtn = document.getElementById('share-btn');
+const endBtn = document.getElementById('end-btn');
+
+// Initialize Socket.IO connection
+function initSocket() {
+    socket = io({
+        transports: ['websocket', 'polling']
+    });
+
+    socket.on('connect', () => {
+        console.log('Connected to server');
+    });
+
+    socket.on('support_status', (data) => {
+        updateStatus('waiting', data.message);
+    });
+
+    socket.on('agent_joined', (data) => {
+        updateStatus('connected', data.message);
+        shareBtn.disabled = false;
+        shareBtn.style.display = 'inline-block';
+        requestBtn.style.display = 'none';
+    });
+
+    socket.on('webrtc_answer', async (data) => {
+        console.log('Received WebRTC answer');
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+    });
+
+    socket.on('webrtc_ice_candidate', async (data) => {
+        console.log('Received ICE candidate');
+        if (data.candidate) {
+            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+    });
+
+    socket.on('session_ended', (data) => {
+        updateStatus('disconnected', data.message);
+        cleanup();
+    });
+
+    socket.on('peer_disconnected', (data) => {
+        updateStatus('disconnected', data.message);
+        cleanup();
+    });
+}
+
+function updateStatus(status, message) {
+    statusIndicator.className = `status-indicator status-${status}`;
+    statusText.textContent = message;
+}
+
+function requestSupport() {
+    if (!socket) initSocket();
+
+    socket.emit('request_support', { user_id: userId });
+    updateStatus('waiting', 'Waiting for an agent to join...');
+    requestBtn.disabled = true;
+    endBtn.style.display = 'inline-block';
+}
+
+async function shareScreen() {
+    try {
+        // Request screen sharing
+        localStream = await navigator.mediaDevices.getDisplayMedia({
+            video: { cursor: "always" },
+            audio: false
+        });
+
+        updateStatus('connected', 'Screen sharing active - Agent can see your screen');
+
+        // Create peer connection
+        peerConnection = new RTCPeerConnection({
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' }
+            ]
+        });
+
+        // Add screen share track to peer connection
+        localStream.getTracks().forEach(track => {
+            peerConnection.addTrack(track, localStream);
+        });
+
+        // Handle ICE candidates
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                socket.emit('webrtc_ice_candidate', {
+                    candidate: event.candidate
+                });
+            }
+        };
+
+        // Handle when user stops sharing via browser button
+        localStream.getVideoTracks()[0].onended = () => {
+            updateStatus('connected', 'Screen sharing stopped');
+            shareBtn.disabled = false;
+            shareBtn.textContent = 'Share My Screen';
+        };
+
+        // Create and send offer
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+
+        socket.emit('webrtc_offer', {
+            offer: offer
+        });
+
+        shareBtn.disabled = true;
+        shareBtn.textContent = 'Sharing...';
+
+    } catch (err) {
+        console.error('Error sharing screen:', err);
+        updateStatus('connected', 'Failed to share screen. Please try again.');
+    }
+}
+
+function endSession() {
+    socket.emit('end_support_session', { user_id: userId });
+    cleanup();
+    updateStatus('disconnected', 'Session ended');
+}
+
+function cleanup() {
+    if (localStream) {
+        localStream.getTracks().forEach(track => track.stop());
+        localStream = null;
+    }
+    if (peerConnection) {
+        peerConnection.close();
+        peerConnection = null;
+    }
+    requestBtn.disabled = false;
+    requestBtn.style.display = 'inline-block';
+    shareBtn.style.display = 'none';
+    shareBtn.disabled = true;
+    shareBtn.textContent = 'Share My Screen';
+    endBtn.style.display = 'none';
+}
+
+// Event listeners
+requestBtn.addEventListener('click', requestSupport);
+shareBtn.addEventListener('click', shareScreen);
+endBtn.addEventListener('click', endSession);
+
+// Auto-reconnect if already in a session
+{% if existing_session %}
+initSocket();
+updateStatus('{{ existing_session.status }}',
+    '{{ "Connected to agent" if existing_session.status == "connected" else "Waiting for agent..." }}');
+requestBtn.disabled = true;
+endBtn.style.display = 'inline-block';
+{% if existing_session.status == 'connected' %}
+shareBtn.style.display = 'inline-block';
+shareBtn.disabled = false;
+requestBtn.style.display = 'none';
+{% endif %}
+{% endif %}
+</script>
+
+{% endblock %}

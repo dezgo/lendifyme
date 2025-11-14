@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+
+{% block title %}Support Dashboard – LendifyMe{% endblock %}
+
+{% block extra_css %}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1rem;
+    color: #007bff;
+    text-decoration: none;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+h1 {
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #666;
+    margin-bottom: 2rem;
+}
+.support-dashboard {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.section {
+    margin-bottom: 2rem;
+}
+.section h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    color: #333;
+}
+.session-list {
+    display: grid;
+    gap: 1rem;
+}
+.session-card {
+    background: white;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    padding: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.session-card.waiting {
+    border-color: #ffc107;
+    background: #fffbf0;
+}
+.session-card.connected {
+    border-color: #28a745;
+    background: #f0f9f4;
+}
+.session-info h3 {
+    margin: 0 0 0.5rem 0;
+    color: #333;
+}
+.session-info p {
+    margin: 0;
+    color: #666;
+    font-size: 0.9rem;
+}
+.session-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+.btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+.btn-primary:hover {
+    background: #0056b3;
+}
+.btn-danger {
+    background: #dc3545;
+    color: white;
+}
+.btn-danger:hover {
+    background: #c82333;
+}
+.btn-success {
+    background: #28a745;
+    color: white;
+}
+.btn-success:hover {
+    background: #218838;
+}
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: #999;
+}
+.empty-state p {
+    margin: 0;
+    font-size: 1.1rem;
+}
+.video-container {
+    margin-top: 1rem;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    display: none;
+}
+.video-container.active {
+    display: block;
+}
+.video-container video {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+}
+.badge-warning {
+    background: #ffc107;
+    color: #000;
+}
+.badge-success {
+    background: #28a745;
+    color: white;
+}
+{% endblock %}
+
+{% block content %}
+<a href="/admin/users" class="back-link">← Back to Admin</a>
+
+<div class="support-dashboard">
+    <h1>Support Dashboard</h1>
+    <p class="subtitle">Manage and join user support sessions</p>
+
+    <div class="section">
+        <h2>Waiting Requests <span class="badge badge-warning" id="waiting-count">{{ waiting_sessions|length }}</span></h2>
+        <div class="session-list" id="waiting-list">
+            {% if waiting_sessions %}
+                {% for session in waiting_sessions %}
+                <div class="session-card waiting" data-user-id="{{ session.user_id }}">
+                    <div class="session-info">
+                        <h3>User #{{ session.user_id }}</h3>
+                        <p>Waiting for support</p>
+                    </div>
+                    <div class="session-actions">
+                        <button class="btn btn-primary join-btn" data-user-id="{{ session.user_id }}">
+                            Join Session
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>No pending support requests</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Active Sessions <span class="badge badge-success" id="active-count">{{ active_sessions|length }}</span></h2>
+        <div class="session-list" id="active-list">
+            {% if active_sessions %}
+                {% for session in active_sessions %}
+                <div class="session-card connected" data-user-id="{{ session.user_id }}">
+                    <div class="session-info">
+                        <h3>User #{{ session.user_id }}</h3>
+                        <p>Connected</p>
+                    </div>
+                    <div class="session-actions">
+                        <button class="btn btn-danger end-btn" data-user-id="{{ session.user_id }}">
+                            End Session
+                        </button>
+                    </div>
+                    <div class="video-container" id="video-{{ session.user_id }}">
+                        <video autoplay playsinline></video>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>No active sessions</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Socket.IO Client -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+<script>
+let socket = null;
+let peerConnections = {}; // Track multiple peer connections
+
+// Initialize Socket.IO connection
+function initSocket() {
+    socket = io({
+        transports: ['websocket', 'polling']
+    });
+
+    socket.on('connect', () => {
+        console.log('Connected to server');
+        // Join admin room to receive notifications
+        socket.emit('join_admin_room');
+    });
+
+    socket.on('admin_joined', (data) => {
+        console.log(data.message);
+    });
+
+    socket.on('new_support_request', (data) => {
+        console.log('New support request from user', data.user_id);
+        addWaitingSession(data.user_id);
+    });
+
+    socket.on('joined_session', (data) => {
+        console.log('Joined session with user', data.user_id);
+        moveToActiveSession(data.user_id);
+    });
+
+    socket.on('webrtc_offer', async (data) => {
+        console.log('Received WebRTC offer from user', data.from);
+        await handleOffer(data.from, data.offer);
+    });
+
+    socket.on('webrtc_ice_candidate', async (data) => {
+        console.log('Received ICE candidate');
+        const userId = getCurrentSessionUser(data);
+        if (userId && peerConnections[userId]) {
+            if (data.candidate) {
+                await peerConnections[userId].addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        }
+    });
+
+    socket.on('session_ended', (data) => {
+        console.log('Session ended:', data.message);
+        // Reload page to refresh session list
+        location.reload();
+    });
+}
+
+function getCurrentSessionUser(data) {
+    // Helper to determine which user this ICE candidate is for
+    // In a production app, you'd track this more carefully
+    return Object.keys(peerConnections)[0];
+}
+
+function addWaitingSession(userId) {
+    const waitingList = document.getElementById('waiting-list');
+    const emptyState = waitingList.querySelector('.empty-state');
+    if (emptyState) {
+        emptyState.remove();
+    }
+
+    const sessionCard = document.createElement('div');
+    sessionCard.className = 'session-card waiting';
+    sessionCard.setAttribute('data-user-id', userId);
+    sessionCard.innerHTML = `
+        <div class="session-info">
+            <h3>User #${userId}</h3>
+            <p>Waiting for support</p>
+        </div>
+        <div class="session-actions">
+            <button class="btn btn-primary join-btn" data-user-id="${userId}">
+                Join Session
+            </button>
+        </div>
+    `;
+
+    waitingList.appendChild(sessionCard);
+    updateWaitingCount();
+
+    // Attach event listener
+    sessionCard.querySelector('.join-btn').addEventListener('click', function() {
+        joinSession(userId);
+    });
+}
+
+function moveToActiveSession(userId) {
+    const waitingCard = document.querySelector(`.session-card.waiting[data-user-id="${userId}"]`);
+    if (waitingCard) {
+        waitingCard.remove();
+    }
+
+    const activeList = document.getElementById('active-list');
+    const emptyState = activeList.querySelector('.empty-state');
+    if (emptyState) {
+        emptyState.remove();
+    }
+
+    const sessionCard = document.createElement('div');
+    sessionCard.className = 'session-card connected';
+    sessionCard.setAttribute('data-user-id', userId);
+    sessionCard.innerHTML = `
+        <div class="session-info">
+            <h3>User #${userId}</h3>
+            <p>Connected - Waiting for screen share...</p>
+        </div>
+        <div class="session-actions">
+            <button class="btn btn-danger end-btn" data-user-id="${userId}">
+                End Session
+            </button>
+        </div>
+        <div class="video-container" id="video-${userId}">
+            <video autoplay playsinline></video>
+        </div>
+    `;
+
+    activeList.appendChild(sessionCard);
+    updateCounts();
+
+    // Attach event listener
+    sessionCard.querySelector('.end-btn').addEventListener('click', function() {
+        endSession(userId);
+    });
+}
+
+function joinSession(userId) {
+    console.log('Joining session with user', userId);
+    socket.emit('agent_join_session', { user_id: userId });
+}
+
+async function handleOffer(userId, offer) {
+    console.log('Handling offer from user', userId);
+
+    // Create peer connection for this user
+    const peerConnection = new RTCPeerConnection({
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' }
+        ]
+    });
+
+    peerConnections[userId] = peerConnection;
+
+    // Handle ICE candidates
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            socket.emit('webrtc_ice_candidate', {
+                candidate: event.candidate,
+                user_id: userId
+            });
+        }
+    };
+
+    // Handle incoming stream
+    peerConnection.ontrack = (event) => {
+        console.log('Received stream from user', userId);
+        const videoContainer = document.getElementById(`video-${userId}`);
+        const video = videoContainer.querySelector('video');
+        video.srcObject = event.streams[0];
+        videoContainer.classList.add('active');
+
+        // Update status
+        const sessionCard = document.querySelector(`.session-card[data-user-id="${userId}"]`);
+        if (sessionCard) {
+            const statusText = sessionCard.querySelector('.session-info p');
+            statusText.textContent = 'Screen sharing active';
+        }
+    };
+
+    // Set remote description and create answer
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+
+    // Send answer back to user
+    socket.emit('webrtc_answer', {
+        answer: answer,
+        user_id: userId
+    });
+}
+
+function endSession(userId) {
+    console.log('Ending session with user', userId);
+
+    // Close peer connection
+    if (peerConnections[userId]) {
+        peerConnections[userId].close();
+        delete peerConnections[userId];
+    }
+
+    socket.emit('end_support_session', { user_id: userId });
+
+    // Remove from UI
+    const sessionCard = document.querySelector(`.session-card[data-user-id="${userId}"]`);
+    if (sessionCard) {
+        sessionCard.remove();
+    }
+
+    updateCounts();
+}
+
+function updateWaitingCount() {
+    const count = document.querySelectorAll('.session-card.waiting').length;
+    document.getElementById('waiting-count').textContent = count;
+}
+
+function updateCounts() {
+    const waitingCount = document.querySelectorAll('.session-card.waiting').length;
+    const activeCount = document.querySelectorAll('.session-card.connected').length;
+
+    document.getElementById('waiting-count').textContent = waitingCount;
+    document.getElementById('active-count').textContent = activeCount;
+
+    // Show empty state if no sessions
+    const waitingList = document.getElementById('waiting-list');
+    if (waitingCount === 0 && !waitingList.querySelector('.empty-state')) {
+        waitingList.innerHTML = '<div class="empty-state"><p>No pending support requests</p></div>';
+    }
+
+    const activeList = document.getElementById('active-list');
+    if (activeCount === 0 && !activeList.querySelector('.empty-state')) {
+        activeList.innerHTML = '<div class="empty-state"><p>No active sessions</p></div>';
+    }
+}
+
+// Initialize socket on page load
+initSocket();
+
+// Attach event listeners to existing buttons
+document.querySelectorAll('.join-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const userId = this.getAttribute('data-user-id');
+        joinSession(userId);
+    });
+});
+
+document.querySelectorAll('.end-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const userId = this.getAttribute('data-user-id');
+        endSession(userId);
+    });
+});
+</script>
+
+{% endblock %}

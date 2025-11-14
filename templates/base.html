@@ -66,6 +66,9 @@
                 {% if session.is_admin %}
                 <a href="/analytics" class="settings-link">📊 Analytics</a>
                 <a href="/admin/users" class="settings-link">👥 Users</a>
+                <a href="/admin/support" class="settings-link">🎧 Support</a>
+                {% else %}
+                <a href="/support" class="settings-link">🆘 Get Support</a>
                 {% endif %}
                 <a href="/settings" class="settings-link">⚙️ Settings</a>
                 <a href="/logout" class="logout-link">Logout</a>
