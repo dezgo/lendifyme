@@ -30,24 +30,21 @@ h1 {
     padding: 2rem;
     margin-bottom: 1.5rem;
 }
-.status-indicator {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 0.5rem;
-}
-.status-waiting { background: #ffc107; }
-.status-connected { background: #28a745; }
-.status-disconnected { background: #dc3545; }
-.status-message {
-    font-size: 1.1rem;
-    margin-bottom: 1rem;
+.info-box {
+    background: #e7f3ff;
+    border-left: 4px solid #007bff;
     padding: 1rem;
-    background: #f8f9fa;
+    margin-bottom: 1.5rem;
     border-radius: 4px;
-    display: flex;
-    align-items: center;
+}
+.info-box h3 {
+    margin: 0 0 0.5rem 0;
+    color: #007bff;
+}
+.info-box p {
+    margin: 0;
+    color: #333;
+    line-height: 1.6;
 }
 .btn {
     padding: 0.75rem 1.5rem;
@@ -65,717 +62,89 @@ h1 {
 .btn-primary:hover {
     background: #0056b3;
 }
-.btn-danger {
-    background: #dc3545;
+.btn-success {
+    background: #28a745;
     color: white;
 }
-.btn-danger:hover {
-    background: #c82333;
+.btn-success:hover {
+    background: #218838;
 }
 .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
-.info-box {
-    background: #e7f3ff;
-    border-left: 4px solid #007bff;
-    padding: 1rem;
-    margin-bottom: 1rem;
-    border-radius: 4px;
-}
-.info-box h3 {
-    margin: 0 0 0.5rem 0;
-    color: #007bff;
-}
-.info-box p {
-    margin: 0;
-    color: #333;
-}
-.modal-overlay {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.7);
-    z-index: 9999;
-    align-items: center;
-    justify-content: center;
-}
-.modal-overlay.active {
-    display: flex;
-}
-.modal-content {
-    background: white;
-    padding: 2rem;
-    border-radius: 12px;
-    max-width: 500px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-    animation: slideIn 0.3s ease-out;
-}
-@keyframes slideIn {
-    from {
-        transform: translateY(-50px);
-        opacity: 0;
-    }
-    to {
-        transform: translateY(0);
-        opacity: 1;
-    }
-}
-.modal-content h2 {
-    margin: 0 0 1rem 0;
-    color: #333;
-    font-size: 1.5rem;
-}
-.modal-content p {
-    margin: 0 0 1.5rem 0;
-    color: #666;
-    line-height: 1.6;
-}
-.modal-content strong {
-    color: #007bff;
-}
-.modal-actions {
-    display: flex;
-    gap: 1rem;
-    justify-content: flex-end;
-}
-.btn-secondary {
-    background: #6c757d;
-    color: white;
-}
-.btn-secondary:hover {
-    background: #5a6268;
-}
-.chat-widget {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    width: 350px;
-    max-height: 500px;
-    background: white;
-    border-radius: 12px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-    display: none;
-    flex-direction: column;
-    z-index: 1000;
-}
-.chat-widget.active {
-    display: flex;
-}
-.chat-header {
-    background: #007bff;
-    color: white;
-    padding: 1rem;
-    border-radius: 12px 12px 0 0;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-.chat-header h3 {
-    margin: 0;
-    font-size: 1rem;
-}
-.chat-minimize {
-    background: none;
-    border: none;
-    color: white;
-    cursor: pointer;
-    font-size: 1.5rem;
+.feature-list {
+    list-style: none;
     padding: 0;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
-.chat-messages {
-    flex: 1;
-    overflow-y: auto;
-    padding: 1rem;
-    max-height: 300px;
+.feature-list li {
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #eee;
 }
-.chat-message {
-    margin-bottom: 0.75rem;
-    display: flex;
-    flex-direction: column;
+.feature-list li:last-child {
+    border-bottom: none;
 }
-.chat-message.agent {
-    align-items: flex-start;
-}
-.chat-message.user {
-    align-items: flex-end;
-}
-.chat-bubble {
-    background: #f1f3f4;
-    padding: 0.75rem 1rem;
-    border-radius: 12px;
-    max-width: 80%;
-    word-wrap: break-word;
-}
-.chat-message.agent .chat-bubble {
-    background: #e3f2fd;
-}
-.chat-message.user .chat-bubble {
-    background: #007bff;
-    color: white;
-}
-.chat-sender {
-    font-size: 0.75rem;
-    color: #666;
-    margin-bottom: 0.25rem;
-}
-.chat-input-container {
-    padding: 1rem;
-    border-top: 1px solid #ddd;
-    display: flex;
-    gap: 0.5rem;
-}
-.chat-input {
-    flex: 1;
-    padding: 0.5rem;
-    border: 1px solid #ddd;
-    border-radius: 20px;
-    outline: none;
-}
-.chat-input:focus {
-    border-color: #007bff;
-}
-.chat-send {
-    background: #007bff;
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 40px;
-    height: 40px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-.chat-send:hover {
-    background: #0056b3;
-}
-/* Live indicator banner */
-.live-indicator {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-    color: white;
-    padding: 0.75rem 1rem;
-    z-index: 1000;
-    display: none;
-    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
-    border-bottom: 3px solid #bd2130;
-}
-.live-indicator.active {
-    display: block;
-    animation: slideDown 0.3s ease-out;
-}
-@keyframes slideDown {
-    from {
-        transform: translateY(-100%);
-    }
-    to {
-        transform: translateY(0);
-    }
-}
-.live-indicator-content {
-    max-width: 1200px;
-    margin: 0 auto;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 1rem;
-}
-.live-indicator-text {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex: 1;
-}
-.live-pulse {
-    width: 12px;
-    height: 12px;
-    background: white;
-    border-radius: 50%;
-    animation: pulse 1.5s ease-in-out infinite;
-    flex-shrink: 0;
-}
-@keyframes pulse {
-    0%, 100% {
-        opacity: 1;
-        transform: scale(1);
-    }
-    50% {
-        opacity: 0.5;
-        transform: scale(1.2);
-    }
-}
-.live-indicator h2 {
-    margin: 0;
-    font-size: 0.95rem;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-.live-indicator-actions {
-    display: flex;
-    gap: 0.5rem;
-}
-.btn-live-end {
-    background: white;
-    color: #dc3545;
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 4px;
-    font-size: 0.9rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-.btn-live-end:hover {
-    background: #f8f9fa;
-    transform: translateY(-1px);
-}
-/* Push down ALL content when live indicator is showing */
-body.live-mode {
-    padding-top: 55px;
-}
-/* Chat toggle button (shows when chat is minimized) */
-.chat-toggle {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    background: #007bff;
-    color: white;
-    border: none;
-    border-radius: 50%;
-    width: 60px;
-    height: 60px;
-    font-size: 1.5rem;
-    cursor: pointer;
-    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
-    z-index: 999;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-}
-.chat-toggle.show {
-    display: flex;
-}
-.chat-toggle:hover {
-    background: #0056b3;
-    transform: translateY(-2px);
-    box-shadow: 0 6px 16px rgba(0, 123, 255, 0.4);
+.feature-list li::before {
+    content: "✓ ";
+    color: #28a745;
+    font-weight: bold;
+    margin-right: 0.5rem;
 }
 {% endblock %}
 
 {% block content %}
-<!-- Live Screen Sharing Indicator -->
-<div class="live-indicator" id="live-indicator">
-    <div class="live-indicator-content">
-        <div class="live-indicator-text">
-            <div class="live-pulse"></div>
-            <h2>🔴 LIVE - Agent is viewing your screen</h2>
-        </div>
-        <div class="live-indicator-actions">
-            <button class="btn-live-end" id="live-end-btn">End Session</button>
-        </div>
-    </div>
-</div>
+<a href="/" class="back-link">← Back to Dashboard</a>
 
-<a href="/" class="back-link" id="back-link">← Back to Dashboard</a>
-
-<div class="support-container" id="support-container">
-    <h1>Get Support</h1>
+<div class="support-container">
+    <h1>Get Live Support</h1>
     <p class="subtitle">Connect with an agent and share your screen for help</p>
 
     <div class="support-card">
         <div class="info-box">
             <h3>How it works</h3>
-            <p>1. Click "Request Support" below<br>
-               2. Wait for an agent to join<br>
-               3. Click "Share My Screen" when prompted<br>
-               4. The agent can now see your screen to help you</p>
+            <p>
+                1. Click "Request Support" below<br>
+                2. Wait for an agent to join your session<br>
+                3. Click "Share My Screen" when prompted<br>
+                4. Navigate around the app normally - the agent can see your screen<br>
+                5. Chat with the agent using the chat widget
+            </p>
         </div>
 
-        <div id="status-message" class="status-message">
-            <span class="status-indicator status-disconnected"></span>
-            <span id="status-text">Click "Request Support" to get started</span>
+        <h3>Features</h3>
+        <ul class="feature-list">
+            <li><strong>Live Screen Sharing</strong> - Share your entire screen or browser window with the agent</li>
+            <li><strong>Real-time Chat</strong> - Message the agent while they help you</li>
+            <li><strong>Navigate Freely</strong> - Move around the app normally while sharing your screen</li>
+            <li><strong>Always Available</strong> - The support overlay stays active on every page</li>
+            <li><strong>Easy to End</strong> - Click "End Session" in the red banner at any time</li>
+        </ul>
+
+        <div style="margin-top: 2rem;">
+            <button class="btn btn-primary" onclick="LendifyMeSupport.requestSupport()">
+                🆘 Request Support
+            </button>
+            <button class="btn btn-success" onclick="LendifyMeSupport.shareScreen()">
+                🖥️ Share My Screen
+            </button>
         </div>
 
-        <div id="controls">
-            <button id="request-btn" class="btn btn-primary">Request Support</button>
-            <button id="share-btn" class="btn btn-primary" style="display: none;" disabled>Share My Screen</button>
-            <button id="end-btn" class="btn btn-danger" style="display: none;">End Session</button>
-        </div>
+        <p style="margin-top: 1.5rem; color: #666; font-size: 0.9rem;">
+            <strong>Privacy:</strong> Screen sharing is completely under your control. You choose what to share and can stop at any time.
+        </p>
     </div>
 
-    <!-- Preview of what's being shared -->
-    <div class="support-card" id="preview-container" style="display: none;">
-        <h3>Preview: What the agent sees</h3>
-        <p style="color: #666; margin-bottom: 1rem;">This is what the agent is currently viewing:</p>
-        <video id="preview-video" autoplay muted playsinline style="width: 100%; border-radius: 8px; background: #000;"></video>
+    <div class="support-card">
+        <h3>Tips for Best Results</h3>
+        <p style="color: #666; margin-bottom: 1rem;">
+            <strong>When sharing your screen:</strong>
+        </p>
+        <ul style="color: #666;">
+            <li>Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong> (NOT "Tab")</li>
+            <li>Choose the screen/window where you're running LendifyMe</li>
+            <li>The agent will see you navigate between pages normally</li>
+            <li>Look for the red "LIVE" banner at the top to know sharing is active</li>
+        </ul>
     </div>
 </div>
-
-<!-- Screen Share Confirmation Modal -->
-<div class="modal-overlay" id="share-modal">
-    <div class="modal-content">
-        <h2>Ready to share your screen?</h2>
-        <p>When you click <strong>"Start Sharing"</strong>, your browser will ask what to share.</p>
-        <p><strong>Important:</strong> Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong> (NOT "Tab") so the agent can see you navigate around the app.</p>
-        <p style="font-size: 0.9rem; color: #666; margin-top: 1rem;">💡 Tip: If you share just a tab, the agent won't see you when you navigate to other pages.</p>
-        <div class="modal-actions">
-            <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
-            <button class="btn btn-primary" id="modal-confirm">Start Sharing</button>
-        </div>
-    </div>
-</div>
-
-<!-- Chat Toggle Button (shows when minimized) -->
-<button class="chat-toggle" id="chat-toggle">💬</button>
-
-<!-- Chat Widget -->
-<div class="chat-widget" id="chat-widget">
-    <div class="chat-header">
-        <h3>💬 Chat with Support</h3>
-        <button class="chat-minimize" id="chat-minimize">−</button>
-    </div>
-    <div class="chat-messages" id="chat-messages">
-        <div class="chat-message agent">
-            <span class="chat-sender">Support Agent</span>
-            <div class="chat-bubble">
-                Hi! I'll be with you shortly. Feel free to describe your issue while you wait.
-            </div>
-        </div>
-    </div>
-    <div class="chat-input-container">
-        <input type="text" class="chat-input" id="chat-input" placeholder="Type a message...">
-        <button class="chat-send" id="chat-send">→</button>
-    </div>
-</div>
-
-<!-- Socket.IO Client -->
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-
-<script>
-const userId = {{ user_id }};
-let socket = null;
-let peerConnection = null;
-let localStream = null;
-
-const statusIndicator = document.querySelector('.status-indicator');
-const statusText = document.getElementById('status-text');
-const requestBtn = document.getElementById('request-btn');
-const shareBtn = document.getElementById('share-btn');
-const endBtn = document.getElementById('end-btn');
-const shareModal = document.getElementById('share-modal');
-const modalCancel = document.getElementById('modal-cancel');
-const modalConfirm = document.getElementById('modal-confirm');
-const chatWidget = document.getElementById('chat-widget');
-const chatMessages = document.getElementById('chat-messages');
-const chatInput = document.getElementById('chat-input');
-const chatSend = document.getElementById('chat-send');
-const chatMinimize = document.getElementById('chat-minimize');
-const chatToggle = document.getElementById('chat-toggle');
-const liveIndicator = document.getElementById('live-indicator');
-const liveEndBtn = document.getElementById('live-end-btn');
-const supportContainer = document.getElementById('support-container');
-const backLink = document.getElementById('back-link');
-
-let isSharingScreen = false;
-
-// Prevent navigation when screen sharing is active
-backLink.addEventListener('click', (e) => {
-    if (isSharingScreen) {
-        e.preventDefault();
-        if (confirm('You are currently sharing your screen. If you leave this page, the agent will lose your video feed.\n\nDo you want to end the screen share and return to the dashboard?')) {
-            endSession();
-            window.location.href = '/';
-        }
-    }
-});
-
-// Warn before closing/reloading page during active screen share
-window.addEventListener('beforeunload', (e) => {
-    if (isSharingScreen) {
-        e.preventDefault();
-        e.returnValue = 'You are currently sharing your screen. Leaving will end the session.';
-        return e.returnValue;
-    }
-});
-
-// Initialize Socket.IO connection
-function initSocket() {
-    socket = io({
-        transports: ['websocket', 'polling']
-    });
-
-    socket.on('connect', () => {
-        console.log('Connected to server');
-    });
-
-    socket.on('support_status', (data) => {
-        updateStatus('waiting', data.message);
-    });
-
-    socket.on('agent_joined', (data) => {
-        updateStatus('connected', data.message);
-        shareBtn.disabled = false;
-        shareBtn.style.display = 'inline-block';
-        requestBtn.style.display = 'none';
-    });
-
-    socket.on('webrtc_answer', async (data) => {
-        console.log('Received WebRTC answer');
-        await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
-    });
-
-    socket.on('webrtc_ice_candidate', async (data) => {
-        console.log('Received ICE candidate');
-        if (data.candidate) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-        }
-    });
-
-    socket.on('session_ended', (data) => {
-        updateStatus('disconnected', data.message);
-        cleanup();
-    });
-
-    socket.on('peer_disconnected', (data) => {
-        updateStatus('disconnected', data.message);
-        cleanup();
-    });
-
-    socket.on('new_message', (data) => {
-        addChatMessage(data.sender, data.text, data.is_agent);
-    });
-}
-
-function updateStatus(status, message) {
-    statusIndicator.className = `status-indicator status-${status}`;
-    statusText.textContent = message;
-}
-
-function requestSupport() {
-    if (!socket) initSocket();
-
-    socket.emit('request_support', { user_id: userId });
-    updateStatus('waiting', 'Waiting for an agent to join...');
-    requestBtn.disabled = true;
-    endBtn.style.display = 'inline-block';
-
-    // Show chat widget and ensure toggle is hidden
-    chatWidget.classList.add('active');
-    chatToggle.classList.remove('show');
-}
-
-function sendChatMessage() {
-    const message = chatInput.value.trim();
-    if (!message) return;
-
-    socket.emit('send_message', { message: message });
-    chatInput.value = '';
-}
-
-function addChatMessage(sender, text, isAgent) {
-    const messageDiv = document.createElement('div');
-    messageDiv.className = `chat-message ${isAgent ? 'agent' : 'user'}`;
-
-    messageDiv.innerHTML = `
-        <span class="chat-sender">${sender}</span>
-        <div class="chat-bubble">${escapeHtml(text)}</div>
-    `;
-
-    chatMessages.appendChild(messageDiv);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
-function shareScreen() {
-    // Show the modal instead of immediately requesting screen share
-    shareModal.classList.add('active');
-}
-
-async function startScreenShare() {
-    try {
-        // Hide modal
-        shareModal.classList.remove('active');
-
-        // Request screen sharing
-        console.log('Requesting screen share...');
-        localStream = await navigator.mediaDevices.getDisplayMedia({
-            video: { cursor: "always" },
-            audio: false
-        });
-
-        console.log('Screen share granted. Stream:', localStream);
-        console.log('Video tracks:', localStream.getVideoTracks());
-
-        // Show preview of what's being shared
-        const previewVideo = document.getElementById('preview-video');
-        const previewContainer = document.getElementById('preview-container');
-        previewVideo.srcObject = localStream;
-        previewContainer.style.display = 'block';
-
-        // Show LIVE indicator banner
-        liveIndicator.classList.add('active');
-        document.body.classList.add('live-mode');
-        isSharingScreen = true;
-
-        updateStatus('connected', 'Screen sharing active - Agent can see your screen');
-
-        // Create peer connection
-        peerConnection = new RTCPeerConnection({
-            iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' }
-            ]
-        });
-
-        // Add screen share track to peer connection
-        localStream.getTracks().forEach(track => {
-            console.log('Adding track to peer connection:', track);
-            peerConnection.addTrack(track, localStream);
-        });
-
-        // Handle ICE candidates
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                console.log('Sending ICE candidate:', event.candidate);
-                socket.emit('webrtc_ice_candidate', {
-                    candidate: event.candidate
-                });
-            }
-        };
-
-        // Handle when user stops sharing via browser button
-        localStream.getVideoTracks()[0].onended = () => {
-            updateStatus('connected', 'Screen sharing stopped');
-            shareBtn.disabled = false;
-            shareBtn.textContent = 'Share My Screen';
-            previewContainer.style.display = 'none';
-            isSharingScreen = false;
-            // Hide LIVE indicator
-            liveIndicator.classList.remove('active');
-            document.body.classList.remove('live-mode');
-        };
-
-        // Create and send offer
-        console.log('Creating WebRTC offer...');
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-
-        console.log('Sending offer to agent:', offer);
-        socket.emit('webrtc_offer', {
-            offer: offer
-        });
-
-        shareBtn.disabled = true;
-        shareBtn.textContent = 'Sharing...';
-
-    } catch (err) {
-        console.error('Error sharing screen:', err);
-        if (err.name === 'NotAllowedError') {
-            updateStatus('connected', 'Screen sharing cancelled. Click "Share My Screen" to try again.');
-        } else {
-            updateStatus('connected', 'Failed to share screen. Please try again.');
-        }
-    }
-}
-
-function endSession() {
-    socket.emit('end_support_session', { user_id: userId });
-    cleanup();
-    updateStatus('disconnected', 'Session ended');
-}
-
-function cleanup() {
-    if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
-        localStream = null;
-    }
-    if (peerConnection) {
-        peerConnection.close();
-        peerConnection = null;
-    }
-    isSharingScreen = false;
-    requestBtn.disabled = false;
-    requestBtn.style.display = 'inline-block';
-    shareBtn.style.display = 'none';
-    shareBtn.disabled = true;
-    shareBtn.textContent = 'Share My Screen';
-    endBtn.style.display = 'none';
-    chatWidget.classList.remove('active');
-    chatToggle.classList.remove('show');
-    // Hide LIVE indicator
-    liveIndicator.classList.remove('active');
-    document.body.classList.remove('live-mode');
-    document.getElementById('preview-container').style.display = 'none';
-}
-
-// Event listeners
-requestBtn.addEventListener('click', requestSupport);
-shareBtn.addEventListener('click', shareScreen);
-endBtn.addEventListener('click', endSession);
-liveEndBtn.addEventListener('click', endSession);
-
-// Modal event listeners
-modalCancel.addEventListener('click', () => {
-    shareModal.classList.remove('active');
-});
-modalConfirm.addEventListener('click', startScreenShare);
-
-// Close modal if clicking outside
-shareModal.addEventListener('click', (e) => {
-    if (e.target === shareModal) {
-        shareModal.classList.remove('active');
-    }
-});
-
-// Chat event listeners
-chatSend.addEventListener('click', sendChatMessage);
-chatInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        sendChatMessage();
-    }
-});
-chatMinimize.addEventListener('click', () => {
-    chatWidget.classList.remove('active');
-    chatToggle.classList.add('show');
-});
-
-chatToggle.addEventListener('click', () => {
-    chatWidget.classList.add('active');
-    chatToggle.classList.remove('show');
-});
-
-// Auto-reconnect if already in a session
-{% if existing_session %}
-initSocket();
-updateStatus('{{ existing_session.status }}',
-    '{{ "Connected to agent" if existing_session.status == "connected" else "Waiting for agent..." }}');
-requestBtn.disabled = true;
-endBtn.style.display = 'inline-block';
-{% if existing_session.status == 'connected' %}
-shareBtn.style.display = 'inline-block';
-shareBtn.disabled = false;
-requestBtn.style.display = 'none';
-{% endif %}
-{% endif %}
-</script>
-
 {% endblock %}
