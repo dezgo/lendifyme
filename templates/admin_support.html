@@ -188,7 +188,7 @@ h1 {
                         </button>
                     </div>
                     <div class="video-container" id="video-{{ session.user_id }}">
-                        <video autoplay playsinline></video>
+                        <video autoplay muted playsinline></video>
                     </div>
                 </div>
                 {% endfor %}
@@ -319,7 +319,7 @@ function moveToActiveSession(userId) {
             </button>
         </div>
         <div class="video-container" id="video-${userId}">
-            <video autoplay playsinline></video>
+            <video autoplay muted playsinline></video>
         </div>
     `;
 
@@ -391,6 +391,12 @@ async function handleOffer(userId, offer) {
         // Verify video is playing
         video.onloadedmetadata = () => {
             console.log('Video metadata loaded. Dimensions:', video.videoWidth, 'x', video.videoHeight);
+            // Explicitly play the video
+            video.play().then(() => {
+                console.log('Video play() succeeded');
+            }).catch(err => {
+                console.error('Video play() failed:', err);
+            });
         };
 
         video.onplay = () => {
