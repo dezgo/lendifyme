@@ -343,9 +343,37 @@ h1 {
     background: #f8f9fa;
     transform: translateY(-1px);
 }
-/* Push down content when live indicator is showing */
-.support-container.live-mode {
-    margin-top: 60px;
+/* Push down ALL content when live indicator is showing */
+body.live-mode {
+    padding-top: 55px;
+}
+/* Chat toggle button (shows when chat is minimized) */
+.chat-toggle {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    font-size: 1.5rem;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+    z-index: 999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+.chat-toggle.show {
+    display: flex;
+}
+.chat-toggle:hover {
+    background: #0056b3;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 123, 255, 0.4);
 }
 {% endblock %}
 
@@ -411,6 +439,9 @@ h1 {
     </div>
 </div>
 
+<!-- Chat Toggle Button (shows when minimized) -->
+<button class="chat-toggle" id="chat-toggle">💬</button>
+
 <!-- Chat Widget -->
 <div class="chat-widget" id="chat-widget">
     <div class="chat-header">
@@ -453,11 +484,10 @@ const chatMessages = document.getElementById('chat-messages');
 const chatInput = document.getElementById('chat-input');
 const chatSend = document.getElementById('chat-send');
 const chatMinimize = document.getElementById('chat-minimize');
+const chatToggle = document.getElementById('chat-toggle');
 const liveIndicator = document.getElementById('live-indicator');
 const liveEndBtn = document.getElementById('live-end-btn');
 const supportContainer = document.getElementById('support-container');
-
-let chatMinimized = false;
 
 // Initialize Socket.IO connection
 function initSocket() {
@@ -520,8 +550,9 @@ function requestSupport() {
     requestBtn.disabled = true;
     endBtn.style.display = 'inline-block';
 
-    // Show chat widget
+    // Show chat widget and ensure toggle is hidden
     chatWidget.classList.add('active');
+    chatToggle.classList.remove('show');
 }
 
 function sendChatMessage() {
@@ -579,7 +610,7 @@ async function startScreenShare() {
 
         // Show LIVE indicator banner
         liveIndicator.classList.add('active');
-        supportContainer.classList.add('live-mode');
+        document.body.classList.add('live-mode');
 
         updateStatus('connected', 'Screen sharing active - Agent can see your screen');
 
@@ -614,7 +645,7 @@ async function startScreenShare() {
             previewContainer.style.display = 'none';
             // Hide LIVE indicator
             liveIndicator.classList.remove('active');
-            supportContainer.classList.remove('live-mode');
+            document.body.classList.remove('live-mode');
         };
 
         // Create and send offer
@@ -662,9 +693,10 @@ function cleanup() {
     shareBtn.textContent = 'Share My Screen';
     endBtn.style.display = 'none';
     chatWidget.classList.remove('active');
+    chatToggle.classList.remove('show');
     // Hide LIVE indicator
     liveIndicator.classList.remove('active');
-    supportContainer.classList.remove('live-mode');
+    document.body.classList.remove('live-mode');
     document.getElementById('preview-container').style.display = 'none';
 }
 
@@ -695,7 +727,13 @@ chatInput.addEventListener('keypress', (e) => {
     }
 });
 chatMinimize.addEventListener('click', () => {
-    chatWidget.classList.toggle('active');
+    chatWidget.classList.remove('active');
+    chatToggle.classList.add('show');
+});
+
+chatToggle.addEventListener('click', () => {
+    chatWidget.classList.add('active');
+    chatToggle.classList.remove('show');
 });
 
 // Auto-reconnect if already in a session
