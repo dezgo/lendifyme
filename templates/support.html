@@ -136,15 +136,24 @@ h1 {
 
     <div class="support-card">
         <h3>Tips for Best Results</h3>
-        <p style="color: #666; margin-bottom: 1rem;">
-            <strong>When sharing your screen:</strong>
+
+        <div style="background: #d4edda; border-left: 4px solid #28a745; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
+            <p style="margin: 0 0 0.5rem 0; color: #155724; font-weight: 700;">✅ Recommended: Share Screen or Window</p>
+            <p style="margin: 0; color: #155724;">
+                Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong> when prompted. This lets the agent follow you as you navigate, and the connection will auto-resume on each page (or just one click to resume).
+            </p>
+        </div>
+
+        <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
+            <p style="margin: 0 0 0.5rem 0; color: #856404; font-weight: 700;">⚠️ Not Recommended: Share Tab</p>
+            <p style="margin: 0; color: #856404;">
+                If you select <strong>"Tab"</strong>, you'll need to manually click "Resume Sharing" every time you navigate to a different page. This gets annoying fast!
+            </p>
+        </div>
+
+        <p style="color: #666; margin-top: 1.5rem;">
+            <strong>Look for the red "LIVE" banner</strong> at the top of your screen to know when sharing is active.
         </p>
-        <ul style="color: #666;">
-            <li>Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong> (NOT "Tab")</li>
-            <li>Choose the screen/window where you're running LendifyMe</li>
-            <li>The agent will see you navigate between pages normally</li>
-            <li>Look for the red "LIVE" banner at the top to know sharing is active</li>
-        </ul>
     </div>
 </div>
 {% endblock %}

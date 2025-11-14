@@ -19,9 +19,10 @@
     let peerConnection = null;
     let localStream = null;
     let isSharingScreen = false;
+    let shareType = null; // 'screen', 'window', or 'tab'
 
     // DOM elements (will be created dynamically)
-    let liveIndicator, liveEndBtn, chatWidget, chatToggle, chatMessages, chatInput, chatSend, chatMinimize, shareModal;
+    let liveIndicator, liveEndBtn, liveResumeBtn, chatWidget, chatToggle, chatMessages, chatInput, chatSend, chatMinimize, shareModal;
 
     // Session storage keys
     const SESSION_KEY = 'support_session_active';
@@ -49,6 +50,7 @@
                     <h2>🔴 LIVE - Agent is viewing your screen</h2>
                 </div>
                 <div class="support-live-indicator-actions">
+                    <button class="support-btn-live-resume" id="support-live-resume-btn" style="display: none;">Resume Sharing</button>
                     <button class="support-btn-live-end" id="support-live-end-btn">End Session</button>
                 </div>
             </div>
@@ -83,8 +85,17 @@
             <div class="support-modal-content">
                 <h2>Ready to share your screen?</h2>
                 <p>When you click <strong>"Start Sharing"</strong>, your browser will ask what to share.</p>
-                <p><strong>Important:</strong> Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong> (NOT "Tab") so the agent can see you navigate around the app.</p>
-                <p style="font-size: 0.9rem; color: #666; margin-top: 1rem;">💡 Tip: If you share just a tab, the agent won't see you when you navigate to other pages.</p>
+
+                <div style="background: #d4edda; border: 2px solid #28a745; border-radius: 6px; padding: 1rem; margin: 1rem 0;">
+                    <p style="margin: 0 0 0.5rem 0; color: #155724; font-weight: 700;">✅ Best Option:</p>
+                    <p style="margin: 0; color: #155724;">Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong> so the agent can follow you as you navigate.</p>
+                </div>
+
+                <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 6px; padding: 1rem; margin: 1rem 0;">
+                    <p style="margin: 0 0 0.5rem 0; color: #856404; font-weight: 700;">⚠️ Not Recommended:</p>
+                    <p style="margin: 0; color: #856404;">Avoid selecting <strong>"Tab"</strong> - you'll have to manually reshare every time you click a link!</p>
+                </div>
+
                 <div class="support-modal-actions">
                     <button class="support-btn support-btn-secondary" id="support-modal-cancel">Cancel</button>
                     <button class="support-btn support-btn-primary" id="support-modal-confirm">Start Sharing</button>
@@ -100,6 +111,7 @@
 
         // Get references to dynamically created elements
         liveEndBtn = document.getElementById('support-live-end-btn');
+        liveResumeBtn = document.getElementById('support-live-resume-btn');
         chatMessages = document.getElementById('support-chat-messages');
         chatInput = document.getElementById('support-chat-input');
         chatSend = document.getElementById('support-chat-send');
@@ -114,8 +126,9 @@
     }
 
     function attachEventListeners() {
-        // Live banner end button
+        // Live banner buttons
         liveEndBtn.addEventListener('click', endSession);
+        liveResumeBtn.addEventListener('click', resumeScreenShare);
 
         // Chat toggle
         chatToggle.addEventListener('click', function() {
@@ -228,46 +241,34 @@
 
             console.log('[Support] Screen share granted');
 
+            // Detect share type (this is a best-effort detection)
+            const videoTrack = localStream.getVideoTracks()[0];
+            const settings = videoTrack.getSettings();
+
+            // Try to determine if it's screen, window, or tab based on displaySurface
+            if (settings.displaySurface) {
+                shareType = settings.displaySurface; // 'monitor', 'window', or 'browser'
+                console.log('[Support] Share type detected:', shareType);
+
+                // Warn if they shared a tab
+                if (shareType === 'browser') {
+                    addChatMessage('System', '⚠️ You shared a browser tab. This will disconnect when you navigate. For best results, reshare and select "Entire Screen" or "Window".', true);
+                }
+            }
+
             // Show live indicator
             liveIndicator.classList.add('active');
+            liveResumeBtn.style.display = 'none'; // Hide resume button when actively sharing
             document.body.classList.add('support-live-mode');
             isSharingScreen = true;
 
-            sessionStorage.setItem(SESSION_DATA_KEY, JSON.stringify({ status: 'sharing' }));
+            sessionStorage.setItem(SESSION_DATA_KEY, JSON.stringify({
+                status: 'sharing',
+                shareType: shareType
+            }));
 
-            // Create peer connection
-            peerConnection = new RTCPeerConnection({
-                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-            });
-
-            // Add tracks
-            localStream.getTracks().forEach(track => {
-                console.log('[Support] Adding track:', track);
-                peerConnection.addTrack(track, localStream);
-            });
-
-            // Handle ICE candidates
-            peerConnection.onicecandidate = (event) => {
-                if (event.candidate) {
-                    console.log('[Support] Sending ICE candidate');
-                    socket.emit('webrtc_ice_candidate', { candidate: event.candidate });
-                }
-            };
-
-            // Handle track end
-            localStream.getVideoTracks()[0].onended = () => {
-                console.log('[Support] Screen sharing stopped');
-                isSharingScreen = false;
-                liveIndicator.classList.remove('active');
-                document.body.classList.remove('support-live-mode');
-            };
-
-            // Create and send offer
-            const offer = await peerConnection.createOffer();
-            await peerConnection.setLocalDescription(offer);
-
-            console.log('[Support] Sending offer to agent');
-            socket.emit('webrtc_offer', { offer: offer });
+            // Setup the WebRTC peer connection
+            await setupPeerConnection();
 
         } catch (err) {
             console.error('[Support] Error sharing screen:', err);
@@ -331,6 +332,11 @@
         sessionStorage.removeItem(SESSION_DATA_KEY);
     }
 
+    async function resumeScreenShare() {
+        console.log('[Support] Attempting to resume screen share...');
+        await startScreenShare();
+    }
+
     function restoreSession(sessionData) {
         console.log('[Support] Restoring session:', sessionData);
 
@@ -342,12 +348,98 @@
             chatWidget.classList.add('active');
         }
 
-        // Note: We can't automatically restore screen sharing
-        // The user will need to reshare their screen after navigation
+        // If they were sharing their screen, try to auto-reconnect
         if (sessionData.status === 'sharing') {
-            // Show a message that they need to reshare
-            addChatMessage('System', 'Page reloaded. Please click "Share Screen" again to continue sharing.', true);
+            shareType = sessionData.shareType || null;
+
+            // Show live banner with resume button
+            liveIndicator.classList.add('active');
+            liveResumeBtn.style.display = 'inline-block';
+            document.body.classList.add('support-live-mode');
+
+            // Try to auto-reconnect (works best for screen/window shares)
+            setTimeout(async () => {
+                try {
+                    console.log('[Support] Auto-reconnecting screen share...');
+
+                    // Attempt to get the display media again
+                    // For screen/window shares, this might just return the existing stream
+                    // For tab shares, it will require user interaction
+                    localStream = await navigator.mediaDevices.getDisplayMedia({
+                        video: { cursor: "always" },
+                        audio: false
+                    });
+
+                    console.log('[Support] Auto-reconnect successful!');
+
+                    // Hide resume button and setup the connection
+                    liveResumeBtn.style.display = 'none';
+                    isSharingScreen = true;
+
+                    // Setup peer connection
+                    await setupPeerConnection();
+
+                    addChatMessage('System', '✅ Screen sharing reconnected!', true);
+
+                } catch (err) {
+                    console.log('[Support] Auto-reconnect failed (expected for tab shares):', err.message);
+
+                    // Show resume button and message
+                    liveResumeBtn.style.display = 'inline-block';
+
+                    if (shareType === 'browser') {
+                        addChatMessage('System', 'Tab sharing disconnected. Click "Resume Sharing" to continue (you\'ll need to reshare each time you navigate).', true);
+                    } else {
+                        addChatMessage('System', 'Click "Resume Sharing" to continue sharing your screen.', true);
+                    }
+                }
+            }, 500); // Small delay to let the page fully load
         }
+    }
+
+    async function setupPeerConnection() {
+        // Create peer connection
+        peerConnection = new RTCPeerConnection({
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        // Add tracks
+        localStream.getTracks().forEach(track => {
+            console.log('[Support] Adding track:', track);
+            peerConnection.addTrack(track, localStream);
+        });
+
+        // Handle ICE candidates
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                console.log('[Support] Sending ICE candidate');
+                socket.emit('webrtc_ice_candidate', { candidate: event.candidate });
+            }
+        };
+
+        // Handle track end
+        localStream.getVideoTracks()[0].onended = () => {
+            console.log('[Support] Screen sharing stopped by user');
+            isSharingScreen = false;
+
+            // Check if session is still active
+            const hasActiveSession = sessionStorage.getItem(SESSION_KEY) === 'true';
+            if (hasActiveSession) {
+                // Show resume button
+                liveResumeBtn.style.display = 'inline-block';
+                addChatMessage('System', 'Screen sharing stopped. Click "Resume Sharing" to continue.', true);
+            } else {
+                liveIndicator.classList.remove('active');
+                document.body.classList.remove('support-live-mode');
+            }
+        };
+
+        // Create and send offer
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+
+        console.log('[Support] Sending offer to agent');
+        socket.emit('webrtc_offer', { offer: offer });
     }
 
 })();

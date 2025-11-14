@@ -78,6 +78,34 @@
     gap: 0.5rem;
 }
 
+.support-btn-live-resume {
+    background: #ffc107;
+    color: #000;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    animation: supportPulseButton 2s ease-in-out infinite;
+}
+
+.support-btn-live-resume:hover {
+    background: #ffca2c;
+    transform: translateY(-1px);
+}
+
+@keyframes supportPulseButton {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(255, 193, 7, 0);
+    }
+}
+
 .support-btn-live-end {
     background: white;
     color: #dc3545;
