@@ -1,6 +1,7 @@
 flask~=3.0.2
 flask-wtf
 flask-socketio~=5.3.6
+eventlet~=0.33.3
 gunicorn
 python-dotenv~=1.0.1
 pytest~=7.2.0

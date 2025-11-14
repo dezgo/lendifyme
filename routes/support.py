@@ -105,6 +105,9 @@ def register_socketio_handlers(socketio):
 
             user_email = user[0] if user else f"User #{user_id}"
 
+            # Store user email in session data for display in admin dashboard
+            active_sessions[user_id]['user_email'] = user_email
+
             # Send email to admin
             admin_email = os.getenv('ADMIN_EMAIL')
             if admin_email:
@@ -133,7 +136,8 @@ Go to the support dashboard to help them:
         # Notify all admins that a new request came in
         socketio.emit('new_support_request', {
             'user_id': user_id,
-            'room_id': room_id
+            'room_id': room_id,
+            'user_email': user_email
         }, room='admin_room')
 
 

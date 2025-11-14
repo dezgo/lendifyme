@@ -258,12 +258,122 @@ h1 {
 .chat-send:hover {
     background: #0056b3;
 }
+/* Live indicator banner */
+.live-indicator {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    padding: 1.5rem 2rem;
+    z-index: 10000;
+    display: none;
+    box-shadow: 0 4px 20px rgba(220, 53, 69, 0.4);
+    border-bottom: 4px solid #bd2130;
+}
+.live-indicator.active {
+    display: block;
+    animation: slideDown 0.5s ease-out;
+}
+@keyframes slideDown {
+    from {
+        transform: translateY(-100%);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+.live-indicator-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 2rem;
+}
+.live-indicator-text {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex: 1;
+}
+.live-pulse {
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.2);
+    }
+}
+.live-indicator h2 {
+    margin: 0;
+    font-size: 1.5rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.live-indicator p {
+    margin: 0.5rem 0 0 0;
+    font-size: 1rem;
+    opacity: 0.95;
+}
+.live-indicator-actions {
+    display: flex;
+    gap: 1rem;
+}
+.btn-live-end {
+    background: white;
+    color: #dc3545;
+    padding: 1rem 2rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+.btn-live-end:hover {
+    background: #f8f9fa;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+}
+/* Push down content when live indicator is showing */
+.support-container.live-mode {
+    margin-top: 140px;
+}
 {% endblock %}
 
 {% block content %}
+<!-- Live Screen Sharing Indicator -->
+<div class="live-indicator" id="live-indicator">
+    <div class="live-indicator-content">
+        <div class="live-indicator-text">
+            <div class="live-pulse"></div>
+            <div>
+                <h2>🔴 LIVE - Agent is viewing your screen</h2>
+                <p>A support agent can see everything on this screen. End the session when you're done.</p>
+            </div>
+        </div>
+        <div class="live-indicator-actions">
+            <button class="btn-live-end" id="live-end-btn">End Session Now</button>
+        </div>
+    </div>
+</div>
+
 <a href="/" class="back-link">← Back to Dashboard</a>
 
-<div class="support-container">
+<div class="support-container" id="support-container">
     <h1>Get Support</h1>
     <p class="subtitle">Connect with an agent and share your screen for help</p>
 
@@ -351,6 +461,9 @@ const chatMessages = document.getElementById('chat-messages');
 const chatInput = document.getElementById('chat-input');
 const chatSend = document.getElementById('chat-send');
 const chatMinimize = document.getElementById('chat-minimize');
+const liveIndicator = document.getElementById('live-indicator');
+const liveEndBtn = document.getElementById('live-end-btn');
+const supportContainer = document.getElementById('support-container');
 
 let chatMinimized = false;
 
@@ -472,6 +585,10 @@ async function startScreenShare() {
         previewVideo.srcObject = localStream;
         previewContainer.style.display = 'block';
 
+        // Show LIVE indicator banner
+        liveIndicator.classList.add('active');
+        supportContainer.classList.add('live-mode');
+
         updateStatus('connected', 'Screen sharing active - Agent can see your screen');
 
         // Create peer connection
@@ -503,6 +620,9 @@ async function startScreenShare() {
             shareBtn.disabled = false;
             shareBtn.textContent = 'Share My Screen';
             previewContainer.style.display = 'none';
+            // Hide LIVE indicator
+            liveIndicator.classList.remove('active');
+            supportContainer.classList.remove('live-mode');
         };
 
         // Create and send offer
@@ -550,12 +670,17 @@ function cleanup() {
     shareBtn.textContent = 'Share My Screen';
     endBtn.style.display = 'none';
     chatWidget.classList.remove('active');
+    // Hide LIVE indicator
+    liveIndicator.classList.remove('active');
+    supportContainer.classList.remove('live-mode');
+    document.getElementById('preview-container').style.display = 'none';
 }
 
 // Event listeners
 requestBtn.addEventListener('click', requestSupport);
 shareBtn.addEventListener('click', shareScreen);
 endBtn.addEventListener('click', endSession);
+liveEndBtn.addEventListener('click', endSession);
 
 // Modal event listeners
 modalCancel.addEventListener('click', () => {

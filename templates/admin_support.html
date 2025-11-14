@@ -223,7 +223,7 @@ h1 {
                 {% for session in waiting_sessions %}
                 <div class="session-card waiting" data-user-id="{{ session.user_id }}">
                     <div class="session-info">
-                        <h3>User #{{ session.user_id }}</h3>
+                        <h3>{{ session.user_email if session.user_email else 'User #' + session.user_id|string }}</h3>
                         <p>Waiting for support</p>
                     </div>
                     <div class="session-actions">
@@ -248,7 +248,7 @@ h1 {
                 {% for session in active_sessions %}
                 <div class="session-card connected" data-user-id="{{ session.user_id }}">
                     <div class="session-info">
-                        <h3>User #{{ session.user_id }}</h3>
+                        <h3>{{ session.user_email if session.user_email else 'User #' + session.user_id|string }}</h3>
                         <p>Connected</p>
                     </div>
                     <div class="session-actions">
@@ -295,7 +295,7 @@ function initSocket() {
 
     socket.on('new_support_request', (data) => {
         console.log('New support request from user', data.user_id);
-        addWaitingSession(data.user_id);
+        addWaitingSession(data.user_id, data.user_email);
     });
 
     socket.on('joined_session', (data) => {
@@ -336,19 +336,21 @@ function getCurrentSessionUser(data) {
     return Object.keys(peerConnections)[0];
 }
 
-function addWaitingSession(userId) {
+function addWaitingSession(userId, userEmail) {
     const waitingList = document.getElementById('waiting-list');
     const emptyState = waitingList.querySelector('.empty-state');
     if (emptyState) {
         emptyState.remove();
     }
 
+    const displayName = userEmail || `User #${userId}`;
+
     const sessionCard = document.createElement('div');
     sessionCard.className = 'session-card waiting';
     sessionCard.setAttribute('data-user-id', userId);
     sessionCard.innerHTML = `
         <div class="session-info">
-            <h3>User #${userId}</h3>
+            <h3>${escapeHtml(displayName)}</h3>
             <p>Waiting for support</p>
         </div>
         <div class="session-actions">
@@ -369,7 +371,14 @@ function addWaitingSession(userId) {
 
 function moveToActiveSession(userId) {
     const waitingCard = document.querySelector(`.session-card.waiting[data-user-id="${userId}"]`);
+    let displayName = `User #${userId}`;
+
+    // Try to get the display name from the waiting card
     if (waitingCard) {
+        const nameElement = waitingCard.querySelector('.session-info h3');
+        if (nameElement) {
+            displayName = nameElement.textContent;
+        }
         waitingCard.remove();
     }
 
@@ -384,7 +393,7 @@ function moveToActiveSession(userId) {
     sessionCard.setAttribute('data-user-id', userId);
     sessionCard.innerHTML = `
         <div class="session-info">
-            <h3>User #${userId}</h3>
+            <h3>${escapeHtml(displayName)}</h3>
             <p>Connected - Waiting for screen share...</p>
         </div>
         <div class="session-actions">
