@@ -391,7 +391,7 @@ body.live-mode {
     </div>
 </div>
 
-<a href="/" class="back-link">← Back to Dashboard</a>
+<a href="/" class="back-link" id="back-link">← Back to Dashboard</a>
 
 <div class="support-container" id="support-container">
     <h1>Get Support</h1>
@@ -489,6 +489,29 @@ const chatToggle = document.getElementById('chat-toggle');
 const liveIndicator = document.getElementById('live-indicator');
 const liveEndBtn = document.getElementById('live-end-btn');
 const supportContainer = document.getElementById('support-container');
+const backLink = document.getElementById('back-link');
+
+let isSharingScreen = false;
+
+// Prevent navigation when screen sharing is active
+backLink.addEventListener('click', (e) => {
+    if (isSharingScreen) {
+        e.preventDefault();
+        if (confirm('You are currently sharing your screen. If you leave this page, the agent will lose your video feed.\n\nDo you want to end the screen share and return to the dashboard?')) {
+            endSession();
+            window.location.href = '/';
+        }
+    }
+});
+
+// Warn before closing/reloading page during active screen share
+window.addEventListener('beforeunload', (e) => {
+    if (isSharingScreen) {
+        e.preventDefault();
+        e.returnValue = 'You are currently sharing your screen. Leaving will end the session.';
+        return e.returnValue;
+    }
+});
 
 // Initialize Socket.IO connection
 function initSocket() {
@@ -612,6 +635,7 @@ async function startScreenShare() {
         // Show LIVE indicator banner
         liveIndicator.classList.add('active');
         document.body.classList.add('live-mode');
+        isSharingScreen = true;
 
         updateStatus('connected', 'Screen sharing active - Agent can see your screen');
 
@@ -644,6 +668,7 @@ async function startScreenShare() {
             shareBtn.disabled = false;
             shareBtn.textContent = 'Share My Screen';
             previewContainer.style.display = 'none';
+            isSharingScreen = false;
             // Hide LIVE indicator
             liveIndicator.classList.remove('active');
             document.body.classList.remove('live-mode');
@@ -687,6 +712,7 @@ function cleanup() {
         peerConnection.close();
         peerConnection = null;
     }
+    isSharingScreen = false;
     requestBtn.disabled = false;
     requestBtn.style.display = 'inline-block';
     shareBtn.style.display = 'none';
