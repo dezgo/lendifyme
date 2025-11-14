@@ -149,6 +149,115 @@ h1 {
 .btn-secondary:hover {
     background: #5a6268;
 }
+.chat-widget {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 350px;
+    max-height: 500px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    display: none;
+    flex-direction: column;
+    z-index: 1000;
+}
+.chat-widget.active {
+    display: flex;
+}
+.chat-header {
+    background: #007bff;
+    color: white;
+    padding: 1rem;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.chat-header h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+.chat-minimize {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 1.5rem;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    max-height: 300px;
+}
+.chat-message {
+    margin-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+}
+.chat-message.agent {
+    align-items: flex-start;
+}
+.chat-message.user {
+    align-items: flex-end;
+}
+.chat-bubble {
+    background: #f1f3f4;
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+.chat-message.agent .chat-bubble {
+    background: #e3f2fd;
+}
+.chat-message.user .chat-bubble {
+    background: #007bff;
+    color: white;
+}
+.chat-sender {
+    font-size: 0.75rem;
+    color: #666;
+    margin-bottom: 0.25rem;
+}
+.chat-input-container {
+    padding: 1rem;
+    border-top: 1px solid #ddd;
+    display: flex;
+    gap: 0.5rem;
+}
+.chat-input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    outline: none;
+}
+.chat-input:focus {
+    border-color: #007bff;
+}
+.chat-send {
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.chat-send:hover {
+    background: #0056b3;
+}
 {% endblock %}
 
 {% block content %}
@@ -200,6 +309,26 @@ h1 {
     </div>
 </div>
 
+<!-- Chat Widget -->
+<div class="chat-widget" id="chat-widget">
+    <div class="chat-header">
+        <h3>💬 Chat with Support</h3>
+        <button class="chat-minimize" id="chat-minimize">−</button>
+    </div>
+    <div class="chat-messages" id="chat-messages">
+        <div class="chat-message agent">
+            <span class="chat-sender">Support Agent</span>
+            <div class="chat-bubble">
+                Hi! I'll be with you shortly. Feel free to describe your issue while you wait.
+            </div>
+        </div>
+    </div>
+    <div class="chat-input-container">
+        <input type="text" class="chat-input" id="chat-input" placeholder="Type a message...">
+        <button class="chat-send" id="chat-send">→</button>
+    </div>
+</div>
+
 <!-- Socket.IO Client -->
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
@@ -217,6 +346,13 @@ const endBtn = document.getElementById('end-btn');
 const shareModal = document.getElementById('share-modal');
 const modalCancel = document.getElementById('modal-cancel');
 const modalConfirm = document.getElementById('modal-confirm');
+const chatWidget = document.getElementById('chat-widget');
+const chatMessages = document.getElementById('chat-messages');
+const chatInput = document.getElementById('chat-input');
+const chatSend = document.getElementById('chat-send');
+const chatMinimize = document.getElementById('chat-minimize');
+
+let chatMinimized = false;
 
 // Initialize Socket.IO connection
 function initSocket() {
@@ -260,6 +396,10 @@ function initSocket() {
         updateStatus('disconnected', data.message);
         cleanup();
     });
+
+    socket.on('new_message', (data) => {
+        addChatMessage(data.sender, data.text, data.is_agent);
+    });
 }
 
 function updateStatus(status, message) {
@@ -274,6 +414,36 @@ function requestSupport() {
     updateStatus('waiting', 'Waiting for an agent to join...');
     requestBtn.disabled = true;
     endBtn.style.display = 'inline-block';
+
+    // Show chat widget
+    chatWidget.classList.add('active');
+}
+
+function sendChatMessage() {
+    const message = chatInput.value.trim();
+    if (!message) return;
+
+    socket.emit('send_message', { message: message });
+    chatInput.value = '';
+}
+
+function addChatMessage(sender, text, isAgent) {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `chat-message ${isAgent ? 'agent' : 'user'}`;
+
+    messageDiv.innerHTML = `
+        <span class="chat-sender">${sender}</span>
+        <div class="chat-bubble">${escapeHtml(text)}</div>
+    `;
+
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function shareScreen() {
@@ -379,6 +549,7 @@ function cleanup() {
     shareBtn.disabled = true;
     shareBtn.textContent = 'Share My Screen';
     endBtn.style.display = 'none';
+    chatWidget.classList.remove('active');
 }
 
 // Event listeners
@@ -397,6 +568,17 @@ shareModal.addEventListener('click', (e) => {
     if (e.target === shareModal) {
         shareModal.classList.remove('active');
     }
+});
+
+// Chat event listeners
+chatSend.addEventListener('click', sendChatMessage);
+chatInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        sendChatMessage();
+    }
+});
+chatMinimize.addEventListener('click', () => {
+    chatWidget.classList.toggle('active');
 });
 
 // Auto-reconnect if already in a session

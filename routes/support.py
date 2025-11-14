@@ -4,12 +4,13 @@ Support routes - Remote screen sharing support for users and agents.
 from flask import Blueprint, render_template, session, redirect, url_for, flash, request as flask_request
 from flask_socketio import emit, join_room, leave_room
 from helpers.decorators import login_required, admin_required
+from datetime import datetime
 
 # Create blueprint
 support_bp = Blueprint('support', __name__)
 
 # In-memory storage for active support sessions
-# Format: {user_id: {'room_id': str, 'status': 'waiting'|'connected', 'agent_sid': str}}
+# Format: {user_id: {'room_id': str, 'status': 'waiting'|'connected', 'agent_sid': str, 'messages': []}}
 active_sessions = {}
 
 
@@ -59,7 +60,10 @@ def admin_support():
 
 def register_socketio_handlers(socketio):
     """Register Socket.IO event handlers for WebRTC signaling."""
-    from flask import request
+    from flask import request, current_app
+    from flask_mail import Message
+    from helpers.db import get_db_connection
+    import os
 
     @socketio.on('request_support')
     def handle_request_support(data):
@@ -77,7 +81,8 @@ def register_socketio_handlers(socketio):
             'room_id': room_id,
             'status': 'waiting',
             'user_sid': request.sid,
-            'agent_sid': None
+            'agent_sid': None,
+            'messages': []
         }
 
         # Join the room
@@ -88,6 +93,42 @@ def register_socketio_handlers(socketio):
             'status': 'waiting',
             'message': 'Waiting for an agent to join...'
         })
+
+        # Send email notification to admin
+        try:
+            # Get user email from database
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute("SELECT email FROM users WHERE id = ?", (user_id,))
+            user = c.fetchone()
+            conn.close()
+
+            user_email = user[0] if user else f"User #{user_id}"
+
+            # Send email to admin
+            admin_email = os.getenv('ADMIN_EMAIL')
+            if admin_email:
+                from routes.auth import get_mail_instance
+                mail = get_mail_instance()
+
+                msg = Message(
+                    subject="🆘 New Support Request - LendifyMe",
+                    recipients=[admin_email],
+                    body=f"""
+A user has requested support on LendifyMe!
+
+User: {user_email}
+User ID: {user_id}
+Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+Go to the support dashboard to help them:
+{os.getenv('APP_URL', 'http://localhost:5000')}/admin/support
+                    """.strip()
+                )
+                mail.send(msg)
+                current_app.logger.info(f"Support request email sent for user {user_id}")
+        except Exception as e:
+            current_app.logger.error(f"Failed to send support request email: {e}")
 
         # Notify all admins that a new request came in
         socketio.emit('new_support_request', {
@@ -233,6 +274,56 @@ def register_socketio_handlers(socketio):
 
         # Leave room
         leave_room(room_id)
+
+
+    @socketio.on('send_message')
+    def handle_send_message(data):
+        """Handle chat messages between user and agent."""
+        user_id = session.get('user_id')
+        if not user_id:
+            return
+
+        message_text = data.get('message', '').strip()
+        if not message_text:
+            return
+
+        # Determine which session this belongs to
+        if user_id == 1:  # Agent sending message
+            target_user_id = data.get('user_id')
+            session_info = active_sessions.get(target_user_id)
+            sender_name = "Support Agent"
+            is_agent = True
+        else:  # User sending message
+            session_info = active_sessions.get(user_id)
+            target_user_id = user_id
+            # Get user name from database
+            try:
+                conn = get_db_connection()
+                c = conn.cursor()
+                c.execute("SELECT name, email FROM users WHERE id = ?", (user_id,))
+                user_data = c.fetchone()
+                conn.close()
+                sender_name = user_data[0] if (user_data and user_data[0]) else (user_data[1] if user_data else f"User #{user_id}")
+            except:
+                sender_name = f"User #{user_id}"
+            is_agent = False
+
+        if not session_info:
+            return
+
+        room_id = session_info['room_id']
+
+        # Store message in session
+        message_obj = {
+            'sender': sender_name,
+            'text': message_text,
+            'timestamp': datetime.now().isoformat(),
+            'is_agent': is_agent
+        }
+        session_info['messages'].append(message_obj)
+
+        # Broadcast message to everyone in the room
+        socketio.emit('new_message', message_obj, room=room_id)
 
 
     @socketio.on('disconnect')
