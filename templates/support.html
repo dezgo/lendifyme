@@ -91,6 +91,64 @@ h1 {
     margin: 0;
     color: #333;
 }
+.modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+.modal-overlay.active {
+    display: flex;
+}
+.modal-content {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    max-width: 500px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    animation: slideIn 0.3s ease-out;
+}
+@keyframes slideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+.modal-content h2 {
+    margin: 0 0 1rem 0;
+    color: #333;
+    font-size: 1.5rem;
+}
+.modal-content p {
+    margin: 0 0 1.5rem 0;
+    color: #666;
+    line-height: 1.6;
+}
+.modal-content strong {
+    color: #007bff;
+}
+.modal-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+}
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+.btn-secondary:hover {
+    background: #5a6268;
+}
 {% endblock %}
 
 {% block content %}
@@ -129,6 +187,19 @@ h1 {
     </div>
 </div>
 
+<!-- Screen Share Confirmation Modal -->
+<div class="modal-overlay" id="share-modal">
+    <div class="modal-content">
+        <h2>Ready to share your screen?</h2>
+        <p>When you click <strong>"Start Sharing"</strong>, your browser will ask which window or tab to share.</p>
+        <p><strong>Important:</strong> Make sure to select <strong>this tab</strong> (the one showing your loans and dashboard). This way the support agent can see what you're working on.</p>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" id="modal-cancel">Cancel</button>
+            <button class="btn btn-primary" id="modal-confirm">Start Sharing</button>
+        </div>
+    </div>
+</div>
+
 <!-- Socket.IO Client -->
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
@@ -143,6 +214,9 @@ const statusText = document.getElementById('status-text');
 const requestBtn = document.getElementById('request-btn');
 const shareBtn = document.getElementById('share-btn');
 const endBtn = document.getElementById('end-btn');
+const shareModal = document.getElementById('share-modal');
+const modalCancel = document.getElementById('modal-cancel');
+const modalConfirm = document.getElementById('modal-confirm');
 
 // Initialize Socket.IO connection
 function initSocket() {
@@ -202,10 +276,15 @@ function requestSupport() {
     endBtn.style.display = 'inline-block';
 }
 
-async function shareScreen() {
+function shareScreen() {
+    // Show the modal instead of immediately requesting screen share
+    shareModal.classList.add('active');
+}
+
+async function startScreenShare() {
     try {
-        // Show helpful instructions
-        alert('⚠️ IMPORTANT: When selecting what to share, make sure to select THIS TAB (your loan dashboard), NOT the admin support dashboard!\n\nLook for the tab that shows your loans.');
+        // Hide modal
+        shareModal.classList.remove('active');
 
         // Request screen sharing
         console.log('Requesting screen share...');
@@ -306,6 +385,19 @@ function cleanup() {
 requestBtn.addEventListener('click', requestSupport);
 shareBtn.addEventListener('click', shareScreen);
 endBtn.addEventListener('click', endSession);
+
+// Modal event listeners
+modalCancel.addEventListener('click', () => {
+    shareModal.classList.remove('active');
+});
+modalConfirm.addEventListener('click', startScreenShare);
+
+// Close modal if clicking outside
+shareModal.addEventListener('click', (e) => {
+    if (e.target === shareModal) {
+        shareModal.classList.remove('active');
+    }
+});
 
 // Auto-reconnect if already in a session
 {% if existing_session %}

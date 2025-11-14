@@ -57,8 +57,11 @@ sentry_sdk.init(
 )
 
 app = Flask(__name__)
+
+# Socket.IO needs to be initialized before CSRF to avoid conflicts
+socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False, engineio_logger=False, async_mode='threading')
+
 csrf = CSRFProtect(app)
-socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False)
 
 if os.getenv("FLASK_ENV") == "production":
     app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
