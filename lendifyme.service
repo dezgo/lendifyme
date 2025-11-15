@@ -1,0 +1,19 @@
+[Unit]
+Description=Gunicorn service for LendifyMe Flask app
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/lendifyme
+EnvironmentFile=/var/www/lendifyme/.env
+ExecStart=/var/www/lendifyme/venv/bin/gunicorn \
+  --worker-class gevent \
+  -w 1 \
+  --bind unix:/var/www/lendifyme/lendifyme.sock \
+  app:app
+
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
