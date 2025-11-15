@@ -54,6 +54,30 @@ def admin_support():
     )
 
 
+@support_bp.route("/admin/support/sessions")
+@admin_required
+def get_sessions():
+    """API endpoint to get current sessions status (for polling)."""
+    from flask import jsonify
+
+    waiting_sessions = [
+        {'user_id': uid, 'user_email': data.get('user_email', f'User #{uid}')}
+        for uid, data in active_sessions.items()
+        if data['status'] == 'waiting'
+    ]
+
+    active_support = [
+        {'user_id': uid, 'user_email': data.get('user_email', f'User #{uid}')}
+        for uid, data in active_sessions.items()
+        if data['status'] == 'connected'
+    ]
+
+    return jsonify({
+        'waiting': waiting_sessions,
+        'active': active_support
+    })
+
+
 # ============================================================================
 # Socket.IO Event Handlers
 # ============================================================================
