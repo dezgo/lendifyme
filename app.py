@@ -10,6 +10,7 @@ from flask_mail import Mail
 from functools import wraps
 import os
 import logging
+import platform
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
@@ -59,9 +60,13 @@ sentry_sdk.init(
 app = Flask(__name__)
 
 # Socket.IO needs to be initialized before CSRF to avoid conflicts
-# Using eventlet for production (works on Ubuntu server)
-# Note: For local Windows development, use python app.py which will auto-select threading
-socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False, engineio_logger=False, async_mode='eventlet')
+# Auto-detect async_mode for Windows/development, use eventlet for Linux production
+if platform.system() == 'Windows':
+    # Windows development - let Socket.IO auto-detect (uses threading)
+    socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False, engineio_logger=False)
+else:
+    # Linux production - use eventlet for WebSocket support with gunicorn
+    socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False, engineio_logger=False, async_mode='eventlet')
 
 csrf = CSRFProtect(app)
 
