@@ -68,7 +68,7 @@
                 <a href="/admin/users" class="settings-link">👥 Users</a>
                 <a href="/admin/support" class="settings-link">🎧 Support</a>
                 {% else %}
-                <a href="/support" class="settings-link">🆘 Get Support</a>
+                <a href="/support" class="settings-link" id="support-link">🆘 Get Support</a>
                 {% endif %}
                 <a href="/settings" class="settings-link">⚙️ Settings</a>
                 <a href="/logout" class="logout-link">Logout</a>
@@ -482,6 +482,19 @@
                 });
             });
         })();
+    </script>
+
+    <script>
+        // Hide "Get Support" link if we're inside the support iframe
+        if (window.self !== window.top) {
+            // We're in an iframe
+            document.addEventListener('DOMContentLoaded', function() {
+                const supportLink = document.getElementById('support-link');
+                if (supportLink) {
+                    supportLink.style.display = 'none';
+                }
+            });
+        }
     </script>
 
     <script defer src="{{ url_for('static', filename='js/app.js', v=1) }}"></script>

@@ -335,8 +335,13 @@
             });
 
             socket.on('session_ended', (data) => {
-                updateStatus('disconnected', data.message);
+                updateStatus('disconnected', data.message + ' - Redirecting...');
                 cleanup();
+
+                // Redirect to dashboard after session ends
+                setTimeout(() => {
+                    window.location.href = '/';
+                }, 2000);
             });
 
             socket.on('new_message', (data) => {
@@ -409,7 +414,12 @@
         function endSession() {
             socket.emit('end_support_session', { user_id: userId });
             cleanup();
-            updateStatus('disconnected', 'Session ended');
+            updateStatus('disconnected', 'Session ended - Redirecting...');
+
+            // Redirect to dashboard after ending session
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 1000);
         }
 
         function cleanup() {
@@ -420,6 +430,10 @@
             if (peerConnection) {
                 peerConnection.close();
                 peerConnection = null;
+            }
+            if (socket) {
+                socket.disconnect();
+                socket = null;
             }
             requestBtn.disabled = false;
             requestBtn.style.display = 'inline-block';
