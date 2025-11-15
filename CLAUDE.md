@@ -13,8 +13,12 @@ LendifyMe is a simple loan tracking Flask web application that allows users to r
 # Development server
 python app.py
 
-# Production server (using gunicorn)
-gunicorn app:app
+# Production server (using gunicorn with gevent worker for Socket.IO support)
+gunicorn --worker-class gevent -w 1 app:app
+
+# IMPORTANT: Socket.IO requires gevent worker class
+# Standard gunicorn workers will NOT work with WebSocket connections
+# Use -w 1 for single worker (Socket.IO rooms require sticky sessions)
 ```
 
 ### Testing

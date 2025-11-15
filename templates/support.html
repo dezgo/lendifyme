@@ -363,7 +363,10 @@
 
             socket.on('connect_error', (error) => {
                 console.error('[Support] Connection error:', error);
-                updateStatus('disconnected', 'Connection error - Please refresh the page');
+                console.error('[Support] Error type:', error.type);
+                console.error('[Support] Error message:', error.message);
+                console.error('[Support] Error description:', error.description);
+                updateStatus('disconnected', `Connection error: ${error.message || 'Unknown error'}. Please check console for details.`);
             });
         }
 
