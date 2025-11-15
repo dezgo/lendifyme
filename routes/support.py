@@ -135,9 +135,6 @@ def register_socketio_handlers(socketio):
             # Send email to admin
             admin_email = os.getenv('ADMIN_EMAIL')
             if admin_email:
-                from routes.auth import get_mail_instance
-                mail = get_mail_instance()
-
                 msg = Message(
                     subject="🆘 New Support Request - LendifyMe",
                     recipients=[admin_email],
@@ -152,7 +149,7 @@ Go to the support dashboard to help them:
 {os.getenv('APP_URL', 'http://localhost:5000')}/admin/support
                     """.strip()
                 )
-                mail.send(msg)
+                current_app.extensions['mail'].send(msg)
                 current_app.logger.info(f"Support request email sent for user {user_id}")
         except Exception as e:
             current_app.logger.error(f"Failed to send support request email: {e}")
