@@ -117,9 +117,8 @@ def register_socketio_handlers(socketio):
             'message': 'Waiting for an agent to join...'
         })
 
-        # Send email notification to admin
+        # Get user email and send notification to admin
         try:
-            # Get user email from database
             conn = get_db_connection()
             c = conn.cursor()
             c.execute("SELECT email FROM users WHERE id = ?", (user_id,))
@@ -131,23 +130,9 @@ def register_socketio_handlers(socketio):
             # Store user email in session data for display in admin dashboard
             active_sessions[user_id]['user_email'] = user_email
 
-            # Send email to admin
-            admin_email = os.getenv('ADMIN_EMAIL')
-            if admin_email:
-                from services.email_sender import send_support_request_email
-                app_url = os.getenv('APP_URL', 'http://localhost:5000')
-
-                success, message = send_support_request_email(
-                    admin_email=admin_email,
-                    user_email=user_email,
-                    user_id=user_id,
-                    app_url=app_url
-                )
-
-                if success:
-                    current_app.logger.info(f"Support request email sent for user {user_id}")
-                else:
-                    current_app.logger.warning(f"Failed to send support email: {message}")
+            # Send support request notification (all complexity handled internally)
+            from services.email_service import email_service
+            email_service.send_support_request(user_id, user_email)
         except Exception as e:
             current_app.logger.error(f"Failed to send support request email: {e}")
 

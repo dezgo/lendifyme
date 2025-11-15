@@ -157,12 +157,55 @@ Optional bank API credentials (required only if using respective connector):
 - `UP_BANK_API_KEY` - Up Bank API token (get from https://api.up.com.au/getting_started)
 - Additional banks can be added by extending the connector registry
 
+Optional email configuration:
+- `MAILGUN_API_KEY` - Mailgun API key (recommended for production)
+- `MAILGUN_DOMAIN` - Mailgun domain
+- `MAIL_DEFAULT_SENDER` - Sender email address
+- `MAIL_SENDER_NAME` - Sender name (defaults to 'LendifyMe')
+- `APP_URL` - Base application URL (e.g., https://lendifyme.com)
+- `ADMIN_EMAIL` - Admin email for support notifications
+
 **Setup:**
 1. Copy `.env.example` to `.env`
 2. Set `SECRET_KEY` to a random value
 3. Add bank API keys for any connectors you want to use
-4. Run `pip install -r requirements.txt`
-5. Run `python app.py`
+4. Add email credentials (Mailgun recommended)
+5. Run `pip install -r requirements.txt`
+6. Run `python app.py`
+
+### Email Service
+The application uses a centralized email service (`services/email_service.py`) that abstracts all email complexity.
+
+**Usage Pattern:**
+```python
+from services.email_service import email_service
+
+# Send support request notification
+email_service.send_support_request(user_id, user_email)
+
+# Send magic link
+email_service.send_magic_link(email, name, token)
+
+# Send borrower invite
+email_service.send_borrower_invite(borrower_email, borrower_name, portal_token, lender_name)
+
+# Send payment notification
+email_service.send_payment_notification(
+    borrower_email, borrower_name, portal_token, lender_name,
+    payment_amount, payment_date, payment_description, new_balance, original_amount
+)
+```
+
+**How It Works:**
+- Email service handles environment variables internally (APP_URL, ADMIN_EMAIL, etc.)
+- Tries Mailgun API first, falls back to SMTP automatically
+- All logging and error handling is centralized
+- Callers don't need to know about email infrastructure
+
+**Email Providers:**
+1. **Mailgun API** (recommended for production) - Set `MAILGUN_API_KEY` and `MAILGUN_DOMAIN`
+2. **SMTP** (fallback) - Set `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SERVER`, `MAIL_PORT`
+3. **Development mode** - Prints links to console if no provider configured
 
 ## Bank Connector Architecture
 
