@@ -7,3 +7,4 @@ logs/
 *.log
 .claude/settings.local.json
 copy_prod_db.bat
+.venv

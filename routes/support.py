@@ -85,7 +85,6 @@ def get_sessions():
 def register_socketio_handlers(socketio):
     """Register Socket.IO event handlers for WebRTC signaling."""
     from flask import request, current_app
-    from flask_mail import Message
     from helpers.db import get_db_connection
     import os
 
@@ -118,9 +117,8 @@ def register_socketio_handlers(socketio):
             'message': 'Waiting for an agent to join...'
         })
 
-        # Send email notification to admin
+        # Get user email and send notification to admin
         try:
-            # Get user email from database
             conn = get_db_connection()
             c = conn.cursor()
             c.execute("SELECT email FROM users WHERE id = ?", (user_id,))
@@ -132,28 +130,9 @@ def register_socketio_handlers(socketio):
             # Store user email in session data for display in admin dashboard
             active_sessions[user_id]['user_email'] = user_email
 
-            # Send email to admin
-            admin_email = os.getenv('ADMIN_EMAIL')
-            if admin_email:
-                from routes.auth import get_mail_instance
-                mail = get_mail_instance()
-
-                msg = Message(
-                    subject="🆘 New Support Request - LendifyMe",
-                    recipients=[admin_email],
-                    body=f"""
-A user has requested support on LendifyMe!
-
-User: {user_email}
-User ID: {user_id}
-Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-Go to the support dashboard to help them:
-{os.getenv('APP_URL', 'http://localhost:5000')}/admin/support
-                    """.strip()
-                )
-                mail.send(msg)
-                current_app.logger.info(f"Support request email sent for user {user_id}")
+            # Send support request notification (all complexity handled internally)
+            from services.email_service import email_service
+            email_service.send_support_request(user_id, user_email)
         except Exception as e:
             current_app.logger.error(f"Failed to send support request email: {e}")
 
