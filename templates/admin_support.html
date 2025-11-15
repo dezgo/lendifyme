@@ -137,9 +137,13 @@ h1 {
     cursor: pointer;
     font-size: 0.9rem;
     z-index: 10;
+    pointer-events: auto;
 }
 .video-fullscreen-btn:hover {
     background: rgba(0, 0, 0, 0.9);
+}
+.video-fullscreen-btn:active {
+    transform: scale(0.95);
 }
 .video-container.fullscreen {
     position: fixed;
@@ -494,8 +498,8 @@ function moveToActiveSession(userId) {
     });
 
     // Fullscreen button
-    sessionCard.querySelector('.video-fullscreen-btn').addEventListener('click', function() {
-        toggleFullscreen(userId);
+    sessionCard.querySelector('.video-fullscreen-btn').addEventListener('click', function(e) {
+        toggleFullscreen(userId, e);
     });
 
     // Chat send button
@@ -671,9 +675,18 @@ function addChatMessageToAdmin(sender, text, isAgent) {
     });
 }
 
-function toggleFullscreen(userId) {
+function toggleFullscreen(userId, event) {
+    // Prevent event from bubbling up
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+
     const videoContainer = document.getElementById(`video-${userId}`);
+    if (!videoContainer) return;
+
     const btn = videoContainer.querySelector('.video-fullscreen-btn');
+    if (!btn) return;
 
     if (videoContainer.classList.contains('fullscreen')) {
         videoContainer.classList.remove('fullscreen');
@@ -758,6 +771,19 @@ function syncSessions(serverData) {
     });
 }
 
+// Escape key to exit fullscreen
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        // Find any fullscreen video containers and exit them
+        document.querySelectorAll('.video-container.fullscreen').forEach(container => {
+            const userId = container.id.replace('video-', '');
+            const btn = container.querySelector('.video-fullscreen-btn');
+            container.classList.remove('fullscreen');
+            if (btn) btn.textContent = '⛶ Fullscreen';
+        });
+    }
+});
+
 // Initialize socket on page load
 initSocket();
 
@@ -780,9 +806,9 @@ document.querySelectorAll('.end-btn').forEach(btn => {
 });
 
 document.querySelectorAll('.video-fullscreen-btn').forEach(btn => {
-    btn.addEventListener('click', function() {
+    btn.addEventListener('click', function(e) {
         const userId = this.getAttribute('data-user-id');
-        toggleFullscreen(userId);
+        toggleFullscreen(userId, e);
     });
 });
 </script>
