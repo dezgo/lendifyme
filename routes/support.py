@@ -266,11 +266,25 @@ Go to the support dashboard to help them:
             return
 
         room_id = session_info['room_id']
+        session_status = session_info.get('status', 'waiting')
 
         # Notify everyone in the room
         socketio.emit('session_ended', {
-            'message': 'Support session has ended.'
+            'message': 'Support session has ended.',
+            'user_id': cleanup_user_id
         }, room=room_id)
+
+        # If the session was still waiting (user cancelled before agent joined),
+        # notify admins to remove it from their waiting list
+        if session_status == 'waiting':
+            socketio.emit('session_cancelled', {
+                'user_id': cleanup_user_id
+            }, room='admin_room')
+        # If it was active, notify admins to remove from active list
+        else:
+            socketio.emit('session_ended_by_user', {
+                'user_id': cleanup_user_id
+            }, room='admin_room')
 
         # Clean up
         if cleanup_user_id in active_sessions:

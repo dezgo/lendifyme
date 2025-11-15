@@ -298,6 +298,16 @@ function initSocket() {
         addWaitingSession(data.user_id, data.user_email);
     });
 
+    socket.on('session_cancelled', (data) => {
+        console.log('Session cancelled by user', data.user_id);
+        removeWaitingSession(data.user_id);
+    });
+
+    socket.on('session_ended_by_user', (data) => {
+        console.log('Active session ended by user', data.user_id);
+        removeActiveSession(data.user_id);
+    });
+
     socket.on('joined_session', (data) => {
         console.log('Joined session with user', data.user_id);
         moveToActiveSession(data.user_id);
@@ -320,8 +330,9 @@ function initSocket() {
 
     socket.on('session_ended', (data) => {
         console.log('Session ended:', data.message);
-        // Reload page to refresh session list
-        location.reload();
+        // Session will be cleaned up - no need to reload entire page
+        // The session removal happens in endSession() when agent ends it,
+        // or we just don't need to do anything if user ended it (already cleaned)
     });
 
     socket.on('new_message', (data) => {
@@ -367,6 +378,27 @@ function addWaitingSession(userId, userEmail) {
     sessionCard.querySelector('.join-btn').addEventListener('click', function() {
         joinSession(userId);
     });
+}
+
+function removeWaitingSession(userId) {
+    const waitingCard = document.querySelector(`.session-card.waiting[data-user-id="${userId}"]`);
+    if (waitingCard) {
+        waitingCard.remove();
+        updateCounts();
+    }
+}
+
+function removeActiveSession(userId) {
+    const activeCard = document.querySelector(`.session-card.connected[data-user-id="${userId}"]`);
+    if (activeCard) {
+        // Close peer connection if exists
+        if (peerConnections[userId]) {
+            peerConnections[userId].close();
+            delete peerConnections[userId];
+        }
+        activeCard.remove();
+        updateCounts();
+    }
 }
 
 function moveToActiveSession(userId) {
