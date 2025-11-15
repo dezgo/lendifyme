@@ -1,0 +1,816 @@
+{% extends "base.html" %}
+
+{% block title %}Support Dashboard – LendifyMe{% endblock %}
+
+{% block extra_css %}
+.back-link {
+    display: inline-block;
+    margin-bottom: 1rem;
+    color: #007bff;
+    text-decoration: none;
+}
+.back-link:hover {
+    text-decoration: underline;
+}
+h1 {
+    margin-bottom: 0.5rem;
+}
+.subtitle {
+    color: #666;
+    margin-bottom: 2rem;
+}
+.support-dashboard {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.section {
+    margin-bottom: 2rem;
+}
+.section h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+    color: #333;
+}
+.session-list {
+    display: grid;
+    gap: 1rem;
+}
+.session-card {
+    background: white;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    padding: 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+.session-card.waiting {
+    border-color: #ffc107;
+    background: #fffbf0;
+}
+.session-card.connected {
+    border-color: #28a745;
+    background: #f0f9f4;
+}
+.session-info h3 {
+    margin: 0 0 0.5rem 0;
+    color: #333;
+}
+.session-info p {
+    margin: 0;
+    color: #666;
+    font-size: 0.9rem;
+}
+.session-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+.btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+.btn-primary:hover {
+    background: #0056b3;
+}
+.btn-danger {
+    background: #dc3545;
+    color: white;
+}
+.btn-danger:hover {
+    background: #c82333;
+}
+.btn-success {
+    background: #28a745;
+    color: white;
+}
+.btn-success:hover {
+    background: #218838;
+}
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+.empty-state {
+    text-align: center;
+    padding: 3rem;
+    color: #999;
+}
+.empty-state p {
+    margin: 0;
+    font-size: 1.1rem;
+}
+.video-container {
+    margin-top: 1rem;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    display: none;
+    position: relative;
+}
+.video-container.active {
+    display: block;
+}
+.video-container video {
+    width: 100%;
+    min-height: 600px;
+    max-height: 800px;
+    height: auto;
+    display: block;
+}
+.video-fullscreen-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0, 0, 0, 0.7);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    z-index: 10;
+    pointer-events: auto;
+}
+.video-fullscreen-btn:hover {
+    background: rgba(0, 0, 0, 0.9);
+}
+.video-fullscreen-btn:active {
+    transform: scale(0.95);
+}
+.video-container.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 9999;
+    border-radius: 0;
+    margin: 0;
+}
+.video-container.fullscreen video {
+    width: 100%;
+    height: 100%;
+    min-height: 100vh;
+    max-height: 100vh;
+    object-fit: contain;
+}
+.badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+}
+.badge-warning {
+    background: #ffc107;
+    color: #000;
+}
+.badge-success {
+    background: #28a745;
+    color: white;
+}
+.chat-panel {
+    margin-top: 1rem;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    background: #f8f9fa;
+}
+.chat-messages-admin {
+    max-height: 250px;
+    overflow-y: auto;
+    padding: 1rem;
+    background: white;
+}
+.chat-message {
+    margin-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+}
+.chat-message.agent {
+    align-items: flex-end;
+}
+.chat-message.user {
+    align-items: flex-start;
+}
+.chat-bubble {
+    background: #f1f3f4;
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+.chat-message.agent .chat-bubble {
+    background: #007bff;
+    color: white;
+}
+.chat-message.user .chat-bubble {
+    background: #e3f2fd;
+}
+.chat-sender {
+    font-size: 0.75rem;
+    color: #666;
+    margin-bottom: 0.25rem;
+}
+.chat-input-container {
+    padding: 1rem;
+    display: flex;
+    gap: 0.5rem;
+    border-top: 1px solid #ddd;
+}
+.chat-input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    outline: none;
+}
+.chat-input:focus {
+    border-color: #007bff;
+}
+.chat-send-btn {
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    cursor: pointer;
+}
+.chat-send-btn:hover {
+    background: #0056b3;
+}
+{% endblock %}
+
+{% block content %}
+<a href="/admin/users" class="back-link">← Back to Admin</a>
+
+<div class="support-dashboard">
+    <h1>Support Dashboard</h1>
+    <p class="subtitle">Manage and join user support sessions</p>
+
+    <div class="section">
+        <h2>Waiting Requests <span class="badge badge-warning" id="waiting-count">{{ waiting_sessions|length }}</span></h2>
+        <div class="session-list" id="waiting-list">
+            {% if waiting_sessions %}
+                {% for session in waiting_sessions %}
+                <div class="session-card waiting" data-user-id="{{ session.user_id }}">
+                    <div class="session-info">
+                        <h3>{{ session.user_email if session.user_email else 'User #' + session.user_id|string }}</h3>
+                        <p>Waiting for support</p>
+                    </div>
+                    <div class="session-actions">
+                        <button class="btn btn-primary join-btn" data-user-id="{{ session.user_id }}">
+                            Join Session
+                        </button>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>No pending support requests</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Active Sessions <span class="badge badge-success" id="active-count">{{ active_sessions|length }}</span></h2>
+        <div class="session-list" id="active-list">
+            {% if active_sessions %}
+                {% for session in active_sessions %}
+                <div class="session-card connected" data-user-id="{{ session.user_id }}">
+                    <div class="session-info">
+                        <h3>{{ session.user_email if session.user_email else 'User #' + session.user_id|string }}</h3>
+                        <p>Connected</p>
+                    </div>
+                    <div class="session-actions">
+                        <button class="btn btn-danger end-btn" data-user-id="{{ session.user_id }}">
+                            End Session
+                        </button>
+                    </div>
+                    <div class="video-container" id="video-{{ session.user_id }}">
+                        <button class="video-fullscreen-btn" data-user-id="{{ session.user_id }}">⛶ Fullscreen</button>
+                        <video autoplay muted playsinline></video>
+                    </div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>No active sessions</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<!-- Socket.IO Client -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+<script>
+let socket = null;
+let peerConnections = {}; // Track multiple peer connections
+
+// Initialize Socket.IO connection
+function initSocket() {
+    socket = io({
+        transports: ['websocket', 'polling']
+    });
+
+    socket.on('connect', () => {
+        console.log('Connected to server');
+        // Join admin room to receive notifications
+        socket.emit('join_admin_room');
+    });
+
+    socket.on('admin_joined', (data) => {
+        console.log(data.message);
+    });
+
+    socket.on('new_support_request', (data) => {
+        console.log('New support request from user', data.user_id);
+        addWaitingSession(data.user_id, data.user_email);
+    });
+
+    socket.on('session_cancelled', (data) => {
+        console.log('Session cancelled by user', data.user_id);
+        removeWaitingSession(data.user_id);
+    });
+
+    socket.on('session_ended_by_user', (data) => {
+        console.log('Active session ended by user', data.user_id);
+        removeActiveSession(data.user_id);
+    });
+
+    socket.on('joined_session', (data) => {
+        console.log('Joined session with user', data.user_id);
+        moveToActiveSession(data.user_id);
+    });
+
+    socket.on('webrtc_offer', async (data) => {
+        console.log('Received WebRTC offer from user', data.from);
+        await handleOffer(data.from, data.offer);
+    });
+
+    socket.on('webrtc_ice_candidate', async (data) => {
+        console.log('Received ICE candidate');
+        const userId = getCurrentSessionUser(data);
+        if (userId && peerConnections[userId]) {
+            if (data.candidate) {
+                await peerConnections[userId].addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+        }
+    });
+
+    socket.on('session_ended', (data) => {
+        console.log('Session ended:', data.message);
+        // Session will be cleaned up - no need to reload entire page
+        // The session removal happens in endSession() when agent ends it,
+        // or we just don't need to do anything if user ended it (already cleaned)
+    });
+
+    socket.on('new_message', (data) => {
+        console.log('New message:', data);
+        addChatMessageToAdmin(data.sender, data.text, data.is_agent);
+    });
+}
+
+function getCurrentSessionUser(data) {
+    // Helper to determine which user this ICE candidate is for
+    // In a production app, you'd track this more carefully
+    return Object.keys(peerConnections)[0];
+}
+
+function addWaitingSession(userId, userEmail) {
+    const waitingList = document.getElementById('waiting-list');
+    const emptyState = waitingList.querySelector('.empty-state');
+    if (emptyState) {
+        emptyState.remove();
+    }
+
+    const displayName = userEmail || `User #${userId}`;
+
+    const sessionCard = document.createElement('div');
+    sessionCard.className = 'session-card waiting';
+    sessionCard.setAttribute('data-user-id', userId);
+    sessionCard.innerHTML = `
+        <div class="session-info">
+            <h3>${escapeHtml(displayName)}</h3>
+            <p>Waiting for support</p>
+        </div>
+        <div class="session-actions">
+            <button class="btn btn-primary join-btn" data-user-id="${userId}">
+                Join Session
+            </button>
+        </div>
+    `;
+
+    waitingList.appendChild(sessionCard);
+    updateWaitingCount();
+
+    // Attach event listener
+    sessionCard.querySelector('.join-btn').addEventListener('click', function() {
+        joinSession(userId);
+    });
+}
+
+function removeWaitingSession(userId) {
+    const waitingCard = document.querySelector(`.session-card.waiting[data-user-id="${userId}"]`);
+    if (waitingCard) {
+        waitingCard.remove();
+        updateCounts();
+    }
+}
+
+function removeActiveSession(userId) {
+    const activeCard = document.querySelector(`.session-card.connected[data-user-id="${userId}"]`);
+    if (activeCard) {
+        // Close peer connection if exists
+        if (peerConnections[userId]) {
+            peerConnections[userId].close();
+            delete peerConnections[userId];
+        }
+        activeCard.remove();
+        updateCounts();
+    }
+}
+
+function moveToActiveSession(userId) {
+    const waitingCard = document.querySelector(`.session-card.waiting[data-user-id="${userId}"]`);
+    let displayName = `User #${userId}`;
+
+    // Try to get the display name from the waiting card
+    if (waitingCard) {
+        const nameElement = waitingCard.querySelector('.session-info h3');
+        if (nameElement) {
+            displayName = nameElement.textContent;
+        }
+        waitingCard.remove();
+    }
+
+    const activeList = document.getElementById('active-list');
+    const emptyState = activeList.querySelector('.empty-state');
+    if (emptyState) {
+        emptyState.remove();
+    }
+
+    const sessionCard = document.createElement('div');
+    sessionCard.className = 'session-card connected';
+    sessionCard.setAttribute('data-user-id', userId);
+    sessionCard.innerHTML = `
+        <div class="session-info">
+            <h3>${escapeHtml(displayName)}</h3>
+            <p>Connected - Waiting for screen share...</p>
+        </div>
+        <div class="session-actions">
+            <button class="btn btn-danger end-btn" data-user-id="${userId}">
+                End Session
+            </button>
+        </div>
+        <div class="video-container" id="video-${userId}">
+            <button class="video-fullscreen-btn" data-user-id="${userId}">⛶ Fullscreen</button>
+            <video autoplay muted playsinline></video>
+        </div>
+        <div class="chat-panel">
+            <div class="chat-messages-admin" id="chat-${userId}"></div>
+            <div class="chat-input-container">
+                <input type="text" class="chat-input" id="chat-input-${userId}" placeholder="Type a message...">
+                <button class="chat-send-btn" data-user-id="${userId}">Send</button>
+            </div>
+        </div>
+    `;
+
+    activeList.appendChild(sessionCard);
+    updateCounts();
+
+    // Attach event listeners
+    sessionCard.querySelector('.end-btn').addEventListener('click', function() {
+        endSession(userId);
+    });
+
+    // Fullscreen button
+    sessionCard.querySelector('.video-fullscreen-btn').addEventListener('click', function(e) {
+        toggleFullscreen(userId, e);
+    });
+
+    // Chat send button
+    const chatSendBtn = sessionCard.querySelector('.chat-send-btn');
+    const chatInput = sessionCard.querySelector(`#chat-input-${userId}`);
+
+    chatSendBtn.addEventListener('click', function() {
+        sendAdminMessage(userId, chatInput);
+    });
+
+    chatInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            sendAdminMessage(userId, chatInput);
+        }
+    });
+}
+
+function joinSession(userId) {
+    console.log('Joining session with user', userId);
+    socket.emit('agent_join_session', { user_id: userId });
+}
+
+async function handleOffer(userId, offer) {
+    console.log('=== ADMIN: Handling offer from user', userId, '===');
+    console.log('Offer SDP:', offer);
+
+    // Close existing peer connection if it exists (user might be reconnecting after navigation)
+    if (peerConnections[userId]) {
+        console.log('Closing existing peer connection for user', userId);
+        peerConnections[userId].close();
+        delete peerConnections[userId];
+    }
+
+    // Create peer connection for this user
+    const peerConnection = new RTCPeerConnection({
+        iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' }
+        ]
+    });
+
+    peerConnections[userId] = peerConnection;
+    console.log('Created peer connection for user', userId);
+
+    // Handle ICE candidates
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            console.log('ADMIN: Sending ICE candidate:', event.candidate);
+            socket.emit('webrtc_ice_candidate', {
+                candidate: event.candidate,
+                user_id: userId
+            });
+        } else {
+            console.log('ADMIN: All ICE candidates sent');
+        }
+    };
+
+    // Handle connection state changes
+    peerConnection.onconnectionstatechange = () => {
+        console.log('ADMIN: Connection state:', peerConnection.connectionState);
+    };
+
+    peerConnection.oniceconnectionstatechange = () => {
+        console.log('ADMIN: ICE connection state:', peerConnection.iceConnectionState);
+    };
+
+    // Handle incoming stream
+    peerConnection.ontrack = (event) => {
+        console.log('ADMIN: ✅ Received track from user', userId);
+        console.log('Stream:', event.streams[0]);
+        console.log('Track:', event.track);
+        console.log('Track kind:', event.track.kind);
+        console.log('Track settings:', event.track.getSettings());
+
+        const videoContainer = document.getElementById(`video-${userId}`);
+        const video = videoContainer.querySelector('video');
+
+        console.log('Setting video srcObject...');
+        video.srcObject = event.streams[0];
+        videoContainer.classList.add('active');
+
+        // Verify video is playing
+        video.onloadedmetadata = () => {
+            console.log('Video metadata loaded. Dimensions:', video.videoWidth, 'x', video.videoHeight);
+            // Explicitly play the video
+            video.play().then(() => {
+                console.log('Video play() succeeded');
+            }).catch(err => {
+                console.error('Video play() failed:', err);
+            });
+        };
+
+        video.onplay = () => {
+            console.log('Video started playing');
+        };
+
+        // Update status
+        const sessionCard = document.querySelector(`.session-card[data-user-id="${userId}"]`);
+        if (sessionCard) {
+            const statusText = sessionCard.querySelector('.session-info p');
+            statusText.textContent = 'Screen sharing active';
+        }
+    };
+
+    // Set remote description and create answer
+    console.log('ADMIN: Setting remote description...');
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    console.log('ADMIN: Creating answer...');
+    const answer = await peerConnection.createAnswer();
+    await peerConnection.setLocalDescription(answer);
+    console.log('ADMIN: Answer created:', answer);
+
+    // Send answer back to user
+    console.log('ADMIN: Sending answer to user', userId);
+    socket.emit('webrtc_answer', {
+        answer: answer,
+        user_id: userId
+    });
+}
+
+function endSession(userId) {
+    console.log('Ending session with user', userId);
+
+    // Close peer connection
+    if (peerConnections[userId]) {
+        peerConnections[userId].close();
+        delete peerConnections[userId];
+    }
+
+    socket.emit('end_support_session', { user_id: userId });
+
+    // Remove from UI
+    const sessionCard = document.querySelector(`.session-card[data-user-id="${userId}"]`);
+    if (sessionCard) {
+        sessionCard.remove();
+    }
+
+    updateCounts();
+}
+
+function sendAdminMessage(userId, inputElement) {
+    const message = inputElement.value.trim();
+    if (!message) return;
+
+    socket.emit('send_message', {
+        message: message,
+        user_id: userId
+    });
+
+    inputElement.value = '';
+}
+
+function addChatMessageToAdmin(sender, text, isAgent) {
+    // Find the active session - messages from users go to all active sessions
+    // In a real multi-user scenario, you'd need to track which user sent which message
+    const activeSessions = document.querySelectorAll('.session-card.connected');
+
+    activeSessions.forEach(sessionCard => {
+        const userId = sessionCard.getAttribute('data-user-id');
+        const chatContainer = document.getElementById(`chat-${userId}`);
+
+        if (chatContainer) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${isAgent ? 'agent' : 'user'}`;
+
+            messageDiv.innerHTML = `
+                <span class="chat-sender">${escapeHtml(sender)}</span>
+                <div class="chat-bubble">${escapeHtml(text)}</div>
+            `;
+
+            chatContainer.appendChild(messageDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+    });
+}
+
+function toggleFullscreen(userId, event) {
+    // Prevent event from bubbling up
+    if (event) {
+        event.stopPropagation();
+        event.preventDefault();
+    }
+
+    const videoContainer = document.getElementById(`video-${userId}`);
+    if (!videoContainer) return;
+
+    const btn = videoContainer.querySelector('.video-fullscreen-btn');
+    if (!btn) return;
+
+    if (videoContainer.classList.contains('fullscreen')) {
+        videoContainer.classList.remove('fullscreen');
+        btn.textContent = '⛶ Fullscreen';
+    } else {
+        videoContainer.classList.add('fullscreen');
+        btn.textContent = '✕ Exit Fullscreen';
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function updateWaitingCount() {
+    const count = document.querySelectorAll('.session-card.waiting').length;
+    document.getElementById('waiting-count').textContent = count;
+}
+
+function updateCounts() {
+    const waitingCount = document.querySelectorAll('.session-card.waiting').length;
+    const activeCount = document.querySelectorAll('.session-card.connected').length;
+
+    document.getElementById('waiting-count').textContent = waitingCount;
+    document.getElementById('active-count').textContent = activeCount;
+
+    // Show empty state if no sessions
+    const waitingList = document.getElementById('waiting-list');
+    if (waitingCount === 0 && !waitingList.querySelector('.empty-state')) {
+        waitingList.innerHTML = '<div class="empty-state"><p>No pending support requests</p></div>';
+    }
+
+    const activeList = document.getElementById('active-list');
+    if (activeCount === 0 && !activeList.querySelector('.empty-state')) {
+        activeList.innerHTML = '<div class="empty-state"><p>No active sessions</p></div>';
+    }
+}
+
+// Poll for session updates every 3 seconds to keep UI in sync
+function pollSessions() {
+    fetch('/admin/support/sessions')
+        .then(response => response.json())
+        .then(data => {
+            syncSessions(data);
+        })
+        .catch(error => {
+            console.error('Failed to poll sessions:', error);
+        });
+}
+
+function syncSessions(serverData) {
+    // Get current UI state
+    const currentWaiting = new Set(
+        Array.from(document.querySelectorAll('.session-card.waiting'))
+            .map(card => parseInt(card.getAttribute('data-user-id')))
+    );
+    const currentActive = new Set(
+        Array.from(document.querySelectorAll('.session-card.connected'))
+            .map(card => parseInt(card.getAttribute('data-user-id')))
+    );
+
+    // Server state
+    const serverWaiting = new Set(serverData.waiting.map(s => s.user_id));
+    const serverActive = new Set(serverData.active.map(s => s.user_id));
+
+    // Remove waiting sessions that no longer exist on server
+    currentWaiting.forEach(userId => {
+        if (!serverWaiting.has(userId)) {
+            console.log('Removing stale waiting session:', userId);
+            removeWaitingSession(userId);
+        }
+    });
+
+    // Remove active sessions that no longer exist on server
+    currentActive.forEach(userId => {
+        if (!serverActive.has(userId)) {
+            console.log('Removing stale active session:', userId);
+            removeActiveSession(userId);
+        }
+    });
+}
+
+// Escape key to exit fullscreen
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') {
+        // Find any fullscreen video containers and exit them
+        document.querySelectorAll('.video-container.fullscreen').forEach(container => {
+            const userId = container.id.replace('video-', '');
+            const btn = container.querySelector('.video-fullscreen-btn');
+            container.classList.remove('fullscreen');
+            if (btn) btn.textContent = '⛶ Fullscreen';
+        });
+    }
+});
+
+// Initialize socket on page load
+initSocket();
+
+// Start polling every 3 seconds
+setInterval(pollSessions, 3000);
+
+// Attach event listeners to existing buttons
+document.querySelectorAll('.join-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const userId = this.getAttribute('data-user-id');
+        joinSession(userId);
+    });
+});
+
+document.querySelectorAll('.end-btn').forEach(btn => {
+    btn.addEventListener('click', function() {
+        const userId = this.getAttribute('data-user-id');
+        endSession(userId);
+    });
+});
+
+document.querySelectorAll('.video-fullscreen-btn').forEach(btn => {
+    btn.addEventListener('click', function(e) {
+        const userId = this.getAttribute('data-user-id');
+        toggleFullscreen(userId, e);
+    });
+});
+</script>
+
+{% endblock %}

@@ -1,4 +1,5 @@
 from flask_wtf import CSRFProtect
+from flask_socketio import SocketIO
 import click
 import sys
 import json
@@ -56,6 +57,11 @@ sentry_sdk.init(
 )
 
 app = Flask(__name__)
+
+# Socket.IO needs to be initialized before CSRF to avoid conflicts
+# Using gevent for Windows compatibility (eventlet doesn't work on Windows)
+socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False, engineio_logger=False, async_mode='gevent')
+
 csrf = CSRFProtect(app)
 
 if os.getenv("FLASK_ENV") == "production":
@@ -177,6 +183,12 @@ from routes.subscription import subscription_bp
 app.register_blueprint(subscription_bp)
 app.logger.info("Registered subscription blueprint")
 print("✅ Registered subscription blueprint")
+
+from routes.support import support_bp, register_socketio_handlers
+app.register_blueprint(support_bp)
+register_socketio_handlers(socketio)
+app.logger.info("Registered support blueprint with Socket.IO handlers")
+print("✅ Registered support blueprint")
 
 # Register analytics route separately (at /analytics, not /admin/analytics)
 @app.route("/analytics")
@@ -986,8 +998,8 @@ def _build_dashboard_context():
 
 
 if __name__ == "__main__":
-    # Avoid double-run in Flask’s reloader child
+    # Avoid double-run in Flask's reloader child
     if os.getenv("WERKZEUG_RUN_MAIN") != "true":
         with app.app_context():
             init_db()
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    socketio.run(app, debug=True, host="127.0.0.1", port=5000)

@@ -1,0 +1,399 @@
+/* LendifyMe Global Support Overlay Styles */
+
+/* Live indicator banner */
+.support-live-indicator {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+    color: white;
+    padding: 0.75rem 1rem;
+    z-index: 10000;
+    display: none;
+    box-shadow: 0 2px 8px rgba(220, 53, 69, 0.3);
+    border-bottom: 3px solid #bd2130;
+}
+
+.support-live-indicator.active {
+    display: block;
+    animation: supportSlideDown 0.3s ease-out;
+}
+
+@keyframes supportSlideDown {
+    from {
+        transform: translateY(-100%);
+    }
+    to {
+        transform: translateY(0);
+    }
+}
+
+.support-live-indicator-content {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+}
+
+.support-live-indicator-text {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex: 1;
+}
+
+.support-live-pulse {
+    width: 12px;
+    height: 12px;
+    background: white;
+    border-radius: 50%;
+    animation: supportPulse 1.5s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes supportPulse {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(1.2);
+    }
+}
+
+.support-live-indicator h2 {
+    margin: 0;
+    font-size: 0.95rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.support-live-indicator-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.support-btn-live-resume {
+    background: #ffc107;
+    color: #000;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    animation: supportPulseButton 2s ease-in-out infinite;
+}
+
+.support-btn-live-resume:hover {
+    background: #ffca2c;
+    transform: translateY(-1px);
+}
+
+@keyframes supportPulseButton {
+    0%, 100% {
+        box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.7);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(255, 193, 7, 0);
+    }
+}
+
+.support-btn-live-end {
+    background: white;
+    color: #dc3545;
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+}
+
+.support-btn-live-end:hover {
+    background: #f8f9fa;
+    transform: translateY(-1px);
+}
+
+/* Push down content when live indicator is showing */
+body.support-live-mode {
+    padding-top: 55px;
+}
+
+/* Chat toggle button */
+.support-chat-toggle {
+    position: fixed;
+    bottom: 90px;
+    right: 20px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 60px;
+    height: 60px;
+    font-size: 1.5rem;
+    cursor: pointer;
+    box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+    z-index: 9999;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.support-chat-toggle.show {
+    display: flex;
+}
+
+.support-chat-toggle:hover {
+    background: #0056b3;
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 123, 255, 0.4);
+}
+
+/* Chat widget */
+.support-chat-widget {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 350px;
+    max-height: 500px;
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+    display: none;
+    flex-direction: column;
+    z-index: 10000;
+}
+
+.support-chat-widget.active {
+    display: flex;
+}
+
+.support-chat-header {
+    background: #007bff;
+    color: white;
+    padding: 1rem;
+    border-radius: 12px 12px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.support-chat-header h3 {
+    margin: 0;
+    font-size: 1rem;
+}
+
+.support-chat-minimize {
+    background: none;
+    border: none;
+    color: white;
+    cursor: pointer;
+    font-size: 1.5rem;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.support-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    max-height: 300px;
+}
+
+.support-chat-message {
+    margin-bottom: 0.75rem;
+    display: flex;
+    flex-direction: column;
+}
+
+.support-chat-message.agent {
+    align-items: flex-start;
+}
+
+.support-chat-message.user {
+    align-items: flex-end;
+}
+
+.support-chat-bubble {
+    background: #f1f3f4;
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    max-width: 80%;
+    word-wrap: break-word;
+}
+
+.support-chat-message.agent .support-chat-bubble {
+    background: #e3f2fd;
+}
+
+.support-chat-message.user .support-chat-bubble {
+    background: #007bff;
+    color: white;
+}
+
+.support-chat-sender {
+    font-size: 0.75rem;
+    color: #666;
+    margin-bottom: 0.25rem;
+}
+
+.support-chat-input-container {
+    padding: 1rem;
+    border-top: 1px solid #ddd;
+    display: flex;
+    gap: 0.5rem;
+}
+
+.support-chat-input {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid #ddd;
+    border-radius: 20px;
+    outline: none;
+}
+
+.support-chat-input:focus {
+    border-color: #007bff;
+}
+
+.support-chat-send {
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.support-chat-send:hover {
+    background: #0056b3;
+}
+
+/* Screen share modal */
+.support-modal-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 10001;
+    align-items: center;
+    justify-content: center;
+}
+
+.support-modal-overlay.active {
+    display: flex;
+}
+
+.support-modal-content {
+    background: white;
+    padding: 2rem;
+    border-radius: 12px;
+    max-width: 500px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    animation: supportSlideIn 0.3s ease-out;
+}
+
+@keyframes supportSlideIn {
+    from {
+        transform: translateY(-50px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.support-modal-content h2 {
+    margin: 0 0 1rem 0;
+    color: #333;
+    font-size: 1.5rem;
+}
+
+.support-modal-content p {
+    margin: 0 0 1rem 0;
+    color: #666;
+    line-height: 1.6;
+}
+
+.support-modal-content strong {
+    color: #007bff;
+}
+
+.support-modal-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: flex-end;
+    margin-top: 1.5rem;
+}
+
+.support-btn {
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.support-btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.support-btn-secondary:hover {
+    background: #5a6268;
+}
+
+.support-btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.support-btn-primary:hover {
+    background: #0056b3;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+    .support-chat-widget {
+        width: calc(100% - 40px);
+        right: 20px;
+        left: 20px;
+    }
+
+    .support-chat-toggle {
+        bottom: 80px;
+        right: 15px;
+        width: 50px;
+        height: 50px;
+        font-size: 1.2rem;
+    }
+
+    .support-modal-content {
+        margin: 20px;
+        max-width: calc(100% - 40px);
+    }
+}
