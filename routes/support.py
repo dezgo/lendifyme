@@ -85,7 +85,6 @@ def get_sessions():
 def register_socketio_handlers(socketio):
     """Register Socket.IO event handlers for WebRTC signaling."""
     from flask import request, current_app
-    from flask_mail import Message
     from helpers.db import get_db_connection
     import os
 
@@ -135,22 +134,20 @@ def register_socketio_handlers(socketio):
             # Send email to admin
             admin_email = os.getenv('ADMIN_EMAIL')
             if admin_email:
-                msg = Message(
-                    subject="🆘 New Support Request - LendifyMe",
-                    recipients=[admin_email],
-                    body=f"""
-A user has requested support on LendifyMe!
+                from services.email_sender import send_support_request_email
+                app_url = os.getenv('APP_URL', 'http://localhost:5000')
 
-User: {user_email}
-User ID: {user_id}
-Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
-Go to the support dashboard to help them:
-{os.getenv('APP_URL', 'http://localhost:5000')}/admin/support
-                    """.strip()
+                success, message = send_support_request_email(
+                    admin_email=admin_email,
+                    user_email=user_email,
+                    user_id=user_id,
+                    app_url=app_url
                 )
-                current_app.extensions['mail'].send(msg)
-                current_app.logger.info(f"Support request email sent for user {user_id}")
+
+                if success:
+                    current_app.logger.info(f"Support request email sent for user {user_id}")
+                else:
+                    current_app.logger.warning(f"Failed to send support email: {message}")
         except Exception as e:
             current_app.logger.error(f"Failed to send support request email: {e}")
 
