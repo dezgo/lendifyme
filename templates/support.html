@@ -295,6 +295,7 @@
         let socket = null;
         let peerConnection = null;
         let localStream = null;
+        let autoRequestPending = false; // Flag to auto-request on connect
 
         const statusIndicator = document.getElementById('status-indicator');
         const statusText = document.getElementById('status-text');
@@ -310,7 +311,18 @@
         function initSocket() {
             socket = io({ transports: ['websocket', 'polling'] });
 
-            socket.on('connect', () => console.log('[Support] Connected'));
+            socket.on('connect', () => {
+                console.log('[Support] Connected');
+
+                // If auto-request is pending, send it now that we're connected
+                if (autoRequestPending) {
+                    autoRequestPending = false;
+                    socket.emit('request_support', { user_id: userId });
+                    updateStatus('waiting', 'Waiting for an agent to join...');
+                    endBtn.style.display = 'inline-block';
+                    chatWidget.classList.add('active');
+                }
+            });
 
             socket.on('support_status', (data) => updateStatus('waiting', data.message));
 
@@ -344,6 +356,15 @@
             socket.on('new_message', (data) => {
                 addChatMessage(data.sender, data.text, data.is_agent);
             });
+
+            socket.on('disconnect', () => {
+                console.log('[Support] Disconnected from server');
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('[Support] Connection error:', error);
+                updateStatus('disconnected', 'Connection error - Please refresh the page');
+            });
         }
 
         function updateStatus(status, message) {
@@ -352,11 +373,20 @@
         }
 
         function requestSupport() {
-            if (!socket) initSocket();
-            socket.emit('request_support', { user_id: userId });
-            updateStatus('waiting', 'Waiting for an agent to join...');
-            endBtn.style.display = 'inline-block';
-            chatWidget.classList.add('active');
+            if (!socket) {
+                initSocket();
+                // Socket is initializing, set flag to auto-request when connected
+                autoRequestPending = true;
+            } else if (socket.connected) {
+                // Socket already connected, send immediately
+                socket.emit('request_support', { user_id: userId });
+                updateStatus('waiting', 'Waiting for an agent to join...');
+                endBtn.style.display = 'inline-block';
+                chatWidget.classList.add('active');
+            } else {
+                // Socket exists but not connected yet, wait for connection
+                autoRequestPending = true;
+            }
         }
 
         async function shareScreen() {
