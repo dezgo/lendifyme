@@ -59,8 +59,9 @@ sentry_sdk.init(
 app = Flask(__name__)
 
 # Socket.IO needs to be initialized before CSRF to avoid conflicts
-# Using gevent for Windows compatibility (eventlet doesn't work on Windows)
-socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False, engineio_logger=False, async_mode='gevent')
+# Using eventlet for production (works on Ubuntu server)
+# Note: For local Windows development, use python app.py which will auto-select threading
+socketio = SocketIO(app, cors_allowed_origins="*", manage_session=False, engineio_logger=False, async_mode='eventlet')
 
 csrf = CSRFProtect(app)
 
