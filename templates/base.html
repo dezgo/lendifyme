@@ -48,11 +48,6 @@
     <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='favicon/apple-touch-icon.png') }}">
     <link rel="manifest" href="{{ url_for('static', filename='favicon/site.webmanifest') }}">
 
-    {% if session.user_id and not session.is_admin %}
-    <!-- Support Overlay Styles (for logged-in non-admin users) -->
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/support-overlay.css', v=1) }}">
-    {% endif %}
-
     <style>
         {% block extra_css %}{% endblock %}
     </style>
@@ -490,17 +485,6 @@
     </script>
 
     <script defer src="{{ url_for('static', filename='js/app.js', v=1) }}"></script>
-
-    {% if session.user_id and not session.is_admin %}
-    <!-- Support Overlay (for logged-in non-admin users) -->
-    <script>
-        // User context for support overlay
-        window.LENDIFYME_USER_ID = {{ session.user_id }};
-        window.LENDIFYME_IS_ADMIN = {{ 'true' if session.is_admin else 'false' }};
-    </script>
-    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-    <script src="{{ url_for('static', filename='js/support-overlay.js', v=1) }}"></script>
-    {% endif %}
 
     <script>
         {% block extra_js %}{% endblock %}

@@ -1,159 +1,476 @@
-{% extends "base.html" %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Support – LendifyMe</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v=1) }}">
 
-{% block title %}Get Support – LendifyMe{% endblock %}
+    <style>
+        /* Reset base styles for standalone page */
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            overflow: hidden;
+        }
 
-{% block extra_css %}
-.back-link {
-    display: inline-block;
-    margin-bottom: 1rem;
-    color: #007bff;
-    text-decoration: none;
-}
-.back-link:hover {
-    text-decoration: underline;
-}
-h1 {
-    margin-bottom: 0.5rem;
-}
-.subtitle {
-    color: #666;
-    margin-bottom: 2rem;
-}
-.support-container {
-    max-width: 800px;
-    margin: 0 auto;
-}
-.support-card {
-    background: white;
-    border: 2px solid #ddd;
-    border-radius: 8px;
-    padding: 2rem;
-    margin-bottom: 1.5rem;
-}
-.info-box {
-    background: #e7f3ff;
-    border-left: 4px solid #007bff;
-    padding: 1rem;
-    margin-bottom: 1.5rem;
-    border-radius: 4px;
-}
-.info-box h3 {
-    margin: 0 0 0.5rem 0;
-    color: #007bff;
-}
-.info-box p {
-    margin: 0;
-    color: #333;
-    line-height: 1.6;
-}
-.btn {
-    padding: 0.75rem 1.5rem;
-    border: none;
-    border-radius: 4px;
-    font-size: 1rem;
-    cursor: pointer;
-    transition: all 0.2s;
-    margin-right: 0.5rem;
-}
-.btn-primary {
-    background: #007bff;
-    color: white;
-}
-.btn-primary:hover {
-    background: #0056b3;
-}
-.btn-success {
-    background: #28a745;
-    color: white;
-}
-.btn-success:hover {
-    background: #218838;
-}
-.btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-.feature-list {
-    list-style: none;
-    padding: 0;
-}
-.feature-list li {
-    padding: 0.75rem 0;
-    border-bottom: 1px solid #eee;
-}
-.feature-list li:last-child {
-    border-bottom: none;
-}
-.feature-list li::before {
-    content: "✓ ";
-    color: #28a745;
-    font-weight: bold;
-    margin-right: 0.5rem;
-}
-{% endblock %}
+        /* Support header */
+        .support-header {
+            background: #f8f9fa;
+            border-bottom: 2px solid #dee2e6;
+            padding: 1rem 2rem;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            height: 60px;
+            box-sizing: border-box;
+        }
+        .support-header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+        }
+        .support-status {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .status-disconnected { background: #dc3545; }
+        .status-waiting { background: #ffc107; }
+        .status-connected { background: #28a745; }
+        .status-sharing { background: #28a745; animation: pulse 1.5s ease-in-out infinite; }
+        .support-controls {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .btn {
+            padding: 0.6rem 1.2rem;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-primary {
+            background: #007bff;
+            color: white;
+        }
+        .btn-primary:hover {
+            background: #0056b3;
+        }
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        .btn-success:hover {
+            background: #218838;
+        }
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
 
-{% block content %}
-<a href="/" class="back-link">← Back to Dashboard</a>
+        /* App iframe */
+        .app-frame {
+            position: fixed;
+            top: 60px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            width: 100%;
+            height: calc(100vh - 60px);
+            border: none;
+            background: white;
+        }
 
-<div class="support-container">
-    <h1>Get Live Support</h1>
-    <p class="subtitle">Connect with an agent and share your screen for help</p>
+        /* Chat toggle button */
+        .chat-toggle {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            font-size: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 123, 255, 0.3);
+            z-index: 1999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        .chat-toggle.show {
+            display: flex;
+        }
+        .chat-toggle:hover {
+            background: #0056b3;
+            transform: translateY(-2px);
+        }
 
-    <div class="support-card">
-        <div class="info-box">
-            <h3>How it works</h3>
-            <p>
-                1. Click "Request Support" below<br>
-                2. Wait for an agent to join your session<br>
-                3. Click "Share My Screen" when prompted<br>
-                4. Navigate around the app normally - the agent can see your screen<br>
-                5. Chat with the agent using the chat widget
-            </p>
+        /* Chat widget */
+        .chat-widget {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 350px;
+            max-height: 500px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+            display: none;
+            flex-direction: column;
+            z-index: 2000;
+        }
+        .chat-widget.active {
+            display: flex;
+        }
+        .chat-header {
+            background: #007bff;
+            color: white;
+            padding: 1rem;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .chat-header h3 {
+            margin: 0;
+            font-size: 1rem;
+        }
+        .chat-minimize {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 1.5rem;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+            max-height: 300px;
+        }
+        .chat-message {
+            margin-bottom: 0.75rem;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-message.agent {
+            align-items: flex-start;
+        }
+        .chat-message.user {
+            align-items: flex-end;
+        }
+        .chat-bubble {
+            background: #f1f3f4;
+            padding: 0.75rem 1rem;
+            border-radius: 12px;
+            max-width: 80%;
+            word-wrap: break-word;
+        }
+        .chat-message.agent .chat-bubble {
+            background: #e3f2fd;
+        }
+        .chat-message.user .chat-bubble {
+            background: #007bff;
+            color: white;
+        }
+        .chat-sender {
+            font-size: 0.75rem;
+            color: #666;
+            margin-bottom: 0.25rem;
+        }
+        .chat-input-container {
+            padding: 1rem;
+            border-top: 1px solid #ddd;
+            display: flex;
+            gap: 0.5rem;
+        }
+        .chat-input {
+            flex: 1;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            outline: none;
+        }
+        .chat-input:focus {
+            border-color: #007bff;
+        }
+        .chat-send {
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .chat-send:hover {
+            background: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <!-- Support header with controls -->
+    <div class="support-header">
+        <div class="support-header-content">
+            <div class="support-status">
+                <span class="status-indicator status-disconnected" id="status-indicator"></span>
+                <span id="status-text">Click "Request Support" to get started</span>
+            </div>
+            <div class="support-controls">
+                <button id="request-btn" class="btn btn-primary">🆘 Request Support</button>
+                <button id="share-btn" class="btn btn-success" style="display: none;" disabled>🖥️ Share My Screen</button>
+                <button id="end-btn" class="btn btn-danger" style="display: none;">End Session</button>
+            </div>
         </div>
-
-        <h3>Features</h3>
-        <ul class="feature-list">
-            <li><strong>Live Screen Sharing</strong> - Share your entire screen or browser window with the agent</li>
-            <li><strong>Real-time Chat</strong> - Message the agent while they help you</li>
-            <li><strong>Navigate Freely</strong> - Move around the app normally while sharing your screen</li>
-            <li><strong>Always Available</strong> - The support overlay stays active on every page</li>
-            <li><strong>Easy to End</strong> - Click "End Session" in the red banner at any time</li>
-        </ul>
-
-        <div style="margin-top: 2rem;">
-            <button class="btn btn-primary" onclick="LendifyMeSupport.requestSupport()">
-                🆘 Request Support
-            </button>
-            <button class="btn btn-success" onclick="LendifyMeSupport.shareScreen()">
-                🖥️ Share My Screen
-            </button>
-        </div>
-
-        <p style="margin-top: 1.5rem; color: #666; font-size: 0.9rem;">
-            <strong>Privacy:</strong> Screen sharing is completely under your control. You choose what to share and can stop at any time.
-        </p>
     </div>
 
-    <div class="support-card">
-        <h3>Tips for Best Results</h3>
+    <!-- App iframe - users navigate within here -->
+    <iframe id="app-frame" class="app-frame" src="/"></iframe>
 
-        <div style="background: #d4edda; border-left: 4px solid #28a745; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
-            <p style="margin: 0 0 0.5rem 0; color: #155724; font-weight: 700;">✅ Recommended: Share Screen or Window</p>
-            <p style="margin: 0; color: #155724;">
-                Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong> when prompted. When you navigate to different pages, you'll need to click the yellow "Resume Sharing" button to reconnect (one click per page - quick and easy!).
-            </p>
+    <!-- Chat toggle button -->
+    <button class="chat-toggle" id="chat-toggle">💬</button>
+
+    <!-- Chat widget -->
+    <div class="chat-widget" id="chat-widget">
+        <div class="chat-header">
+            <h3>💬 Chat with Support</h3>
+            <button class="chat-minimize" id="chat-minimize">−</button>
         </div>
-
-        <div style="background: #fff3cd; border-left: 4px solid #ffc107; padding: 1rem; margin-bottom: 1rem; border-radius: 4px;">
-            <p style="margin: 0 0 0.5rem 0; color: #856404; font-weight: 700;">⚠️ Not Recommended: Share Tab</p>
-            <p style="margin: 0; color: #856404;">
-                If you select <strong>"Tab"</strong>, you'll need to manually click "Resume Sharing" every time you navigate to a different page. This gets annoying fast!
-            </p>
+        <div class="chat-messages" id="chat-messages">
+            <div class="chat-message agent">
+                <span class="chat-sender">Support Agent</span>
+                <div class="chat-bubble">
+                    Hi! I'll be with you shortly. Feel free to describe your issue while you wait.
+                </div>
+            </div>
         </div>
-
-        <p style="color: #666; margin-top: 1.5rem;">
-            <strong>Look for the red "LIVE" banner</strong> at the top of your screen to know when sharing is active.
-        </p>
+        <div class="chat-input-container">
+            <input type="text" class="chat-input" id="chat-input" placeholder="Type a message...">
+            <button class="chat-send" id="chat-send">→</button>
+        </div>
     </div>
-</div>
-{% endblock %}
+
+    <!-- Socket.IO and WebRTC logic -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        const userId = {{ session.user_id }};
+        let socket = null;
+        let peerConnection = null;
+        let localStream = null;
+
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const requestBtn = document.getElementById('request-btn');
+        const shareBtn = document.getElementById('share-btn');
+        const endBtn = document.getElementById('end-btn');
+        const chatWidget = document.getElementById('chat-widget');
+        const chatToggle = document.getElementById('chat-toggle');
+        const chatMessages = document.getElementById('chat-messages');
+        const chatInput = document.getElementById('chat-input');
+        const chatSend = document.getElementById('chat-send');
+        const chatMinimize = document.getElementById('chat-minimize');
+
+        function initSocket() {
+            socket = io({ transports: ['websocket', 'polling'] });
+
+            socket.on('connect', () => console.log('[Support] Connected'));
+
+            socket.on('support_status', (data) => updateStatus('waiting', data.message));
+
+            socket.on('agent_joined', (data) => {
+                updateStatus('connected', data.message);
+                shareBtn.disabled = false;
+                shareBtn.style.display = 'inline-block';
+                requestBtn.style.display = 'none';
+            });
+
+            socket.on('webrtc_answer', async (data) => {
+                console.log('[Support] Received answer');
+                await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer));
+            });
+
+            socket.on('webrtc_ice_candidate', async (data) => {
+                if (data.candidate && peerConnection) {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                }
+            });
+
+            socket.on('session_ended', (data) => {
+                updateStatus('disconnected', data.message);
+                cleanup();
+            });
+
+            socket.on('new_message', (data) => {
+                addChatMessage(data.sender, data.text, data.is_agent);
+            });
+        }
+
+        function updateStatus(status, message) {
+            statusIndicator.className = `status-indicator status-${status}`;
+            statusText.textContent = message;
+        }
+
+        function requestSupport() {
+            if (!socket) initSocket();
+            socket.emit('request_support', { user_id: userId });
+            updateStatus('waiting', 'Waiting for an agent to join...');
+            requestBtn.disabled = true;
+            endBtn.style.display = 'inline-block';
+            chatWidget.classList.add('active');
+        }
+
+        async function shareScreen() {
+            try {
+                console.log('[Support] Requesting screen share...');
+                localStream = await navigator.mediaDevices.getDisplayMedia({
+                    video: { cursor: "always" },
+                    audio: false
+                });
+
+                console.log('[Support] Screen share granted');
+                updateStatus('sharing', '🔴 LIVE - Agent is viewing your screen');
+
+                peerConnection = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+
+                localStream.getTracks().forEach(track => {
+                    peerConnection.addTrack(track, localStream);
+                });
+
+                peerConnection.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        socket.emit('webrtc_ice_candidate', { candidate: event.candidate });
+                    }
+                };
+
+                localStream.getVideoTracks()[0].onended = () => {
+                    console.log('[Support] Screen sharing stopped');
+                    updateStatus('connected', 'Screen sharing stopped');
+                    shareBtn.disabled = false;
+                };
+
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                socket.emit('webrtc_offer', { offer: offer });
+
+                shareBtn.disabled = true;
+                shareBtn.textContent = '✅ Sharing...';
+
+            } catch (err) {
+                console.error('[Support] Error:', err);
+                if (err.name === 'NotAllowedError') {
+                    alert('Screen sharing cancelled.');
+                } else {
+                    alert('Failed to share screen. Please try again.');
+                }
+            }
+        }
+
+        function endSession() {
+            socket.emit('end_support_session', { user_id: userId });
+            cleanup();
+            updateStatus('disconnected', 'Session ended');
+        }
+
+        function cleanup() {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            requestBtn.disabled = false;
+            requestBtn.style.display = 'inline-block';
+            shareBtn.style.display = 'none';
+            shareBtn.disabled = true;
+            shareBtn.textContent = '🖥️ Share My Screen';
+            endBtn.style.display = 'none';
+            chatWidget.classList.remove('active');
+            chatToggle.classList.remove('show');
+        }
+
+        function sendChatMessage() {
+            const message = chatInput.value.trim();
+            if (!message) return;
+            socket.emit('send_message', { message: message });
+            chatInput.value = '';
+        }
+
+        function addChatMessage(sender, text, isAgent) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${isAgent ? 'agent' : 'user'}`;
+            messageDiv.innerHTML = `
+                <span class="chat-sender">${escapeHtml(sender)}</span>
+                <div class="chat-bubble">${escapeHtml(text)}</div>
+            `;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Event listeners
+        requestBtn.addEventListener('click', requestSupport);
+        shareBtn.addEventListener('click', shareScreen);
+        endBtn.addEventListener('click', endSession);
+        chatSend.addEventListener('click', sendChatMessage);
+        chatInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendChatMessage();
+        });
+        chatMinimize.addEventListener('click', () => {
+            chatWidget.classList.remove('active');
+            chatToggle.classList.add('show');
+        });
+        chatToggle.addEventListener('click', () => {
+            chatWidget.classList.add('active');
+            chatToggle.classList.remove('show');
+        });
+    </script>
+</body>
+</html>
