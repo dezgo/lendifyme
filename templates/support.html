@@ -252,11 +252,10 @@
     <div class="support-header">
         <div class="support-header-content">
             <div class="support-status">
-                <span class="status-indicator status-disconnected" id="status-indicator"></span>
-                <span id="status-text">Click "Request Support" to get started</span>
+                <span class="status-indicator status-waiting" id="status-indicator"></span>
+                <span id="status-text">Connecting to support...</span>
             </div>
             <div class="support-controls">
-                <button id="request-btn" class="btn btn-primary">🆘 Request Support</button>
                 <button id="share-btn" class="btn btn-success" style="display: none;" disabled>🖥️ Share My Screen</button>
                 <button id="end-btn" class="btn btn-danger" style="display: none;">End Session</button>
             </div>
@@ -299,7 +298,6 @@
 
         const statusIndicator = document.getElementById('status-indicator');
         const statusText = document.getElementById('status-text');
-        const requestBtn = document.getElementById('request-btn');
         const shareBtn = document.getElementById('share-btn');
         const endBtn = document.getElementById('end-btn');
         const chatWidget = document.getElementById('chat-widget');
@@ -320,7 +318,6 @@
                 updateStatus('connected', data.message);
                 shareBtn.disabled = false;
                 shareBtn.style.display = 'inline-block';
-                requestBtn.style.display = 'none';
             });
 
             socket.on('webrtc_answer', async (data) => {
@@ -358,7 +355,6 @@
             if (!socket) initSocket();
             socket.emit('request_support', { user_id: userId });
             updateStatus('waiting', 'Waiting for an agent to join...');
-            requestBtn.disabled = true;
             endBtn.style.display = 'inline-block';
             chatWidget.classList.add('active');
         }
@@ -435,8 +431,6 @@
                 socket.disconnect();
                 socket = null;
             }
-            requestBtn.disabled = false;
-            requestBtn.style.display = 'inline-block';
             shareBtn.style.display = 'none';
             shareBtn.disabled = true;
             shareBtn.textContent = '🖥️ Share My Screen';
@@ -470,7 +464,6 @@
         }
 
         // Event listeners
-        requestBtn.addEventListener('click', requestSupport);
         shareBtn.addEventListener('click', shareScreen);
         endBtn.addEventListener('click', endSession);
         chatSend.addEventListener('click', sendChatMessage);
@@ -485,6 +478,9 @@
             chatWidget.classList.add('active');
             chatToggle.classList.remove('show');
         });
+
+        // Automatically request support on page load (user already clicked "Get Support")
+        requestSupport();
     </script>
 </body>
 </html>
