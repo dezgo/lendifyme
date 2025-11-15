@@ -65,15 +65,78 @@ def send_magic_link_email(recipient_email: str, recipient_name: Optional[str], m
     Returns:
         tuple: (success: bool, message: str)
     """
-    # Check if Mailgun API is configured
     mailgun_api_key = os.getenv('MAILGUN_API_KEY')
     mailgun_domain = os.getenv('MAILGUN_DOMAIN')
+    sender_email = os.getenv('MAIL_DEFAULT_SENDER', f'postmaster@{mailgun_domain}' if mailgun_domain else 'noreply@lendifyme.app')
+    sender_name = os.getenv('MAIL_SENDER_NAME', 'LendifyMe')
 
+    subject = "Your LendifyMe Login Link"
+
+    text_body = f"""Hi {recipient_name or 'there'},
+
+Click the link below to sign in to LendifyMe:
+
+{magic_link}
+
+This link will expire in 15 minutes.
+
+If you didn't request this, you can safely ignore this email.
+
+---
+LendifyMe
+"""
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6;">
+    <div style="background: #f8f9fa; padding: 30px; border-radius: 8px;">
+        <h1 style="color: #007bff; margin-top: 0;">LendifyMe</h1>
+        <p>Hi {recipient_name or 'there'},</p>
+        <p>Click the button below to sign in to LendifyMe:</p>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{magic_link}" style="background: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; display: inline-block; font-weight: bold;">
+                Sign In to LendifyMe
+            </a>
+        </div>
+
+        <p style="color: #6c757d; font-size: 14px;">This link will expire in 15 minutes.</p>
+        <p style="color: #6c757d; font-size: 14px;">If you didn't request this, you can safely ignore this email.</p>
+
+        <hr style="border: none; border-top: 1px solid #dee2e6; margin: 20px 0;">
+        <p style="color: #6c757d; font-size: 12px; margin-bottom: 0;">
+            If the button doesn't work, copy and paste this link into your browser:<br>
+            <a href="{magic_link}" style="color: #007bff; word-break: break-all;">{magic_link}</a>
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+    # Try Resend first
+    resend_result = _send_via_resend(
+        sender_email=sender_email,
+        sender_name=sender_name,
+        to_email=recipient_email,
+        to_name=recipient_name,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body
+    )
+    if resend_result[0]:  # Success
+        return resend_result
+
+    # Try Mailgun if Resend failed/not configured
     if mailgun_api_key and mailgun_domain:
         return _send_via_mailgun_api(recipient_email, recipient_name, magic_link, mailgun_api_key, mailgun_domain)
 
     # Fallback to Flask-Mail (SMTP) - handled by caller
-    return False, "Mailgun not configured"
+    return False, "Resend and Mailgun not configured"
 
 
 def _send_via_mailgun_api(recipient_email: str, recipient_name: Optional[str], magic_link: str, api_key: str, domain: str) -> tuple[bool, str]:
@@ -244,7 +307,20 @@ LendifyMe - Simple Loan Tracking
 </html>
 """
 
-    # Try Mailgun first
+    # Try Resend first
+    resend_result = _send_via_resend(
+        sender_email=sender_email,
+        sender_name=sender_name,
+        to_email=to_email,
+        to_name=borrower_name,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body
+    )
+    if resend_result[0]:  # Success
+        return resend_result
+
+    # Try Mailgun if Resend failed/not configured
     if mailgun_api_key and mailgun_domain:
         logger.info(f"📧 Sending borrower invite via Mailgun to {to_email}")
 
@@ -277,8 +353,8 @@ LendifyMe - Simple Loan Tracking
             logger.error(f"Mailgun request exception: {str(e)}")
             return False, f"Failed to send email: {str(e)}"
 
-    # If Mailgun not configured, try SMTP via Flask-Mail
-    logger.info("Mailgun not configured, attempting SMTP...")
+    # If Resend and Mailgun not configured, try SMTP via Flask-Mail
+    logger.info("Resend and Mailgun not configured, attempting SMTP...")
 
     try:
         msg = Message(
@@ -446,7 +522,20 @@ LendifyMe - Simple Loan Tracking
 </html>
 """
 
-    # Try Mailgun first
+    # Try Resend first
+    resend_result = _send_via_resend(
+        sender_email=sender_email,
+        sender_name=sender_name,
+        to_email=to_email,
+        to_name=borrower_name,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body
+    )
+    if resend_result[0]:  # Success
+        return resend_result
+
+    # Try Mailgun if Resend failed/not configured
     if mailgun_api_key and mailgun_domain:
         logger.info(f"📧 Sending payment notification via Mailgun to {to_email}")
 
@@ -479,8 +568,8 @@ LendifyMe - Simple Loan Tracking
             logger.error(f"Mailgun request exception: {str(e)}")
             return False, f"Failed to send email: {str(e)}"
 
-    # If Mailgun not configured, try SMTP via Flask-Mail
-    logger.info("Mailgun not configured, attempting SMTP...")
+    # If Resend and Mailgun not configured, try SMTP via Flask-Mail
+    logger.info("Resend and Mailgun not configured, attempting SMTP...")
 
     try:
         from flask import current_app
@@ -710,7 +799,20 @@ LendifyMe
 </html>
 """
 
-    # Try Mailgun first
+    # Try Resend first
+    resend_result = _send_via_resend(
+        sender_email=sender_email,
+        sender_name=sender_name,
+        to_email=recipient_email,
+        to_name=recipient_name,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body
+    )
+    if resend_result[0]:  # Success
+        return resend_result
+
+    # Try Mailgun if Resend failed/not configured
     if mailgun_api_key and mailgun_domain:
         logger.info(f"📧 Sending verification email via Mailgun API to {recipient_email}")
 
@@ -743,8 +845,8 @@ LendifyMe
             logger.error(f"Mailgun request exception: {str(e)}")
             return False, f"Failed to send email: {str(e)}"
 
-    # Fallback to SMTP
-    logger.info("Mailgun not configured, attempting SMTP...")
+    # Fallback to SMTP if Resend and Mailgun not configured
+    logger.info("Resend and Mailgun not configured, attempting SMTP...")
 
     try:
         msg = Message(
