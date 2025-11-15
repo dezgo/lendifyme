@@ -29,6 +29,7 @@ print("=" * 70)
 print()
 print("Environment Configuration:")
 print(f"  ADMIN_EMAIL: {os.getenv('ADMIN_EMAIL', 'NOT SET')}")
+print(f"  RESEND_API_KEY: {'***' + os.getenv('RESEND_API_KEY', '')[-8:] if os.getenv('RESEND_API_KEY') else 'NOT SET'}")
 print(f"  MAILGUN_API_KEY: {'***' + os.getenv('MAILGUN_API_KEY', '')[-8:] if os.getenv('MAILGUN_API_KEY') else 'NOT SET'}")
 print(f"  MAILGUN_DOMAIN: {os.getenv('MAILGUN_DOMAIN', 'NOT SET')}")
 print(f"  APP_URL: {os.getenv('APP_URL', 'http://localhost:5000')}")
@@ -41,10 +42,17 @@ if not admin_email:
     print("   Please add: ADMIN_EMAIL=your-email@example.com")
     exit(1)
 
-# Check if Mailgun is configured
-if not os.getenv('MAILGUN_API_KEY') or not os.getenv('MAILGUN_DOMAIN'):
-    print("⚠️  WARNING: Mailgun not configured, will try SMTP fallback")
-    print()
+# Check email provider configuration
+has_resend = bool(os.getenv('RESEND_API_KEY'))
+has_mailgun = bool(os.getenv('MAILGUN_API_KEY') and os.getenv('MAILGUN_DOMAIN'))
+
+if has_resend:
+    print("✅ Email provider: Resend (recommended)")
+elif has_mailgun:
+    print("⚠️  Email provider: Mailgun")
+else:
+    print("⚠️  WARNING: No email provider configured, will try SMTP fallback")
+print()
 
 # Import the email sender
 from services.email_sender import send_support_request_email
@@ -81,14 +89,18 @@ if success:
     print()
     print("If you don't see the email:")
     print("  1. Check your spam/junk folder")
-    print("  2. Check Mailgun logs at: https://app.mailgun.com/app/logs")
+    if has_resend:
+        print("  2. Check Resend logs at: https://resend.com/emails")
+    elif has_mailgun:
+        print("  2. Check Mailgun logs at: https://app.mailgun.com/app/logs")
     print("  3. Verify ADMIN_EMAIL is correct in .env")
 else:
     print(f"❌ FAILED: {message}")
     print()
     print("Troubleshooting:")
-    print("  1. Check MAILGUN_API_KEY and MAILGUN_DOMAIN in .env")
-    print("  2. Verify Mailgun domain is verified")
-    print("  3. Check SMTP credentials if using SMTP fallback")
+    print("  1. Add RESEND_API_KEY to .env (recommended)")
+    print("     Get a free API key at: https://resend.com/api-keys")
+    print("  2. OR use MAILGUN_API_KEY and MAILGUN_DOMAIN")
+    print("  3. OR configure SMTP credentials (MAIL_USERNAME, MAIL_PASSWORD)")
 
 print("=" * 70)

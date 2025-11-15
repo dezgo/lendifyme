@@ -1,4 +1,4 @@
-"""Email sending utilities with support for Flask-Mail (SMTP) and Mailgun API."""
+"""Email sending utilities with support for Resend, Mailgun API, and Flask-Mail (SMTP)."""
 import os
 import requests
 import logging
@@ -7,6 +7,55 @@ from flask import current_app
 from flask_mail import Message
 
 logger = logging.getLogger(__name__)
+
+
+def _send_via_resend(sender_email: str, sender_name: str, to_email: str, to_name: Optional[str],
+                     subject: str, html_body: str, text_body: str) -> tuple[bool, str]:
+    """
+    Send email via Resend API.
+
+    Resend API docs: https://resend.com/docs/api-reference/emails/send-email
+    """
+    resend_api_key = os.getenv('RESEND_API_KEY')
+
+    if not resend_api_key:
+        return False, "Resend not configured"
+
+    logger.info(f"📧 Sending via Resend API...")
+    logger.info(f"   From: {sender_name} <{sender_email}>")
+    logger.info(f"   To: {to_email}")
+
+    try:
+        response = requests.post(
+            "https://api.resend.com/emails",
+            headers={
+                "Authorization": f"Bearer {resend_api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "from": f"{sender_name} <{sender_email}>",
+                "to": [to_email],
+                "subject": subject,
+                "html": html_body,
+                "text": text_body
+            },
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            logger.info(f"✅ Resend: Email sent to {to_email}")
+            return True, "Email sent successfully via Resend"
+        else:
+            error_msg = f"Resend API error: {response.status_code} - {response.text}"
+            logger.error(f"❌ Resend error: {error_msg}")
+            return False, error_msg
+
+    except requests.exceptions.Timeout:
+        logger.error("Resend request timed out")
+        return False, "Email request timed out"
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Resend request exception: {str(e)}")
+        return False, f"Failed to send email via Resend: {str(e)}"
 
 
 def send_magic_link_email(recipient_email: str, recipient_name: Optional[str], magic_link: str) -> tuple[bool, str]:
@@ -532,7 +581,20 @@ Go to the support dashboard to help them:
 </html>
 """
 
-    # Try Mailgun first
+    # Try Resend first
+    resend_result = _send_via_resend(
+        sender_email=sender_email,
+        sender_name=sender_name,
+        to_email=admin_email,
+        to_name=None,
+        subject=subject,
+        html_body=html_body,
+        text_body=text_body
+    )
+    if resend_result[0]:  # Success
+        return resend_result
+
+    # Try Mailgun if Resend failed/not configured
     if mailgun_api_key and mailgun_domain:
         logger.info(f"📧 Sending support request notification via Mailgun to {admin_email}")
 
@@ -565,8 +627,8 @@ Go to the support dashboard to help them:
             logger.error(f"Mailgun request exception: {str(e)}")
             return False, f"Failed to send email: {str(e)}"
 
-    # If Mailgun not configured, try SMTP via Flask-Mail
-    logger.info("Mailgun not configured, attempting SMTP...")
+    # If Resend and Mailgun not configured, try SMTP via Flask-Mail
+    logger.info("Resend and Mailgun not configured, attempting SMTP...")
 
     try:
         msg = Message(

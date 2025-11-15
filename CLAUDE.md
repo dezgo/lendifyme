@@ -157,19 +157,32 @@ Optional bank API credentials (required only if using respective connector):
 - `UP_BANK_API_KEY` - Up Bank API token (get from https://api.up.com.au/getting_started)
 - Additional banks can be added by extending the connector registry
 
-Optional email configuration:
-- `MAILGUN_API_KEY` - Mailgun API key (recommended for production)
-- `MAILGUN_DOMAIN` - Mailgun domain
-- `MAIL_DEFAULT_SENDER` - Sender email address
-- `MAIL_SENDER_NAME` - Sender name (defaults to 'LendifyMe')
-- `APP_URL` - Base application URL (e.g., https://lendifyme.com)
-- `ADMIN_EMAIL` - Admin email for support notifications
+Optional email configuration (choose one provider):
+- **Resend (Recommended):**
+  - `RESEND_API_KEY` - Resend API key (get from https://resend.com/api-keys)
+  - `MAIL_DEFAULT_SENDER` - Sender email address (e.g., noreply@yourdomain.com)
+  - `MAIL_SENDER_NAME` - Sender name (defaults to 'LendifyMe')
+- **Mailgun (Alternative):**
+  - `MAILGUN_API_KEY` - Mailgun API key
+  - `MAILGUN_DOMAIN` - Mailgun domain
+  - `MAIL_DEFAULT_SENDER` - Sender email address
+  - `MAIL_SENDER_NAME` - Sender name (defaults to 'LendifyMe')
+- **SMTP (Fallback - Gmail, Outlook, etc.):**
+  - `MAIL_SERVER` - SMTP server (e.g., smtp.gmail.com)
+  - `MAIL_PORT` - SMTP port (e.g., 587)
+  - `MAIL_USE_TLS` - Use TLS (True/False)
+  - `MAIL_USERNAME` - SMTP username
+  - `MAIL_PASSWORD` - SMTP password (for Gmail, use app password)
+  - `MAIL_DEFAULT_SENDER` - Sender email address
+- **Common for all providers:**
+  - `APP_URL` - Base application URL (e.g., https://lendifyme.com)
+  - `ADMIN_EMAIL` - Admin email for support notifications
 
 **Setup:**
 1. Copy `.env.example` to `.env`
 2. Set `SECRET_KEY` to a random value
 3. Add bank API keys for any connectors you want to use
-4. Add email credentials (Mailgun recommended)
+4. Add email credentials (Resend recommended - easiest setup)
 5. Run `pip install -r requirements.txt`
 6. Run `python app.py`
 
@@ -198,14 +211,21 @@ email_service.send_payment_notification(
 
 **How It Works:**
 - Email service handles environment variables internally (APP_URL, ADMIN_EMAIL, etc.)
-- Tries Mailgun API first, falls back to SMTP automatically
+- Tries providers in order: Resend → Mailgun → SMTP
 - All logging and error handling is centralized
 - Callers don't need to know about email infrastructure
 
-**Email Providers:**
-1. **Mailgun API** (recommended for production) - Set `MAILGUN_API_KEY` and `MAILGUN_DOMAIN`
-2. **SMTP** (fallback) - Set `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SERVER`, `MAIL_PORT`
-3. **Development mode** - Prints links to console if no provider configured
+**Email Providers (in priority order):**
+1. **Resend API** (recommended) - Set `RESEND_API_KEY` and `MAIL_DEFAULT_SENDER`
+   - Easiest setup, no domain verification required
+   - 3,000 emails/month free tier
+   - Built for developers
+2. **Mailgun API** (alternative) - Set `MAILGUN_API_KEY` and `MAILGUN_DOMAIN`
+   - Requires domain verification
+   - Can be complex with sandbox mode restrictions
+3. **SMTP** (fallback) - Set `MAIL_USERNAME`, `MAIL_PASSWORD`, `MAIL_SERVER`, `MAIL_PORT`
+   - Works with Gmail, Outlook, etc.
+   - Gmail requires app password: https://myaccount.google.com/apppasswords
 
 ## Bank Connector Architecture
 
