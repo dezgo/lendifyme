@@ -366,7 +366,7 @@
                 console.error('[Support] Error type:', error.type);
                 console.error('[Support] Error message:', error.message);
                 console.error('[Support] Error description:', error.description);
-                updateStatus('disconnected', `Connection error: ${error.message || 'Unknown error'}. Please check console for details.`);
+                updateStatus('disconnected', 'Unable to connect to support. Please try refreshing the page or contact us directly.');
             });
         }
 
