@@ -8,7 +8,7 @@ Group=www-data
 WorkingDirectory=/var/www/lendifyme
 EnvironmentFile=/var/www/lendifyme/.env
 ExecStart=/var/www/lendifyme/venv/bin/gunicorn \
-  --worker-class gevent \
+  --worker-class eventlet \
   -w 1 \
   --bind unix:/var/www/lendifyme/lendifyme.sock \
   app:app
