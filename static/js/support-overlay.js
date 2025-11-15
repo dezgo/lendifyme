@@ -88,7 +88,7 @@
 
                 <div style="background: #d4edda; border: 2px solid #28a745; border-radius: 6px; padding: 1rem; margin: 1rem 0;">
                     <p style="margin: 0 0 0.5rem 0; color: #155724; font-weight: 700;">✅ Best Option:</p>
-                    <p style="margin: 0; color: #155724;">Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong> so the agent can follow you as you navigate.</p>
+                    <p style="margin: 0; color: #155724;">Select <strong>"Entire Screen"</strong> or <strong>"Window"</strong>. When you navigate to different pages, just click the yellow "Resume Sharing" button to reconnect (one click).</p>
                 </div>
 
                 <div style="background: #fff3cd; border: 2px solid #ffc107; border-radius: 6px; padding: 1rem; margin: 1rem 0;">
@@ -348,52 +348,21 @@
             chatWidget.classList.add('active');
         }
 
-        // If they were sharing their screen, try to auto-reconnect
+        // If they were sharing their screen, show resume button
         if (sessionData.status === 'sharing') {
             shareType = sessionData.shareType || null;
 
-            // Show live banner with resume button
+            // Show live banner with resume button (can't auto-reconnect - needs user interaction)
             liveIndicator.classList.add('active');
             liveResumeBtn.style.display = 'inline-block';
             document.body.classList.add('support-live-mode');
 
-            // Try to auto-reconnect (works best for screen/window shares)
-            setTimeout(async () => {
-                try {
-                    console.log('[Support] Auto-reconnecting screen share...');
-
-                    // Attempt to get the display media again
-                    // For screen/window shares, this might just return the existing stream
-                    // For tab shares, it will require user interaction
-                    localStream = await navigator.mediaDevices.getDisplayMedia({
-                        video: { cursor: "always" },
-                        audio: false
-                    });
-
-                    console.log('[Support] Auto-reconnect successful!');
-
-                    // Hide resume button and setup the connection
-                    liveResumeBtn.style.display = 'none';
-                    isSharingScreen = true;
-
-                    // Setup peer connection
-                    await setupPeerConnection();
-
-                    addChatMessage('System', '✅ Screen sharing reconnected!', true);
-
-                } catch (err) {
-                    console.log('[Support] Auto-reconnect failed (expected for tab shares):', err.message);
-
-                    // Show resume button and message
-                    liveResumeBtn.style.display = 'inline-block';
-
-                    if (shareType === 'browser') {
-                        addChatMessage('System', 'Tab sharing disconnected. Click "Resume Sharing" to continue (you\'ll need to reshare each time you navigate).', true);
-                    } else {
-                        addChatMessage('System', 'Click "Resume Sharing" to continue sharing your screen.', true);
-                    }
-                }
-            }, 500); // Small delay to let the page fully load
+            // Add message based on share type
+            if (shareType === 'browser') {
+                addChatMessage('System', '⚠️ Tab sharing disconnected (happens when you navigate). Click "Resume Sharing" to continue.', true);
+            } else {
+                addChatMessage('System', 'Click "Resume Sharing" to continue sharing your screen.', true);
+            }
         }
     }
 

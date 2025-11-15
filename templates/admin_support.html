@@ -445,6 +445,13 @@ async function handleOffer(userId, offer) {
     console.log('=== ADMIN: Handling offer from user', userId, '===');
     console.log('Offer SDP:', offer);
 
+    // Close existing peer connection if it exists (user might be reconnecting after navigation)
+    if (peerConnections[userId]) {
+        console.log('Closing existing peer connection for user', userId);
+        peerConnections[userId].close();
+        delete peerConnections[userId];
+    }
+
     // Create peer connection for this user
     const peerConnection = new RTCPeerConnection({
         iceServers: [
