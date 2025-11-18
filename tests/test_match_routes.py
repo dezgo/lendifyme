@@ -7,25 +7,16 @@ from helpers.db import get_db_connection
 @pytest.fixture
 def client_with_loan(app, logged_in_client):
     """Create logged-in client with a sample loan."""
-    # Use the app's configured database, not a separate tmpdir
-    conn = get_db_connection()
-    c = conn.cursor()
+    # Create loan using the loan creation endpoint (handles encryption properly)
+    response = logged_in_client.post('/', data={
+        'borrower': 'Alice',
+        'amount': '100.00',
+        'note': 'Test loan',
+        'date_borrowed': '2025-10-01',
+        'loan_type': 'lending'
+    }, follow_redirects=True)
 
-    # Get user_id
-    c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
-    user_id = c.fetchone()[0]
-
-    # Generate access token for borrower portal
-    from services.auth_helpers import generate_magic_link_token
-    access_token = generate_magic_link_token()
-
-    # Create loan with access token
-    c.execute("""
-        INSERT INTO loans (user_id, borrower, amount, note, date_borrowed, loan_type, borrower_access_token)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (user_id, 'Alice', 100.00, 'Test loan', '2025-10-01', 'lending', access_token))
-    conn.commit()
-    conn.close()
+    assert response.status_code == 200, "Failed to create test loan"
 
     yield logged_in_client
 
