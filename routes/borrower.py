@@ -152,30 +152,64 @@ def borrower_toggle_notifications(token):
 def send_borrower_invite(loan_id):
     """Send invitation email to borrower with portal access link."""
     conn = get_db_connection()
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
-    # Verify loan ownership and get loan details
+    # Verify loan ownership and get loan details (including encrypted columns)
     c.execute("""
-        SELECT l.id, borrower, borrower_access_token, borrower_email, l.amount,
+        SELECT l.id, l.borrower, l.borrower_encrypted,
+               l.borrower_access_token, l.borrower_email, l.borrower_email_encrypted,
+               l.amount, l.amount_encrypted,
                COALESCE(SUM(at.amount), 0) as amount_repaid
         FROM loans l
         LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.id = ? AND l.user_id = ?
         GROUP BY l.id
     """, (loan_id, get_current_user_id()))
-    loan = c.fetchone()
+    loan_row = c.fetchone()
 
-    if not loan:
+    if not loan_row:
         conn.close()
         flash("Loan not found", "error")
         return redirect("/")
 
-    loan_id, borrower, access_token, borrower_email, amount, amount_repaid = loan
+    # Get DEK to decrypt loan data
+    from helpers.session_helpers import get_user_password_from_session
+    user_password = get_user_password_from_session()
+    dek = get_loan_dek(loan_id, user_password=user_password)
+
+    # Decrypt fields
+    borrower = (
+        decrypt_field(loan_row['borrower_encrypted'], dek)
+        if loan_row['borrower_encrypted'] and dek
+        else loan_row['borrower']
+    )
+
+    amount_str = (
+        decrypt_field(loan_row['amount_encrypted'], dek)
+        if loan_row['amount_encrypted'] and dek
+        else loan_row['amount']
+    )
+    # Convert to float, handle None
+    amount = float(amount_str) if amount_str is not None else 0.0
+
+    borrower_email = (
+        decrypt_field(loan_row['borrower_email_encrypted'], dek)
+        if loan_row['borrower_email_encrypted'] and dek
+        else loan_row['borrower_email']
+    )
+
+    access_token = loan_row['borrower_access_token']
+    amount_repaid = float(loan_row['amount_repaid']) if loan_row['amount_repaid'] is not None else 0.0
 
     if not access_token:
         conn.close()
         flash("This loan doesn't have an access token. Please edit the loan to generate one.", "error")
         return redirect("/")
+
+    # Prepare loan tuple for template (matching expected format)
+    # Template expects: loan[0]=id, loan[1]=borrower, loan[2]=?, loan[3]=email, loan[4]=amount, loan[5]=amount_repaid
+    loan = (loan_id, borrower, access_token, borrower_email, amount, amount_repaid)
 
     if request.method == "POST":
         email = request.form.get("borrower_email")
@@ -185,8 +219,15 @@ def send_borrower_invite(loan_id):
             flash("Email address is required", "error")
             return render_template("send_invite.html", loan=loan)
 
-        # Save email address to loan
-        c.execute("UPDATE loans SET borrower_email = ? WHERE id = ?", (email, loan_id))
+        # Save email address to loan (encrypted if DEK available)
+        if dek:
+            from services.encryption import encrypt_field
+            encrypted_email = encrypt_field(email, dek)
+            c.execute("UPDATE loans SET borrower_email_encrypted = ?, borrower_email = NULL WHERE id = ?",
+                     (encrypted_email, loan_id))
+        else:
+            c.execute("UPDATE loans SET borrower_email = ? WHERE id = ?", (email, loan_id))
+
         conn.commit()
         conn.close()
 
