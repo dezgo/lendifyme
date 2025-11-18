@@ -19,11 +19,51 @@ from services.loans import (
 loan_bp = Blueprint('loan', __name__)
 
 
+def _safe_float_parse(value_str: str | None, default: float | None = None) -> float | None:
+    """Safely parse a string to float with error handling.
+
+    Returns:
+        float if parsing succeeds, default if value_str is None/empty, None on error
+    """
+    if not value_str or (isinstance(value_str, str) and value_str.strip() == ""):
+        return default
+
+    try:
+        # Remove common formatting (currency symbols, commas)
+        if isinstance(value_str, str):
+            cleaned = value_str.replace('$', '').replace(',', '').strip()
+        else:
+            cleaned = str(value_str)
+        return float(cleaned)
+    except (ValueError, TypeError):
+        return None
+
+
 @loan_bp.route("/repay/<int:loan_id>", methods=["POST"])
 @login_required
 def repay(loan_id):
-    repayment_amount = request.form.get("repayment_amount")
+    repayment_amount = request.form.get("repayment_amount", "").strip()
     if not repayment_amount:
+        flash("Repayment amount is required", "error")
+        return redirect("/")
+
+    # Validate repayment amount
+    try:
+        # Remove common formatting (currency symbols, commas)
+        repayment_amount_clean = repayment_amount.replace('$', '').replace(',', '').strip()
+        payment_amount = float(repayment_amount_clean)
+
+        # Validate range
+        if payment_amount <= 0:
+            flash("Repayment amount must be greater than zero", "error")
+            return redirect("/")
+
+        if payment_amount > 999999999:  # Reasonable upper limit
+            flash("Repayment amount is too large", "error")
+            return redirect("/")
+
+    except (ValueError, TypeError):
+        flash(f"Invalid repayment amount: '{repayment_amount}'. Please enter a valid number.", "error")
         return redirect("/")
 
     conn = sqlite3.connect(get_db_path())
@@ -47,6 +87,7 @@ def repay(loan_id):
 
     if not loan_row:
         conn.close()
+        flash("Loan not found", "error")
         return redirect("/")
 
     # Decrypt fields as needed
@@ -72,9 +113,7 @@ def repay(loan_id):
     if loan_row["amount_encrypted"]:
         loan_amount = float(decrypt_field(loan_row["amount_encrypted"], dek))
     else:
-        loan_amount = float(loan_row["amount"])
-
-    payment_amount = float(repayment_amount)
+        loan_amount = float(loan_row["amount"] or 0.0)
 
     # Record manual repayment
     c.execute(
@@ -140,6 +179,19 @@ def edit_loan(loan_id):
         repayment_frequency = request.form.get("repayment_frequency") or None
 
         if borrower and amount:
+            # Validate numeric fields
+            amount_float = _safe_float_parse(amount)
+            if amount_float is None:
+                flash(f"Invalid loan amount: '{amount}'. Please enter a valid number.", "error")
+                conn.close()
+                return redirect(f"/edit/{loan_id}")
+
+            repayment_amount_float = _safe_float_parse(repayment_amount)
+            if repayment_amount and repayment_amount_float is None:
+                flash(f"Invalid repayment amount: '{repayment_amount}'. Please enter a valid number.", "error")
+                conn.close()
+                return redirect(f"/edit/{loan_id}")
+
             # If this loan uses encrypted columns, update those; else update plaintext columns
             uses_encryption = need_dek()
             if uses_encryption:
@@ -175,12 +227,12 @@ def edit_loan(loan_id):
                 # Amount
                 if "amount_encrypted" in loan_row.keys():
                     updates.append("amount_encrypted = ?")
-                    params.append(encrypt_field(str(float(amount)), dek))
+                    params.append(encrypt_field(str(amount_float), dek))
                     if "amount" in loan_row.keys():
                         updates.append("amount = NULL")
                 elif "amount" in loan_row.keys():
                     updates.append("amount = ?")
-                    params.append(float(amount))
+                    params.append(amount_float)
 
                 # Date borrowed (usually non-sensitive: keep plaintext)
                 if "date_borrowed" in loan_row.keys():
@@ -200,12 +252,12 @@ def edit_loan(loan_id):
                 # Repayment amount
                 if "repayment_amount_encrypted" in loan_row.keys():
                     updates.append("repayment_amount_encrypted = ?")
-                    params.append(encrypt_field(str(float(repayment_amount)), dek) if repayment_amount else None)
+                    params.append(encrypt_field(str(repayment_amount_float), dek) if repayment_amount_float else None)
                     if "repayment_amount" in loan_row.keys():
                         updates.append("repayment_amount = NULL")
                 elif "repayment_amount" in loan_row.keys():
                     updates.append("repayment_amount = ?")
-                    params.append(float(repayment_amount) if repayment_amount else None)
+                    params.append(repayment_amount_float)
 
                 # Repayment frequency (string)
                 if "repayment_frequency_encrypted" in loan_row.keys():
@@ -226,7 +278,7 @@ def edit_loan(loan_id):
                 """, tuple(params))
                 conn.commit()
             else:
-                # Legacy plaintext update (your current code, but using Row + None handling)
+                # Legacy plaintext update (using safely parsed values)
                 c.execute("""
                     UPDATE loans
                     SET borrower = ?, bank_name = ?, amount = ?, date_borrowed = ?, note = ?,
@@ -235,10 +287,10 @@ def edit_loan(loan_id):
                 """, (
                     borrower,
                     bank_name,
-                    float(amount),
+                    amount_float,
                     date_borrowed,
                     note,
-                    float(repayment_amount) if repayment_amount else None,
+                    repayment_amount_float,
                     repayment_frequency if repayment_frequency else None,
                     loan_id, get_current_user_id()
                 ))

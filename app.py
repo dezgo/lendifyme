@@ -839,6 +839,32 @@ def _handle_index_post(form):
     return "/"
 
 
+def _safe_float_parse(value_str: str | None, field_name: str) -> float | None:
+    """Safely parse a string to float with validation and error handling."""
+    if not value_str or value_str.strip() == "":
+        return None
+
+    try:
+        # Remove common formatting (currency symbols, commas)
+        cleaned = value_str.replace('$', '').replace(',', '').strip()
+        result = float(cleaned)
+
+        # Validate range
+        if result < 0:
+            flash(f"{field_name} cannot be negative", "error")
+            return None
+
+        if result > 999999999:  # Reasonable upper limit
+            flash(f"{field_name} is too large", "error")
+            return None
+
+        return result
+
+    except (ValueError, TypeError):
+        flash(f"Invalid {field_name}: '{value_str}'. Please enter a valid number.", "error")
+        return None
+
+
 def _create_encrypted_loan(
     *,
     borrower: str,
@@ -857,6 +883,14 @@ def _create_encrypted_loan(
         encrypt_dek_with_password,
         encrypt_dek_with_recovery_phrase,
     )
+
+    # Validate and parse numeric fields
+    amount = _safe_float_parse(amount_str, "Loan amount")
+    if amount is None:
+        return False
+
+    repayment_amount = _safe_float_parse(repayment_amount_str, "Repayment amount")
+    # repayment_amount can be None (optional field)
 
     conn = get_db_connection()
     c = conn.cursor()
@@ -879,10 +913,10 @@ def _create_encrypted_loan(
         loan_data = {
             "borrower": borrower,
             "bank_name": bank_name or None,
-            "amount": float(amount_str),
+            "amount": amount,
             "note": note,
             "borrower_email": None,
-            "repayment_amount": float(repayment_amount_str) if repayment_amount_str else None,
+            "repayment_amount": repayment_amount,
             "repayment_frequency": repayment_frequency or None,
         }
 
