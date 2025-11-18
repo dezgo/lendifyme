@@ -369,35 +369,87 @@ def delete_loan(loan_id):
 @login_required
 def loan_transactions(loan_id):
     """View all applied transactions for a specific loan."""
+    from services.encryption import decrypt_field
+    from services.loans import get_loan_dek
+
     conn = sqlite3.connect(get_db_path())
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
-    # Get loan details with calculated repaid amount
+    # Get loan details (query both plaintext and encrypted columns)
     c.execute("""
-        SELECT l.id, l.borrower, l.amount, l.date_borrowed,
-               COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.bank_name, l.note
+        SELECT l.id, l.borrower, l.borrower_encrypted, l.amount, l.amount_encrypted,
+               l.date_borrowed, l.bank_name, l.bank_name_encrypted, l.note, l.note_encrypted,
+               l.encrypted_dek
         FROM loans l
-        LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.id = ? AND l.user_id = ?
-        GROUP BY l.id
     """, (loan_id, get_current_user_id()))
-    loan = c.fetchone()
+    loan_row = c.fetchone()
 
-    if not loan:
+    if not loan_row:
         flash("Loan not found", "error")
         return redirect("/")
 
-    # Get all applied transactions for this loan
+    # Get DEK for decryption
+    dek = get_loan_dek(loan_row)
+
+    # Decrypt loan data
+    borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] and dek else loan_row['borrower']
+    amount_str = decrypt_field(loan_row['amount_encrypted'], dek) if loan_row['amount_encrypted'] and dek else loan_row['amount']
+    bank_name = decrypt_field(loan_row['bank_name_encrypted'], dek) if loan_row['bank_name_encrypted'] and dek else loan_row['bank_name']
+    note = decrypt_field(loan_row['note_encrypted'], dek) if loan_row['note_encrypted'] and dek else loan_row['note']
+
+    amount = float(amount_str) if amount_str is not None else 0.0
+
+    # Calculate total repaid from applied_transactions
     c.execute("""
-        SELECT id, date, description, amount, applied_at, auto_applied, confidence_score
-        FROM applied_transactions
-        WHERE loan_id = ?
-        ORDER BY date DESC
+        SELECT at.*, l.encrypted_dek
+        FROM applied_transactions at
+        LEFT JOIN loans l ON l.id = at.loan_id
+        WHERE at.loan_id = ?
     """, (loan_id,))
-    transactions = c.fetchall()
+    transaction_rows = c.fetchall()
+
+    amount_repaid = 0.0
+    for row in transaction_rows:
+        trans_dek = get_loan_dek(row)
+        amount_val_str = decrypt_field(row['amount_encrypted'], trans_dek) if row['amount_encrypted'] and trans_dek else row['amount']
+        if amount_val_str:
+            amount_repaid += float(amount_val_str)
+
+    # Build loan tuple for template compatibility
+    loan = (loan_row['id'], borrower, amount, loan_row['date_borrowed'], amount_repaid, bank_name, note)
+
+    # Get all applied transactions for this loan (query both plaintext and encrypted)
+    c.execute("""
+        SELECT at.id, at.date, at.description, at.description_encrypted, at.amount, at.amount_encrypted,
+               at.applied_at, at.auto_applied, at.confidence_score, l.encrypted_dek
+        FROM applied_transactions at
+        LEFT JOIN loans l ON l.id = at.loan_id
+        WHERE at.loan_id = ?
+        ORDER BY at.date DESC
+    """, (loan_id,))
+    transaction_rows = c.fetchall()
 
     conn.close()
+
+    # Decrypt transactions
+    transactions = []
+    for row in transaction_rows:
+        trans_dek = get_loan_dek(row)
+        description = decrypt_field(row['description_encrypted'], trans_dek) if row['description_encrypted'] and trans_dek else row['description']
+        amount_str = decrypt_field(row['amount_encrypted'], trans_dek) if row['amount_encrypted'] and trans_dek else row['amount']
+        amount_val = float(amount_str) if amount_str is not None else 0.0
+
+        transactions.append((
+            row['id'],
+            row['date'],
+            description,
+            amount_val,
+            row['applied_at'],
+            row['auto_applied'],
+            row['confidence_score']
+        ))
 
     has_export = has_feature(get_current_user_id(), 'transaction_export')
     return render_template("loan_transactions.html", loan=loan, transactions=transactions, has_export=has_export)
@@ -407,40 +459,90 @@ def loan_transactions(loan_id):
 @login_required
 def export_loan_transactions(loan_id):
     """Export loan transactions as CSV."""
+    from services.encryption import decrypt_field
+    from services.loans import get_loan_dek
+
     # Check if user has transaction export feature
     if not has_feature(get_current_user_id(), 'transaction_export'):
         flash("Transaction export is available on Basic and Pro plans. Upgrade to export your transactions!", "error")
         return redirect("/pricing")
 
     conn = sqlite3.connect(get_db_path())
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
-    # Get loan details with calculated repaid amount
+    # Get loan details (query both plaintext and encrypted columns)
     c.execute("""
-        SELECT l.id, l.borrower, l.amount, l.date_borrowed,
-               COALESCE(SUM(at.amount), 0) as amount_repaid,
-               l.bank_name, l.note
+        SELECT l.id, l.borrower, l.borrower_encrypted, l.amount, l.amount_encrypted,
+               l.date_borrowed, l.bank_name, l.bank_name_encrypted, l.note, l.note_encrypted,
+               l.encrypted_dek
         FROM loans l
-        LEFT JOIN applied_transactions at ON l.id = at.loan_id
         WHERE l.id = ? AND l.user_id = ?
-        GROUP BY l.id
     """, (loan_id, get_current_user_id()))
-    loan = c.fetchone()
+    loan_row = c.fetchone()
 
-    if not loan:
+    if not loan_row:
         flash("Loan not found", "error")
         return redirect("/")
 
-    # Get all applied transactions for this loan
+    # Get DEK for decryption
+    dek = get_loan_dek(loan_row)
+
+    # Decrypt loan data
+    borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] and dek else loan_row['borrower']
+    amount_str = decrypt_field(loan_row['amount_encrypted'], dek) if loan_row['amount_encrypted'] and dek else loan_row['amount']
+    bank_name = decrypt_field(loan_row['bank_name_encrypted'], dek) if loan_row['bank_name_encrypted'] and dek else loan_row['bank_name']
+    note = decrypt_field(loan_row['note_encrypted'], dek) if loan_row['note_encrypted'] and dek else loan_row['note']
+
+    amount = float(amount_str) if amount_str is not None else 0.0
+
+    # Calculate total repaid
     c.execute("""
-        SELECT id, date, description, amount, applied_at
-        FROM applied_transactions
-        WHERE loan_id = ?
-        ORDER BY date DESC
+        SELECT at.*, l.encrypted_dek
+        FROM applied_transactions at
+        LEFT JOIN loans l ON l.id = at.loan_id
+        WHERE at.loan_id = ?
     """, (loan_id,))
-    transactions = c.fetchall()
+    transaction_rows_for_total = c.fetchall()
+
+    amount_repaid = 0.0
+    for row in transaction_rows_for_total:
+        trans_dek = get_loan_dek(row)
+        amount_val_str = decrypt_field(row['amount_encrypted'], trans_dek) if row['amount_encrypted'] and trans_dek else row['amount']
+        if amount_val_str:
+            amount_repaid += float(amount_val_str)
+
+    # Build loan tuple for CSV generation
+    loan = (loan_row['id'], borrower, amount, loan_row['date_borrowed'], amount_repaid, bank_name, note)
+
+    # Get all applied transactions for this loan (query both plaintext and encrypted)
+    c.execute("""
+        SELECT at.id, at.date, at.description, at.description_encrypted, at.amount, at.amount_encrypted,
+               at.applied_at, l.encrypted_dek
+        FROM applied_transactions at
+        LEFT JOIN loans l ON l.id = at.loan_id
+        WHERE at.loan_id = ?
+        ORDER BY at.date DESC
+    """, (loan_id,))
+    transaction_rows = c.fetchall()
 
     conn.close()
+
+    # Decrypt transactions
+    transactions = []
+    for row in transaction_rows:
+        trans_dek = get_loan_dek(row)
+        description = decrypt_field(row['description_encrypted'], trans_dek) if row['description_encrypted'] and trans_dek else row['description']
+        amount_str = decrypt_field(row['amount_encrypted'], trans_dek) if row['amount_encrypted'] and trans_dek else row['amount']
+        amount_val = float(amount_str) if amount_str is not None else 0.0
+
+        transactions.append((
+            row['id'],
+            row['date'],
+            description,
+            amount_val,
+            row['applied_at']
+        ))
 
     # Build CSV content
     output = StringIO()
@@ -475,8 +577,11 @@ def export_loan_transactions(loan_id):
     csv_content = output.getvalue()
     output.close()
 
+    # Generate safe filename (handle None borrower name)
+    borrower_safe = loan[1].replace(" ", "_") if loan[1] else "unknown"
+
     response = Response(csv_content, mimetype='text/csv')
-    response.headers['Content-Disposition'] = f'attachment; filename=loan_{loan_id}_{loan[1].replace(" ", "_")}_transactions.csv'
+    response.headers['Content-Disposition'] = f'attachment; filename=loan_{loan_id}_{borrower_safe}_transactions.csv'
 
     return response
 

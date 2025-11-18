@@ -174,19 +174,22 @@ class TestMatchWorkflow:
         """Test complete workflow: create loan, upload transactions, apply match."""
         db_path = app.config['DATABASE']
 
-        # Get user_id
+        # 1. Create a loan using POST endpoint (handles encryption properly)
+        response = logged_in_client.post('/', data={
+            'borrower': 'Bob',
+            'amount': '200.00',
+            'note': 'Test loan',
+            'date_borrowed': '2025-10-01',
+            'loan_type': 'lending'
+        }, follow_redirects=True)
+
+        assert response.status_code == 200, "Failed to create test loan"
+
+        # Get the loan_id
         conn = sqlite3.connect(db_path)
         c = conn.cursor()
-        c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
-        user_id = c.fetchone()[0]
-
-        # 1. Create a loan
-        c.execute("""
-            INSERT INTO loans (user_id, borrower, amount, note, date_borrowed, loan_type)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, 'Bob', 200.00, 'Test loan', '2025-10-01', 'lending'))
-        loan_id = c.lastrowid
-        conn.commit()
+        c.execute("SELECT id FROM loans ORDER BY id DESC LIMIT 1")
+        loan_id = c.fetchone()[0]
         conn.close()
 
         # 2. Submit transactions
@@ -233,23 +236,26 @@ class TestMatchWorkflow:
         """Test workflow with multiple loans and transactions."""
         db_path = app.config['DATABASE']
 
-        # Get user_id
-        conn = sqlite3.connect(db_path)
-        c = conn.cursor()
-        c.execute("SELECT id FROM users WHERE email = ?", ('test@example.com',))
-        user_id = c.fetchone()[0]
+        # Create multiple loans using POST endpoint (handles encryption properly)
+        response1 = logged_in_client.post('/', data={
+            'borrower': 'Alice',
+            'amount': '100.00',
+            'note': 'Loan 1',
+            'date_borrowed': '2025-10-01',
+            'loan_type': 'lending'
+        }, follow_redirects=True)
 
-        # Create multiple loans
-        c.execute("""
-            INSERT INTO loans (user_id, borrower, amount, note, date_borrowed, loan_type)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, 'Alice', 100.00, 'Loan 1', '2025-10-01', 'lending'))
-        c.execute("""
-            INSERT INTO loans (user_id, borrower, amount, note, date_borrowed, loan_type)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (user_id, 'Bob', 200.00, 'Loan 2', '2025-10-01', 'lending'))
-        conn.commit()
-        conn.close()
+        assert response1.status_code == 200, "Failed to create first loan"
+
+        response2 = logged_in_client.post('/', data={
+            'borrower': 'Bob',
+            'amount': '200.00',
+            'note': 'Loan 2',
+            'date_borrowed': '2025-10-01',
+            'loan_type': 'lending'
+        }, follow_redirects=True)
+
+        assert response2.status_code == 200, "Failed to create second loan"
 
         # Submit transactions for both
         csv_data = """Date,Description,Amount
