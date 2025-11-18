@@ -14,6 +14,8 @@ from datetime import datetime, timedelta
 from typing import Dict
 from services.connectors.registry import ConnectorRegistry
 from services.transaction_matcher import match_transactions_to_loans
+from services.loans import get_loan_dek
+from services.encryption import decrypt_field
 from helpers.db import get_db_connection
 
 
@@ -127,11 +129,14 @@ def sync_all_bank_connections(db_path: str, user_id: int, user_password: str) ->
             ]
 
             # Get unpaid/partially-paid loans for this user
+            # Query both plaintext AND encrypted columns to support encrypted loans
             c = conn.cursor()
+            conn.row_factory = sqlite3.Row
             c.execute("""
                 SELECT
-                    id, borrower, amount, date_borrowed, repayment_amount,
-                    repayment_frequency, bank_name,
+                    id, borrower, borrower_encrypted, amount, amount_encrypted,
+                    date_borrowed, repayment_amount, repayment_amount_encrypted,
+                    repayment_frequency, bank_name, bank_name_encrypted, encrypted_dek,
                     (SELECT COALESCE(SUM(amount), 0)
                      FROM applied_transactions
                      WHERE loan_id = loans.id) as amount_repaid
@@ -141,17 +146,30 @@ def sync_all_bank_connections(db_path: str, user_id: int, user_password: str) ->
 
             loans = []
             for row in c.fetchall():
-                remaining = row[2] - row[7]  # amount - amount_repaid
+                # Get DEK for this loan using user's password
+                dek = get_loan_dek(row['id'], user_password=user_password)
+
+                # Decrypt fields if they're encrypted, otherwise use plaintext
+                borrower = decrypt_field(row['borrower_encrypted'], dek) if row['borrower_encrypted'] and dek else row['borrower']
+                amount_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
+                bank_name = decrypt_field(row['bank_name_encrypted'], dek) if row['bank_name_encrypted'] and dek else row['bank_name']
+                repayment_amount_str = decrypt_field(row['repayment_amount_encrypted'], dek) if row['repayment_amount_encrypted'] and dek else row['repayment_amount']
+
+                # Convert numeric strings to floats
+                amount = float(amount_str) if amount_str is not None else 0.0
+                repayment_amount = float(repayment_amount_str) if repayment_amount_str is not None else None
+
+                remaining = amount - row['amount_repaid']
                 if remaining > 0:  # Only include loans with remaining balance
                     loans.append({
-                        'id': row[0],
-                        'borrower': row[1],
-                        'amount': row[2],
-                        'date_borrowed': row[3],
-                        'repayment_amount': row[4],
-                        'repayment_frequency': row[5],
-                        'bank_name': row[6],
-                        'amount_repaid': row[7],
+                        'id': row['id'],
+                        'borrower': borrower,
+                        'amount': amount,
+                        'date_borrowed': row['date_borrowed'],
+                        'repayment_amount': repayment_amount,
+                        'repayment_frequency': row['repayment_frequency'],
+                        'bank_name': bank_name,
+                        'amount_repaid': row['amount_repaid'],
                         'remaining': remaining
                     })
 

@@ -457,27 +457,35 @@ class TestAuthorizationValidation:
     @pytest.fixture
     def two_users(self, client, app):
         """Create two users and their loans."""
+        import time
         from services.encryption import generate_encryption_salt
         from werkzeug.security import generate_password_hash
 
         db_path = app.config['DATABASE']
-        conn = get_db_connection()
-        c = conn.cursor()
+
+        # Use timestamp to make emails unique and avoid UNIQUE constraint violations
+        timestamp = str(int(time.time() * 1000000))  # microsecond timestamp
+        user1_email = f'user1_{timestamp}@test.com'
+        user2_email = f'user2_{timestamp}@test.com'
 
         # Create User 1 with password
+        conn = sqlite3.connect(str(db_path))
+        c = conn.cursor()
+
         encryption_salt_1 = generate_encryption_salt()
         password_hash_1 = generate_password_hash('password1')
         c.execute("""
             INSERT INTO users (email, name, recovery_codes, created_at, encryption_salt, password_hash, email_verified, onboarding_completed)
             VALUES (?, ?, ?, datetime('now'), ?, ?, 1, 1)
-        """, ('user1@test.com', 'User 1', '[]', encryption_salt_1, password_hash_1))
+        """, (user1_email, 'User 1', '[]', encryption_salt_1, password_hash_1))
         user1_id = c.lastrowid
         conn.commit()
+        conn.close()
 
         # Log in as User 1 and create loan
         with client.session_transaction() as sess:
             sess['user_id'] = user1_id
-            sess['user_email'] = 'user1@test.com'
+            sess['user_email'] = user1_email
             sess['user_password'] = 'password1'
 
         client.post('/', data={
@@ -488,30 +496,35 @@ class TestAuthorizationValidation:
         })
 
         # Get user1's loan ID
+        conn = sqlite3.connect(str(db_path))
+        c = conn.cursor()
         c.execute("SELECT id FROM loans WHERE user_id = ? ORDER BY id DESC LIMIT 1", (user1_id,))
         result = c.fetchone()
         user1_loan_id = result[0] if result else None
+        conn.close()
 
         # Logout user 1
         client.get('/logout')
 
         # Create User 2
+        conn = sqlite3.connect(str(db_path))
+        c = conn.cursor()
+
         encryption_salt_2 = generate_encryption_salt()
         password_hash_2 = generate_password_hash('password2')
         c.execute("""
             INSERT INTO users (email, name, recovery_codes, created_at, encryption_salt, password_hash, email_verified, onboarding_completed)
             VALUES (?, ?, ?, datetime('now'), ?, ?, 1, 1)
-        """, ('user2@test.com', 'User 2', '[]', encryption_salt_2, password_hash_2))
+        """, (user2_email, 'User 2', '[]', encryption_salt_2, password_hash_2))
         user2_id = c.lastrowid
         conn.commit()
+        conn.close()
 
         # Log in as User 2
         with client.session_transaction() as sess:
             sess['user_id'] = user2_id
-            sess['user_email'] = 'user2@test.com'
+            sess['user_email'] = user2_email
             sess['user_password'] = 'password2'
-
-        conn.close()
 
         return {'user1_loan_id': user1_loan_id, 'user2_id': user2_id}
 

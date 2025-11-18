@@ -5,7 +5,8 @@ from flask import Blueprint, render_template, request, session, redirect, flash,
 from helpers.decorators import login_required, get_current_user_id
 from helpers.db import get_db_connection
 from helpers.utils import get_db_path
-from services.loans import has_feature, get_user_subscription_tier
+from services.loans import has_feature, get_user_subscription_tier, get_loan_dek
+from services.encryption import decrypt_field
 from services.transaction_matcher import match_transactions_to_loans
 from services.connectors.registry import ConnectorRegistry
 from services.connectors.csv_connector import CSVConnector
@@ -13,6 +14,7 @@ from datetime import datetime, timedelta
 import json
 import hashlib
 import secrets
+import sqlite3
 
 
 # Helper function to log events
@@ -193,13 +195,24 @@ def match_transactions():
             transaction_dicts = [t.to_dict() for t in transactions]
             all_transactions_dicts = [t.to_dict() for t in all_transactions]
 
+            # Get user password from session (required for decrypting loan data)
+            user_password = session.get('user_password')
+            if not user_password:
+                flash("Please log in with your password to match transactions.", "error")
+                return redirect("/login")
+
             # Get all loans for current user with calculated repaid amounts AND loan_type
-            conn = get_db_connection()
+            # Query both plaintext AND encrypted columns to support encrypted loans
+            conn = sqlite3.connect(get_db_path())
+            conn.row_factory = sqlite3.Row
             c = conn.cursor()
             c.execute("""
-                SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
+                SELECT l.id, l.borrower, l.borrower_encrypted, l.amount, l.amount_encrypted,
+                       l.note, l.note_encrypted, l.date_borrowed,
                        COALESCE(SUM(at.amount), 0) as amount_repaid,
-                       l.repayment_amount, l.repayment_frequency, l.bank_name, l.loan_type
+                       l.repayment_amount, l.repayment_amount_encrypted,
+                       l.repayment_frequency, l.bank_name, l.bank_name_encrypted,
+                       l.loan_type, l.encrypted_dek
                 FROM loans l
                 LEFT JOIN applied_transactions at ON l.id = at.loan_id
                 WHERE l.user_id = ?
@@ -208,20 +221,34 @@ def match_transactions():
             loan_rows = c.fetchall()
             conn.close()
 
-            # Convert to list of dicts
+            # Convert to list of dicts, decrypting encrypted fields
             loans = []
             for row in loan_rows:
+                # Get DEK for this loan
+                dek = get_loan_dek(row['id'], user_password=user_password)
+
+                # Decrypt fields if they're encrypted, otherwise use plaintext
+                borrower = decrypt_field(row['borrower_encrypted'], dek) if row['borrower_encrypted'] and dek else row['borrower']
+                amount_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
+                note = decrypt_field(row['note_encrypted'], dek) if row['note_encrypted'] and dek else row['note']
+                bank_name = decrypt_field(row['bank_name_encrypted'], dek) if row['bank_name_encrypted'] and dek else row['bank_name']
+                repayment_amount_str = decrypt_field(row['repayment_amount_encrypted'], dek) if row['repayment_amount_encrypted'] and dek else row['repayment_amount']
+
+                # Convert numeric strings to floats
+                amount = float(amount_str) if amount_str is not None else 0.0
+                repayment_amount = float(repayment_amount_str) if repayment_amount_str is not None else None
+
                 loans.append({
-                    'id': row[0],
-                    'borrower': row[1],
-                    'amount': row[2],
-                    'note': row[3] or '',
-                    'date_borrowed': row[4],
-                    'amount_repaid': row[5],
-                    'repayment_amount': row[6],
-                    'repayment_frequency': row[7],
-                    'bank_name': row[8],
-                    'loan_type': row[9]  # 'lending' or 'borrowing'
+                    'id': row['id'],
+                    'borrower': borrower,
+                    'amount': amount,
+                    'note': note or '',
+                    'date_borrowed': row['date_borrowed'],
+                    'amount_repaid': row['amount_repaid'],
+                    'repayment_amount': repayment_amount,
+                    'repayment_frequency': row['repayment_frequency'],
+                    'bank_name': bank_name,
+                    'loan_type': row['loan_type']  # 'lending' or 'borrowing'
                 })
 
             # Find matches
@@ -389,19 +416,42 @@ def apply_match_handler():
                 amount = match['transaction']['amount']
                 transaction = match['transaction']
 
-                # Verify loan ownership and get loan details
+                # Get user password from session for decryption
+                user_password = session.get('user_password')
+                if not user_password:
+                    conn.close()
+                    return jsonify({'error': 'Please log in with your password'}), 401
+
+                # Verify loan ownership and get loan details (query both plaintext and encrypted)
+                conn.row_factory = sqlite3.Row
+                c = conn.cursor()
                 c.execute("""
-                    SELECT l.id, l.borrower, l.borrower_email, l.borrower_access_token, l.amount,
-                           COALESCE(SUM(at.amount), 0) as current_repaid, l.loan_type, l.borrower_notifications_enabled
+                    SELECT l.id, l.borrower, l.borrower_encrypted, l.borrower_email, l.borrower_email_encrypted,
+                           l.borrower_access_token, l.amount, l.amount_encrypted,
+                           COALESCE(SUM(at.amount), 0) as current_repaid, l.loan_type, l.borrower_notifications_enabled,
+                           l.encrypted_dek
                     FROM loans l
                     LEFT JOIN applied_transactions at ON l.id = at.loan_id
                     WHERE l.id = ? AND l.user_id = ?
                     GROUP BY l.id
                 """, (loan_id, get_current_user_id()))
-                loan_details = c.fetchone()
+                loan_row = c.fetchone()
 
-                if loan_details:
-                    loan_id_db, borrower_name, borrower_email, access_token, loan_amount, current_repaid, loan_type, notifications_enabled = loan_details
+                if loan_row:
+                    # Get DEK for decryption
+                    dek = get_loan_dek(loan_row['id'], user_password=user_password)
+
+                    # Decrypt fields
+                    borrower_name = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] and dek else loan_row['borrower']
+                    borrower_email = decrypt_field(loan_row['borrower_email_encrypted'], dek) if loan_row['borrower_email_encrypted'] and dek else loan_row['borrower_email']
+                    amount_str = decrypt_field(loan_row['amount_encrypted'], dek) if loan_row['amount_encrypted'] and dek else loan_row['amount']
+                    loan_amount = float(amount_str) if amount_str is not None else 0.0
+
+                    loan_id_db = loan_row['id']
+                    access_token = loan_row['borrower_access_token']
+                    current_repaid = loan_row['current_repaid']
+                    loan_type = loan_row['loan_type']
+                    notifications_enabled = loan_row['borrower_notifications_enabled']
 
                     # For borrowing loans, transactions are negative (outgoing), but we store as positive repayments
                     # For lending loans, transactions are already positive (incoming)
