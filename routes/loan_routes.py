@@ -3,7 +3,7 @@ Loan management routes blueprint.
 
 Handles loan creation, editing, deletion, repayments, and transaction history.
 """
-from flask import Blueprint, render_template, request, redirect, flash, Response
+from flask import Blueprint, render_template, request, redirect, flash, Response, session
 from io import StringIO
 import csv
 import sqlite3
@@ -372,6 +372,12 @@ def loan_transactions(loan_id):
     from services.encryption import decrypt_field
     from services.loans import get_loan_dek
 
+    # Get user password from session for decryption
+    user_password = session.get('user_password')
+    if not user_password:
+        flash("Please log in with your password to view transactions.", "error")
+        return redirect("/login")
+
     conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
@@ -390,8 +396,8 @@ def loan_transactions(loan_id):
         flash("Loan not found", "error")
         return redirect("/")
 
-    # Get DEK for decryption
-    dek = get_loan_dek(loan_row)
+    # Get DEK for decryption using user password
+    dek = get_loan_dek(loan_row['id'], user_password=user_password)
 
     # Decrypt loan data
     borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] and dek else loan_row['borrower']
@@ -412,8 +418,8 @@ def loan_transactions(loan_id):
 
     amount_repaid = 0.0
     for row in transaction_rows:
-        trans_dek = get_loan_dek(row)
-        amount_val_str = decrypt_field(row['amount_encrypted'], trans_dek) if row['amount_encrypted'] and trans_dek else row['amount']
+        # Reuse same DEK since all transactions belong to the same loan
+        amount_val_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
         if amount_val_str:
             amount_repaid += float(amount_val_str)
 
@@ -467,6 +473,12 @@ def export_loan_transactions(loan_id):
         flash("Transaction export is available on Basic and Pro plans. Upgrade to export your transactions!", "error")
         return redirect("/pricing")
 
+    # Get user password from session for decryption
+    user_password = session.get('user_password')
+    if not user_password:
+        flash("Please log in with your password to export transactions.", "error")
+        return redirect("/login")
+
     conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
@@ -485,8 +497,8 @@ def export_loan_transactions(loan_id):
         flash("Loan not found", "error")
         return redirect("/")
 
-    # Get DEK for decryption
-    dek = get_loan_dek(loan_row)
+    # Get DEK for decryption using user password
+    dek = get_loan_dek(loan_row['id'], user_password=user_password)
 
     # Decrypt loan data
     borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] and dek else loan_row['borrower']
@@ -507,8 +519,8 @@ def export_loan_transactions(loan_id):
 
     amount_repaid = 0.0
     for row in transaction_rows_for_total:
-        trans_dek = get_loan_dek(row)
-        amount_val_str = decrypt_field(row['amount_encrypted'], trans_dek) if row['amount_encrypted'] and trans_dek else row['amount']
+        # Reuse same DEK since all transactions belong to the same loan
+        amount_val_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
         if amount_val_str:
             amount_repaid += float(amount_val_str)
 
