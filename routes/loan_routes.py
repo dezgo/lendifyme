@@ -3,7 +3,7 @@ Loan management routes blueprint.
 
 Handles loan creation, editing, deletion, repayments, and transaction history.
 """
-from flask import Blueprint, render_template, request, redirect, flash, Response, session
+from flask import Blueprint, render_template, request, redirect, flash, Response, session, current_app
 from io import StringIO
 import csv
 import sqlite3
