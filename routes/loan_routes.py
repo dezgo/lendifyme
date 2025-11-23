@@ -419,7 +419,13 @@ def loan_transactions(loan_id):
     amount_repaid = 0.0
     for row in transaction_rows:
         # Reuse same DEK since all transactions belong to the same loan
-        amount_val_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
+        try:
+            amount_val_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
+        except Exception as e:
+            # Decryption failed - fall back to plaintext or log error
+            current_app.logger.warning(f"Failed to decrypt transaction amount for loan {loan_id}: {e}")
+            amount_val_str = row['amount']  # Fall back to plaintext
+
         if amount_val_str:
             amount_repaid += float(amount_val_str)
 
@@ -442,10 +448,21 @@ def loan_transactions(loan_id):
     # Decrypt transactions
     transactions = []
     for row in transaction_rows:
-        trans_dek = get_loan_dek(row)
-        description = decrypt_field(row['description_encrypted'], trans_dek) if row['description_encrypted'] and trans_dek else row['description']
-        amount_str = decrypt_field(row['amount_encrypted'], trans_dek) if row['amount_encrypted'] and trans_dek else row['amount']
-        amount_val = float(amount_str) if amount_str is not None else 0.0
+        # Use same DEK as loan (all transactions belong to this loan)
+        try:
+            description = decrypt_field(row['description_encrypted'], dek) if row['description_encrypted'] and dek else row['description']
+        except Exception as e:
+            # Decryption failed - fall back to plaintext
+            current_app.logger.warning(f"Failed to decrypt transaction description for loan {loan_id}: {e}")
+            description = row['description']
+
+        try:
+            amount_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
+            amount_val = float(amount_str) if amount_str is not None else 0.0
+        except Exception as e:
+            # Decryption failed - fall back to plaintext
+            current_app.logger.warning(f"Failed to decrypt transaction amount for loan {loan_id}: {e}")
+            amount_val = float(row['amount']) if row['amount'] is not None else 0.0
 
         transactions.append((
             row['id'],
@@ -520,7 +537,13 @@ def export_loan_transactions(loan_id):
     amount_repaid = 0.0
     for row in transaction_rows_for_total:
         # Reuse same DEK since all transactions belong to the same loan
-        amount_val_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
+        try:
+            amount_val_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
+        except Exception as e:
+            # Decryption failed - fall back to plaintext or log error
+            current_app.logger.warning(f"Failed to decrypt transaction amount for loan {loan_id} (export): {e}")
+            amount_val_str = row['amount']  # Fall back to plaintext
+
         if amount_val_str:
             amount_repaid += float(amount_val_str)
 
@@ -543,10 +566,21 @@ def export_loan_transactions(loan_id):
     # Decrypt transactions
     transactions = []
     for row in transaction_rows:
-        trans_dek = get_loan_dek(row)
-        description = decrypt_field(row['description_encrypted'], trans_dek) if row['description_encrypted'] and trans_dek else row['description']
-        amount_str = decrypt_field(row['amount_encrypted'], trans_dek) if row['amount_encrypted'] and trans_dek else row['amount']
-        amount_val = float(amount_str) if amount_str is not None else 0.0
+        # Use same DEK as loan (all transactions belong to this loan)
+        try:
+            description = decrypt_field(row['description_encrypted'], dek) if row['description_encrypted'] and dek else row['description']
+        except Exception as e:
+            # Decryption failed - fall back to plaintext
+            current_app.logger.warning(f"Failed to decrypt transaction description for loan {loan_id} (export): {e}")
+            description = row['description']
+
+        try:
+            amount_str = decrypt_field(row['amount_encrypted'], dek) if row['amount_encrypted'] and dek else row['amount']
+            amount_val = float(amount_str) if amount_str is not None else 0.0
+        except Exception as e:
+            # Decryption failed - fall back to plaintext
+            current_app.logger.warning(f"Failed to decrypt transaction amount for loan {loan_id} (export): {e}")
+            amount_val = float(row['amount']) if row['amount'] is not None else 0.0
 
         transactions.append((
             row['id'],
