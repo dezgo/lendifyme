@@ -70,11 +70,11 @@ h1 {
 <form method="post">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Borrower Name</label>
-    <input type="text" name="borrower" value="{{ loan.borrower }}" placeholder="e.g. Alice Smith" required>
+    <input type="text" name="borrower" value="{{ loan.borrower }}" placeholder="e.g. Alice Smith" required data-lpignore="true" autocomplete="off">
 
     <label>Bank Statement Name (optional)</label>
     <input type="text" name="bank_name" value="{{ loan.bank_name if loan.bank_name else '' }}"
-           placeholder="e.g. Alice S or A Smith - as it appears in your bank">
+           placeholder="e.g. Alice S or A Smith - as it appears in your bank" data-lpignore="true" autocomplete="off">
     <p style="font-size: 0.85rem; color: #6c757d; margin-top: -0.5rem; margin-bottom: 1rem;">
         Use this if their name appears differently in your bank transactions
     </p>

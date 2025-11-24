@@ -795,12 +795,12 @@ function toggleUnlockMethod() {
 
                 <div class="form-group">
                     <label class="form-label" id="label_person">Borrower Name</label>
-                    <input type="text" name="borrower" id="input_person" class="form-control" placeholder="e.g. Alice Smith" required>
+                    <input type="text" name="borrower" id="input_person" class="form-control" placeholder="e.g. Alice Smith" required data-lpignore="true" autocomplete="off">
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Bank Statement Name (optional)</label>
-                    <input type="text" name="bank_name" class="form-control" placeholder="e.g. Alice S or A Smith">
+                    <input type="text" name="bank_name" class="form-control" placeholder="e.g. Alice S or A Smith" data-lpignore="true" autocomplete="off">
                     <small class="form-text">Use this if their name appears differently in your bank transactions</small>
                 </div>
 
