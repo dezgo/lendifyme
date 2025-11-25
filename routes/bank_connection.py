@@ -38,7 +38,7 @@ def get_user_info(user_id):
     c = conn.cursor()
 
     c.execute("""
-        SELECT email, name, basiq_user_id, connected_bank, bank_credentials_encrypted
+        SELECT email, name, basiq_user_id, connected_bank, bank_credentials_encrypted, connected_institution_name
         FROM users
         WHERE id = ?
     """, (user_id,))
@@ -52,7 +52,8 @@ def get_user_info(user_id):
             'name': result[1],
             'basiq_user_id': result[2],
             'connected_bank': result[3],
-            'bank_credentials_encrypted': result[4]
+            'bank_credentials_encrypted': result[4],
+            'connected_institution_name': result[5]
         }
     return None
 
@@ -84,21 +85,29 @@ def connect_bank():
     current_connection = None
     if user and user['connected_bank']:
         try:
-            connector_class = ConnectorRegistry.get_connector_class(user['connected_bank'])
-            if connector_class:
-                # Get credential schema to determine if it needs special instantiation
-                schema = connector_class.get_credential_schema()
-                if schema.get('auth_type') == 'oauth':
-                    # OAuth banks (aggregator-backed) need api_key and optionally basiq_user_id
-                    instance = connector_class(api_key="dummy", basiq_user_id=None)
-                else:
-                    # API key banks just need api_key
-                    instance = connector_class(api_key="dummy")
+            # Use actual institution name if available (e.g., "Hooli Bank")
+            # Otherwise fall back to connector name (e.g., "Up Bank")
+            display_name = user.get('connected_institution_name')
 
-                current_connection = {
-                    'id': user['connected_bank'],
-                    'name': instance.connector_name
-                }
+            if not display_name:
+                # Fall back to connector display name
+                connector_class = ConnectorRegistry.get_connector_class(user['connected_bank'])
+                if connector_class:
+                    # Get credential schema to determine if it needs special instantiation
+                    schema = connector_class.get_credential_schema()
+                    if schema.get('auth_type') == 'oauth':
+                        # OAuth banks (aggregator-backed) need api_key and optionally basiq_user_id
+                        instance = connector_class(api_key="dummy", basiq_user_id=None)
+                    else:
+                        # API key banks just need api_key
+                        instance = connector_class(api_key="dummy")
+
+                    display_name = instance.connector_name
+
+            current_connection = {
+                'id': user['connected_bank'],
+                'name': display_name or 'Connected Bank'
+            }
         except Exception as e:
             # Silently fail - just won't show current connection
             current_app.logger.error(f"Failed to get connector name: {e}")
@@ -323,22 +332,30 @@ def check_connection_status(bank_id):
         has_connection = any(c['status'] in connected_statuses for c in connections)
 
         if has_connection:
-            # Store the connection
-            conn = get_db_connection()
-            c = conn.cursor()
-            c.execute("UPDATE users SET connected_bank = ? WHERE id = ?", (bank_id, user_id))
-            conn.commit()
-            conn.close()
-
             # Get the connected connection
             connected_conn = next((c for c in connections if c['status'] in connected_statuses), connections[0])
 
-            log_event('bank_connected', {'bank': bank_id, 'auth_type': 'oauth', 'status': connected_conn['status']})
+            # Get institution name for display (actual bank name, not just "Other Bank")
+            institution_name = connected_conn.get('institution', {}).get('name', 'Unknown Bank')
+
+            # Store the connection with actual institution name
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute("""
+                UPDATE users
+                SET connected_bank = ?,
+                    connected_institution_name = ?
+                WHERE id = ?
+            """, (bank_id, institution_name, user_id))
+            conn.commit()
+            conn.close()
+
+            log_event('bank_connected', {'bank': bank_id, 'auth_type': 'oauth', 'status': connected_conn['status'], 'institution': institution_name})
 
             return jsonify({
                 'connected': True,
-                'bank_name': connector.connector_name,
-                'institution': connected_conn['institution']['name'] if connected_conn.get('institution') else None,
+                'bank_name': institution_name,  # Show actual bank name
+                'institution': institution_name,
                 'status': connected_conn['status']
             })
         else:
@@ -404,15 +421,20 @@ def bank_connected(bank_id):
         # Check for active or available connections
         connected_statuses = ['active', 'available']
         if connections and any(c['status'] in connected_statuses for c in connections):
-            # Store which bank they connected
+            # Get the actual institution name
+            connected_conn = next((c for c in connections if c['status'] in connected_statuses), connections[0])
+            institution_name = connected_conn.get('institution', {}).get('name', 'Unknown Bank')
+
+            # Store which bank they connected and the actual institution name
             conn = get_db_connection()
             c = conn.cursor()
 
             c.execute("""
                 UPDATE users
-                SET connected_bank = ?
+                SET connected_bank = ?,
+                    connected_institution_name = ?
                 WHERE id = ?
-            """, (bank_id, user_id))
+            """, (bank_id, institution_name, user_id))
 
             conn.commit()
             conn.close()
@@ -470,7 +492,8 @@ def disconnect_bank():
     c.execute("""
         UPDATE users
         SET connected_bank = NULL,
-            bank_credentials_encrypted = NULL
+            bank_credentials_encrypted = NULL,
+            connected_institution_name = NULL
         WHERE id = ?
     """, (user_id,))
 

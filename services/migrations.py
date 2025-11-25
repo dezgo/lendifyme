@@ -371,6 +371,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 32:
+        try:
+            migrate_v32_add_connected_institution_name(conn)
+            _set_user_version(conn, 32)
+            conn.commit()
+            print("✅ Migration v32 applied.")
+        except Exception as e:
+            print(f"❌ Migration v32 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -1736,3 +1749,28 @@ def migrate_v31_add_bank_connection_fields(conn):
 
     conn.commit()
     print("  Added bank connection fields: basiq_user_id, connected_bank, bank_credentials_encrypted")
+
+
+def migrate_v32_add_connected_institution_name(conn):
+    """
+    Add connected_institution_name field to store the actual bank name.
+
+    When using 'other_bank' connector (Basiq generic), we need to know which
+    actual institution the user connected (e.g., "Hooli Bank", "CommBank").
+    This field stores the human-readable institution name for display.
+    """
+    c = conn.cursor()
+
+    # Check if column already exists (idempotent migration)
+    c.execute("PRAGMA table_info(users)")
+    columns = [row[1] for row in c.fetchall()]
+
+    if 'connected_institution_name' not in columns:
+        c.execute("""
+            ALTER TABLE users ADD COLUMN connected_institution_name TEXT
+        """)
+        print("  Added connected_institution_name column to users table.")
+    else:
+        print("  connected_institution_name column already exists, skipping.")
+
+    conn.commit()
