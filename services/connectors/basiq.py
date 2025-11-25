@@ -514,6 +514,73 @@ class BasiqConnector(BankConnector):
             logger.error(f"Failed to create consent link: {str(e)}")
             raise ConnectionError(f"Failed to create consent link: {str(e)}")
 
+    def delete_connection(self, user_id: str, connection_id: str) -> bool:
+        """
+        Delete a specific bank connection.
+
+        This is useful for cleaning up old/stuck connections before creating
+        a new consent flow.
+
+        Args:
+            user_id: Basiq user ID
+            connection_id: Connection ID to delete
+
+        Returns:
+            True if deleted successfully, False otherwise
+
+        Raises:
+            ConnectionError: If API request fails
+        """
+        try:
+            response = requests.delete(
+                f"{self.BASE_URL}/users/{user_id}/connections/{connection_id}",
+                headers=self._get_headers(),
+                timeout=15
+            )
+
+            if response.status_code == 204:
+                logger.info(f"Deleted connection {connection_id} for user {user_id}")
+                return True
+            elif response.status_code == 404:
+                logger.warning(f"Connection {connection_id} not found (already deleted?)")
+                return True  # Already gone, so mission accomplished
+            else:
+                logger.error(f"Failed to delete connection: {response.status_code} - {response.text}")
+                return False
+
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error deleting connection: {str(e)}")
+            raise ConnectionError(f"Failed to delete connection: {str(e)}")
+
+    def delete_all_connections(self, user_id: str) -> int:
+        """
+        Delete all bank connections for a user.
+
+        Useful for cleaning up before creating a fresh consent flow.
+
+        Args:
+            user_id: Basiq user ID
+
+        Returns:
+            Number of connections deleted
+        """
+        try:
+            connections = self.get_user_connections(user_id)
+            deleted_count = 0
+
+            for conn in connections:
+                conn_id = conn.get('id')
+                if conn_id:
+                    if self.delete_connection(user_id, conn_id):
+                        deleted_count += 1
+
+            logger.info(f"Deleted {deleted_count} connections for user {user_id}")
+            return deleted_count
+
+        except Exception as e:
+            logger.error(f"Error deleting all connections: {str(e)}")
+            return 0
+
     def get_user_connections(self, user_id: str) -> List[dict]:
         """
         Get all bank connections for a user.

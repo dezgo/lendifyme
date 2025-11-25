@@ -267,15 +267,19 @@ def connect_bank_oauth(bank_id):
                 flash(f"Your {connector.connector_name} account is already connected!", 'success')
                 return redirect(url_for('match'))
 
-            # Check for problematic connections (pending/invalid)
+            # Check for problematic connections (pending/invalid) - DELETE THEM
             if any(c['status'] in problematic_statuses for c in existing_connections):
-                current_app.logger.warning(f"User has connection in problematic state")
+                current_app.logger.warning(f"User has connection in problematic state - deleting to start fresh")
+
+                # Delete all old connections to avoid "already approved" stuck screen
+                deleted = connector._basiq.delete_all_connections(basiq_user_id)
+                current_app.logger.info(f"Deleted {deleted} old connection(s)")
+
                 flash(
-                    'You have a pending or failed connection. If you\'re stuck on the consent screen, '
-                    'try disconnecting your bank first, then connect again.',
-                    'warning'
+                    'Cleaned up old connection. Starting fresh consent flow...',
+                    'info'
                 )
-                # Still generate consent link - they might want to try again
+                # Continue to create new consent link
 
     except Exception as e:
         current_app.logger.warning(f"Could not check existing connections: {e}")
@@ -476,19 +480,32 @@ def bank_connected(bank_id):
 @login_required
 def disconnect_bank():
     """
-    Disconnect user's bank.
+    Disconnect user's bank and clean up Basiq connections.
     """
     user_id = get_current_user_id()
+    user = get_user_info(user_id)
 
     conn = get_db_connection()
     c = conn.cursor()
 
     # Get current bank before disconnecting
-    c.execute("SELECT connected_bank FROM users WHERE id = ?", (user_id,))
+    c.execute("SELECT connected_bank, basiq_user_id FROM users WHERE id = ?", (user_id,))
     result = c.fetchone()
     old_bank = result[0] if result else None
+    basiq_user_id = result[1] if result and len(result) > 1 else None
 
-    # Clear connection
+    # If it's a Basiq connection, delete all connections from Basiq
+    if basiq_user_id and old_bank in ['other_bank', 'nab', 'commbank', 'westpac', 'anz']:
+        try:
+            connector = ConnectorRegistry.create_from_env(old_bank, basiq_user_id=basiq_user_id)
+            if connector and hasattr(connector, '_basiq'):
+                deleted = connector._basiq.delete_all_connections(basiq_user_id)
+                current_app.logger.info(f"Deleted {deleted} Basiq connection(s) for user {user_id}")
+        except Exception as e:
+            current_app.logger.error(f"Failed to delete Basiq connections: {e}")
+            # Continue anyway - at least clear our local reference
+
+    # Clear connection in our database
     c.execute("""
         UPDATE users
         SET connected_bank = NULL,
