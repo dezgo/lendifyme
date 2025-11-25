@@ -162,7 +162,7 @@ def register_socketio_handlers(socketio):
             emit('error', {'message': 'Not authorized'})
             return
 
-        user_id = data.get('user_id')
+        user_id = int(data.get('user_id'))  # Convert to int to match session keys
         session_info = active_sessions.get(user_id)
 
         if not session_info:
@@ -214,7 +214,7 @@ def register_socketio_handlers(socketio):
         if session.get('user_id') != 1:  # Only admin
             return
 
-        user_id = data.get('user_id')
+        user_id = int(data.get('user_id'))  # Convert to int to match session keys
         session_info = active_sessions.get(user_id)
 
         if not session_info:
@@ -235,7 +235,7 @@ def register_socketio_handlers(socketio):
 
         # Determine which session this belongs to
         if user_id == 1:  # Agent sending ICE candidate
-            target_user_id = data.get('user_id')
+            target_user_id = int(data.get('user_id'))  # Convert to int to match session keys
             session_info = active_sessions.get(target_user_id)
         else:  # User sending ICE candidate
             session_info = active_sessions.get(user_id)
@@ -258,7 +258,7 @@ def register_socketio_handlers(socketio):
 
         # Determine which session to end
         if user_id == 1:  # Agent ending session
-            target_user_id = data.get('user_id')
+            target_user_id = int(data.get('user_id'))  # Convert to int to match session keys
             session_info = active_sessions.get(target_user_id)
             cleanup_user_id = target_user_id
         else:  # User ending their own session
@@ -310,7 +310,7 @@ def register_socketio_handlers(socketio):
 
         # Determine which session this belongs to
         if user_id == 1:  # Agent sending message
-            target_user_id = data.get('user_id')
+            target_user_id = int(data.get('user_id'))  # Convert to int to match session keys
             session_info = active_sessions.get(target_user_id)
             sender_name = "Support Agent"
             is_agent = True
