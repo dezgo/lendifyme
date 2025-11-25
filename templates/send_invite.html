@@ -103,6 +103,8 @@ button:hover {
             placeholder="borrower@example.com"
             {% if loan[3] %}value="{{ loan[3] }}"{% endif %}
             required
+            data-lpignore="true"
+            autocomplete="off"
         >
         <p class="help-text">
             The borrower will receive an email with a secure link to view their loan status and payment history.
