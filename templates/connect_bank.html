@@ -230,7 +230,7 @@
             <h3>{{ bank.name }}</h3>
             <p class="auth-type">
                 {% if bank.id == 'other_bank' %}
-                    Connect to 100+ Australian banks
+                    Connect to 100+ Australian banks via secure OAuth
                 {% else %}
                     {{ bank.description }}
                 {% endif %}
@@ -241,30 +241,6 @@
         </div>
         {% endfor %}
     </div>
-    {% endif %}
-
-    {% if other_banks %}
-    <details style="margin-top: 2rem;">
-        <summary style="cursor: pointer; font-weight: bold; color: #666; padding: 1rem 0;">
-            Advanced: Pre-select Specific Bank (requires Basiq Business plan)
-        </summary>
-
-        <div class="info-box" style="margin-top: 1rem; background: #fff3cd; border: 1px solid #ffc107;">
-            <p><strong>⚠️ Note:</strong> Bank-specific connectors require a paid Basiq account with institution-level access permissions. Most users should use "Other Bank" above, which works with the free Basiq sandbox.</p>
-        </div>
-
-        <div class="bank-grid" style="margin-top: 1rem;">
-            {% for bank in other_banks %}
-            <div class="bank-card" data-bank-id="{{ bank.id }}" data-auth-type="{{ bank.auth_type }}">
-                <h3>{{ bank.name }}</h3>
-                <p class="auth-type">{{ bank.description }}</p>
-                <button onclick="connectBank('{{ bank.id }}', '{{ bank.auth_type }}', '{{ bank.name }}')">
-                    Connect
-                </button>
-            </div>
-            {% endfor %}
-        </div>
-    </details>
     {% endif %}
 
     <div class="info-box" style="margin-top: 3rem;">

@@ -145,8 +145,11 @@ class ConnectorRegistry:
                 else:
                     description = 'Connect via secure login'
 
-                # Mark "other_bank" as recommended (it shows all banks)
-                # Bank-specific connectors require higher-tier Basiq access
+                # Only show up_bank and other_bank as primary options
+                # Individual bank connectors (commbank, nab, etc.) are hidden:
+                #   - Require paid Basiq Business plan
+                #   - Basiq shows bank selection anyway, so pre-selection adds no value
+                #   - Creates confusion with "access-denied" errors in sandbox
                 recommended = connector_id in ['up_bank', 'other_bank']
 
                 banks.append({

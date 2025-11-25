@@ -237,13 +237,14 @@ def connect_bank_oauth(bank_id):
     try:
         existing_connections = connector.get_user_connections(basiq_user_id)
         connected_statuses = ['active', 'available']
+        problematic_statuses = ['pending', 'credentials-invalid', 'unavailable']
 
         if existing_connections:
             current_app.logger.info(f"User already has {len(existing_connections)} connection(s)")
             for conn in existing_connections:
                 current_app.logger.info(f"  - Status: {conn.get('status')}, Institution: {conn.get('institution', {}).get('name')}")
 
-            # If already connected, update DB and redirect to success
+            # Check for active/available connections
             if any(c['status'] in connected_statuses for c in existing_connections):
                 current_app.logger.info("User already has active connection, skipping consent flow")
 
@@ -256,6 +257,17 @@ def connect_bank_oauth(bank_id):
 
                 flash(f"Your {connector.connector_name} account is already connected!", 'success')
                 return redirect(url_for('match'))
+
+            # Check for problematic connections (pending/invalid)
+            if any(c['status'] in problematic_statuses for c in existing_connections):
+                current_app.logger.warning(f"User has connection in problematic state")
+                flash(
+                    'You have a pending or failed connection. If you\'re stuck on the consent screen, '
+                    'try disconnecting your bank first, then connect again.',
+                    'warning'
+                )
+                # Still generate consent link - they might want to try again
+
     except Exception as e:
         current_app.logger.warning(f"Could not check existing connections: {e}")
         # Continue with consent flow if check fails
