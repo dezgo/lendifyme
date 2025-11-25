@@ -336,6 +336,11 @@ function initSocket() {
         console.log(data.message);
     });
 
+    socket.on('error', (data) => {
+        console.error('Socket error:', data.message);
+        alert('Error: ' + data.message);
+    });
+
     socket.on('new_support_request', (data) => {
         console.log('New support request from user', data.user_id);
         addWaitingSession(data.user_id, data.user_email);
@@ -519,7 +524,23 @@ function moveToActiveSession(userId) {
 
 function joinSession(userId) {
     console.log('Joining session with user', userId);
+
+    // Disable the button to prevent double-clicks
+    const btn = document.querySelector(`.join-btn[data-user-id="${userId}"]`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Joining...';
+    }
+
     socket.emit('agent_join_session', { user_id: userId });
+
+    // Re-enable button after 3 seconds if join didn't succeed
+    setTimeout(() => {
+        if (btn && btn.disabled) {
+            btn.disabled = false;
+            btn.textContent = 'Join Session';
+        }
+    }, 3000);
 }
 
 async function handleOffer(userId, offer) {
