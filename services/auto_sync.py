@@ -130,8 +130,8 @@ def sync_all_bank_connections(db_path: str, user_id: int, user_password: str) ->
 
             # Get unpaid/partially-paid loans for this user
             # Query both plaintext AND encrypted columns to support encrypted loans
-            c = conn.cursor()
             conn.row_factory = sqlite3.Row
+            c = conn.cursor()
             c.execute("""
                 SELECT
                     id, borrower, borrower_encrypted, amount, amount_encrypted,
