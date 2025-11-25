@@ -264,36 +264,77 @@ def match_transactions():
             transaction_dicts = [t.to_dict() for t in transactions]
             all_transactions_dicts = [t.to_dict() for t in all_transactions]
 
-            # Get all loans for current user with calculated repaid amounts AND loan_type
+            # Get all loans for current user with both plaintext and encrypted columns
+            import sqlite3
             conn = get_db_connection()
+
+            # Set row_factory to access columns by name
+            conn.row_factory = sqlite3.Row
             c = conn.cursor()
+
+            # Query needs to select both plaintext and encrypted columns
             c.execute("""
                 SELECT l.id, l.borrower, l.amount, l.note, l.date_borrowed,
-                       COALESCE(SUM(at.amount), 0) as amount_repaid,
-                       l.repayment_amount, l.repayment_frequency, l.bank_name, l.loan_type
+                       l.borrower_encrypted, l.amount_encrypted, l.note_encrypted,
+                       l.bank_name, l.bank_name_encrypted,
+                       l.repayment_amount, l.repayment_amount_encrypted,
+                       l.repayment_frequency, l.repayment_frequency_encrypted,
+                       l.loan_type, l.encrypted_dek,
+                       COALESCE(SUM(at.amount), 0) as amount_repaid
                 FROM loans l
                 LEFT JOIN applied_transactions at ON l.id = at.loan_id
                 WHERE l.user_id = ?
                 GROUP BY l.id
             """, (get_current_user_id(),))
             loan_rows = c.fetchall()
-            conn.close()
 
-            # Convert to list of dicts
+            # Get user password from session for decryption
+            user_password = session.get('user_password')
+
+            # Convert to list of dicts with decryption
             loans = []
             for row in loan_rows:
+                loan_id = row['id']
+
+                # Decrypt loan data if encrypted
+                if row['borrower_encrypted'] and user_password:
+                    from services.loans import get_loan_dek
+                    from services.encryption import decrypt_field
+
+                    dek = get_loan_dek(loan_id, user_password=user_password)
+                    if dek:
+                        borrower = decrypt_field(row['borrower_encrypted'], dek)
+                        amount = float(decrypt_field(row['amount_encrypted'], dek)) if row['amount_encrypted'] else row['amount']
+                        note = decrypt_field(row['note_encrypted'], dek) if row['note_encrypted'] else row['note']
+                        bank_name = decrypt_field(row['bank_name_encrypted'], dek) if row['bank_name_encrypted'] else row['bank_name']
+                        repayment_amount = float(decrypt_field(row['repayment_amount_encrypted'], dek)) if row['repayment_amount_encrypted'] else row['repayment_amount']
+                        repayment_frequency = decrypt_field(row['repayment_frequency_encrypted'], dek) if row['repayment_frequency_encrypted'] else row['repayment_frequency']
+                    else:
+                        # Skip loans we can't decrypt
+                        continue
+                else:
+                    # Use plaintext values (backward compatibility)
+                    borrower = row['borrower']
+                    amount = row['amount']
+                    note = row['note']
+                    bank_name = row['bank_name']
+                    repayment_amount = row['repayment_amount']
+                    repayment_frequency = row['repayment_frequency']
+
                 loans.append({
-                    'id': row[0],
-                    'borrower': row[1],
-                    'amount': row[2],
-                    'note': row[3] or '',
-                    'date_borrowed': row[4],
-                    'amount_repaid': row[5],
-                    'repayment_amount': row[6],
-                    'repayment_frequency': row[7],
-                    'bank_name': row[8],
-                    'loan_type': row[9]  # 'lending' or 'borrowing'
+                    'id': loan_id,
+                    'borrower': borrower,
+                    'amount': amount,
+                    'note': note or '',
+                    'date_borrowed': row['date_borrowed'],
+                    'amount_repaid': row['amount_repaid'],
+                    'repayment_amount': repayment_amount,
+                    'repayment_frequency': repayment_frequency,
+                    'bank_name': bank_name,
+                    'loan_type': row['loan_type']  # 'lending' or 'borrowing'
                 })
+
+            conn.close()
 
             # Find matches
             matches = match_transactions_to_loans(transaction_dicts, loans)
