@@ -266,7 +266,29 @@ def stripe_webhook():
             user_id = metadata.get('user_id')
             tier = metadata.get('tier')
 
+            app.logger.info(f"checkout.session.completed: session_id={session.get('id')}, customer={customer_id}, subscription={subscription_id}, metadata={metadata}")
+
+            # Fetch subscription object from Stripe if we need metadata or status
+            subscription_obj = None
+            initial_status = 'trialing'
+
+            if subscription_id:
+                try:
+                    subscription_obj = stripe.Subscription.retrieve(subscription_id)
+                    initial_status = subscription_obj.get('status', 'trialing')
+
+                    # If metadata is missing from session, try to get it from subscription
+                    if not user_id or not tier:
+                        app.logger.warning(f"Metadata missing from session, fetching from subscription object")
+                        sub_metadata = subscription_obj.get('metadata', {})
+                        user_id = user_id or sub_metadata.get('user_id')
+                        tier = tier or sub_metadata.get('tier')
+                        app.logger.info(f"Retrieved from subscription: user_id={user_id}, tier={tier}, status={initial_status}")
+                except Exception as e:
+                    app.logger.error(f"Failed to retrieve subscription object: {e}")
+
             if user_id and tier:
+
                 # Update user's subscription tier
                 c.execute("""
                     UPDATE users
@@ -274,52 +296,79 @@ def stripe_webhook():
                     WHERE id = ?
                 """, (tier, customer_id, user_id))
 
-                # Create subscription record
+                # Create subscription record with correct status
                 c.execute("""
                     INSERT INTO user_subscriptions
                     (user_id, stripe_subscription_id, stripe_customer_id, tier, status, created_at)
-                    VALUES (?, ?, ?, ?, 'trialing', CURRENT_TIMESTAMP)
-                """, (user_id, subscription_id, customer_id, tier))
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """, (user_id, subscription_id, customer_id, tier, initial_status))
 
                 conn.commit()
-                app.logger.info(f"Subscription created for user {user_id}: {tier}")
+                app.logger.info(f"Subscription created for user {user_id}: {tier} (status: {initial_status})")
+            else:
+                app.logger.error(f"checkout.session.completed: Missing required metadata! user_id={user_id}, tier={tier}, session={session.get('id')}")
 
         elif event_type == 'customer.subscription.updated':
             # Subscription status changed
             subscription = data_object
             subscription_id = subscription['id']
+            customer_id = subscription.get('customer')
             status = subscription['status']
             current_period_start = datetime.fromtimestamp(subscription['current_period_start']).isoformat()
             current_period_end = datetime.fromtimestamp(subscription['current_period_end']).isoformat()
             cancel_at_period_end = subscription.get('cancel_at_period_end', False)
 
-            # Update subscription record
-            c.execute("""
-                UPDATE user_subscriptions
-                SET status = ?,
-                    current_period_start = ?,
-                    current_period_end = ?,
-                    cancel_at_period_end = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE stripe_subscription_id = ?
-            """, (status, current_period_start, current_period_end, cancel_at_period_end, subscription_id))
+            # Check if subscription record exists
+            c.execute("SELECT user_id, tier FROM user_subscriptions WHERE stripe_subscription_id = ?", (subscription_id,))
+            existing = c.fetchone()
 
-            # If subscription becomes active, update user tier
-            if status == 'active':
+            if existing:
+                # Update existing subscription record
                 c.execute("""
-                    UPDATE users
-                    SET subscription_tier = (
-                        SELECT tier FROM user_subscriptions
-                        WHERE stripe_subscription_id = ?
-                    )
-                    WHERE id = (
-                        SELECT user_id FROM user_subscriptions
-                        WHERE stripe_subscription_id = ?
-                    )
-                """, (subscription_id, subscription_id))
+                    UPDATE user_subscriptions
+                    SET status = ?,
+                        current_period_start = ?,
+                        current_period_end = ?,
+                        cancel_at_period_end = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE stripe_subscription_id = ?
+                """, (status, current_period_start, current_period_end, cancel_at_period_end, subscription_id))
 
-            conn.commit()
-            app.logger.info(f"Subscription {subscription_id} updated: {status}")
+                # If subscription becomes active, update user tier
+                if status == 'active':
+                    user_id, tier = existing
+                    c.execute("UPDATE users SET subscription_tier = ? WHERE id = ?", (tier, user_id))
+                    app.logger.info(f"Updated user {user_id} to tier {tier} (subscription became active)")
+
+                conn.commit()
+                app.logger.info(f"Subscription {subscription_id} updated: {status}")
+            else:
+                # Subscription record doesn't exist - create it from metadata
+                # This handles the case where checkout.session.completed failed
+                app.logger.warning(f"Subscription {subscription_id} not found in database, creating from metadata")
+                metadata = subscription.get('metadata', {})
+                user_id = metadata.get('user_id')
+                tier = metadata.get('tier')
+
+                if user_id and tier:
+                    # Create subscription record
+                    c.execute("""
+                        INSERT INTO user_subscriptions
+                        (user_id, stripe_subscription_id, stripe_customer_id, tier, status,
+                         current_period_start, current_period_end, cancel_at_period_end, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    """, (user_id, subscription_id, customer_id, tier, status,
+                          current_period_start, current_period_end, cancel_at_period_end))
+
+                    # Update user tier if active
+                    if status == 'active':
+                        c.execute("UPDATE users SET subscription_tier = ?, stripe_customer_id = ? WHERE id = ?",
+                                (tier, customer_id, user_id))
+
+                    conn.commit()
+                    app.logger.info(f"Created missing subscription record for user {user_id}: {tier} (status: {status})")
+                else:
+                    app.logger.error(f"Cannot create subscription record - missing metadata: user_id={user_id}, tier={tier}")
 
         elif event_type == 'customer.subscription.deleted':
             # Subscription cancelled or ended
