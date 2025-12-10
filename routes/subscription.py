@@ -2,6 +2,7 @@
 Subscription routes - pricing, billing, Stripe integration, webhooks.
 """
 from flask import Blueprint, render_template, request, session, redirect, flash, current_app as app
+from flask_wtf.csrf import csrf_exempt
 from helpers.decorators import login_required, get_current_user_id
 from helpers.db import get_db_connection
 from services.loans import get_user_subscription_tier, check_loan_limit
@@ -222,6 +223,7 @@ def checkout_cancel():
 
 
 @subscription_bp.route("/webhooks/stripe", methods=["POST"])
+@csrf_exempt
 def stripe_webhook():
     """Handle Stripe webhook events."""
     import stripe
