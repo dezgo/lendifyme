@@ -197,7 +197,7 @@ h1 {
         </div>
     {% elif subscription.status == 'trialing' %}
         <div class="alert alert-info">
-            🎉 You're currently on a free trial! Your trial ends on {{ subscription.period_end }}, after which you'll be charged.
+            🎉 You're currently on a free trial! Your trial ends on {{ subscription.trial_ends_at }}, after which you'll be charged.
         </div>
     {% elif subscription.status == 'past_due' %}
         <div class="alert alert-warning">
