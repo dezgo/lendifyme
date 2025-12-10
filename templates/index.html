@@ -701,7 +701,7 @@ function toggleUnlockMethod() {
         {% for loan in loans %}
             {% set remaining = loan[2] - loan[5] %}
             {% set progress = (loan[5] / loan[2] * 100) if loan[2] > 0 else 0 %}
-            {% set is_editable = (editable_limit is none) or (loop.index0 < editable_limit) %}
+            {% set is_editable = (editable_limit is none) or (loop.revindex0 < editable_limit) %}
             <div class="loan-card" style="{% if not is_editable %}opacity: 0.6; border: 2px dashed #ccc;{% endif %}">
                 <div class="loan-header">
                     <h3 class="loan-person">{{ loan[1] }}</h3>
