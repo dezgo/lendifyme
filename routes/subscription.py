@@ -513,3 +513,54 @@ def billing():
     return render_template("billing.html",
                          subscription=subscription_data,
                          portal_url=portal_url)
+
+
+@subscription_bp.route("/cancel-subscription", methods=["POST"])
+@login_required
+def cancel_subscription():
+    """Cancel user's subscription (sets to cancel at period end)."""
+    import stripe
+
+    user_id = get_current_user_id()
+    conn = get_db_connection()
+    c = conn.cursor()
+
+    # Get user's subscription
+    c.execute("""
+        SELECT stripe_subscription_id, status, current_period_end
+        FROM user_subscriptions
+        WHERE user_id = ? AND status IN ('active', 'trialing')
+    """, (user_id,))
+    result = c.fetchone()
+
+    if not result:
+        conn.close()
+        flash("No active subscription found", "error")
+        return redirect("/billing")
+
+    subscription_id, status, period_end = result
+    conn.close()
+
+    # Cancel subscription via Stripe API (cancel at period end)
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+
+    try:
+        subscription = stripe.Subscription.modify(
+            subscription_id,
+            cancel_at_period_end=True
+        )
+
+        # Log the cancellation
+        log_event('subscription_cancelled', event_data={
+            'subscription_id': subscription_id,
+            'cancel_at_period_end': True
+        })
+
+        flash(f"Subscription cancelled. You'll retain access to {get_user_subscription_tier().title()} features until {period_end}.", "success")
+        app.logger.info(f"User {user_id} cancelled subscription {subscription_id}")
+
+    except Exception as e:
+        app.logger.error(f"Error cancelling subscription: {e}")
+        flash("Unable to cancel subscription. Please try again or contact support.", "error")
+
+    return redirect("/billing")

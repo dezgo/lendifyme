@@ -267,23 +267,38 @@ h1 {
                 <a href="/pricing" class="btn btn-primary">Upgrade Plan</a>
             {% elif subscription.manual_override %}
                 <p style="color: #6c757d; margin: 0;">This is a complimentary plan granted by an administrator.</p>
-            {% elif portal_url %}
-                <a href="{{ portal_url }}" class="btn btn-primary">Manage Subscription</a>
+            {% elif subscription.subscription_id and not subscription.cancel_at_period_end %}
                 <a href="/pricing" class="btn btn-secondary">View All Plans</a>
+                <button onclick="confirmCancel()" class="btn" style="background: #dc3545; color: white; margin-top: 0.5rem;">Cancel Subscription</button>
+            {% elif subscription.cancel_at_period_end %}
+                <p style="color: #dc3545; margin: 0;">⚠️ Your subscription is set to cancel on {{ subscription.period_end }}</p>
+                <a href="/pricing" class="btn btn-secondary" style="margin-top: 0.5rem;">View All Plans</a>
             {% else %}
                 <a href="/pricing" class="btn btn-secondary">View All Plans</a>
             {% endif %}
         </div>
     </div>
 
-    {% if not subscription.manual_override and subscription.tier != 'free' %}
+    {% if not subscription.manual_override and subscription.tier != 'free' and portal_url %}
         <div class="subscription-card">
             <h2>Need Help?</h2>
-            <p>You can manage your subscription, update payment methods, view invoices, and cancel your plan using the Stripe Customer Portal.</p>
-            {% if portal_url %}
-                <a href="{{ portal_url }}" class="btn btn-secondary">Open Customer Portal</a>
-            {% endif %}
+            <p>For payment methods, invoices, and other billing details, use the Stripe Customer Portal.</p>
+            <a href="{{ portal_url }}" class="btn btn-secondary">Open Customer Portal</a>
         </div>
     {% endif %}
 </div>
+
+<!-- Hidden form for subscription cancellation -->
+<form id="cancelForm" action="/cancel-subscription" method="POST" style="display: none;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+</form>
+
+<script>
+function confirmCancel() {
+    if (confirm('Are you sure you want to cancel your subscription?\n\nYou\'ll retain access to {{ subscription.tier_name }} features until {{ subscription.period_end }}, after which your account will be downgraded to the Free plan.')) {
+        document.getElementById('cancelForm').submit();
+    }
+}
+</script>
+
 {% endblock %}
