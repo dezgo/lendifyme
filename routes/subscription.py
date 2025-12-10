@@ -448,7 +448,7 @@ def billing():
 
     # Get user's subscription info
     c.execute("""
-        SELECT u.subscription_tier, u.stripe_customer_id, u.manual_override,
+        SELECT u.subscription_tier, u.stripe_customer_id, u.manual_override, u.trial_ends_at,
                us.stripe_subscription_id, us.status, us.current_period_end,
                us.cancel_at_period_end, sp.price_monthly, sp.price_yearly, sp.features_json
         FROM users u
@@ -463,7 +463,7 @@ def billing():
         flash("User not found", "error")
         return redirect("/")
 
-    tier, stripe_customer_id, manual_override, subscription_id, status, period_end, cancel_at_period_end, price_monthly, price_yearly, features_json = result
+    tier, stripe_customer_id, manual_override, trial_ends_at, subscription_id, status, period_end, cancel_at_period_end, price_monthly, price_yearly, features_json = result
 
     # Get usage stats
     current_loans, max_loans, can_create = check_loan_limit()
@@ -478,6 +478,7 @@ def billing():
         'subscription_id': subscription_id,
         'cancel_at_period_end': cancel_at_period_end,
         'period_end': period_end,
+        'trial_ends_at': trial_ends_at,
         'current_loans': current_loans,
         'max_loans': max_loans,
         'features': json.loads(features_json) if features_json else {}
