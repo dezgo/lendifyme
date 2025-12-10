@@ -704,6 +704,7 @@ def index():
             over_limit=context_or_redirect.get("over_limit", False),
             current_count=context_or_redirect.get("current_count", 0),
             max_loans=context_or_redirect.get("max_loans"),
+            editable_limit=context_or_redirect.get("editable_limit"),
         )
     # it's a redirect target
     return redirect(context_or_redirect)
@@ -1031,12 +1032,7 @@ def _build_dashboard_context():
         encrypted_rows = c.fetchall()
         loans = decrypt_loans(c, encrypted_rows, user_password)
 
-        # Mark loans as editable/read-only based on tier limit
-        from services.loans import is_loan_editable
-        for index, loan in enumerate(loans):
-            loan['is_editable'] = is_loan_editable(index)
-
-        # Get tier info for over-limit banner
+        # Get tier info for over-limit banner and editability
         current_count, max_loans, can_create = check_loan_limit()
         over_limit = max_loans is not None and current_count > max_loans
 
@@ -1047,6 +1043,7 @@ def _build_dashboard_context():
             "over_limit": over_limit,
             "current_count": current_count,
             "max_loans": max_loans,
+            "editable_limit": max_loans,  # For template to check loan index
         }
     finally:
         conn.close()
