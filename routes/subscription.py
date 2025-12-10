@@ -465,6 +465,17 @@ def billing():
 
     tier, stripe_customer_id, manual_override, trial_ends_at, subscription_id, status, period_end, cancel_at_period_end, price_monthly, price_yearly, features_json = result
 
+    # Format trial_ends_at for display (e.g., "December 24, 2025")
+    trial_ends_at_formatted = None
+    if trial_ends_at:
+        try:
+            # Parse ISO format datetime string
+            trial_date = datetime.fromisoformat(trial_ends_at)
+            # Format as "Month Day, Year"
+            trial_ends_at_formatted = trial_date.strftime("%B %d, %Y")
+        except (ValueError, AttributeError):
+            trial_ends_at_formatted = trial_ends_at  # Fallback to raw value
+
     # Get usage stats
     current_loans, max_loans, can_create = check_loan_limit()
 
@@ -478,7 +489,7 @@ def billing():
         'subscription_id': subscription_id,
         'cancel_at_period_end': cancel_at_period_end,
         'period_end': period_end,
-        'trial_ends_at': trial_ends_at,
+        'trial_ends_at': trial_ends_at_formatted,
         'current_loans': current_loans,
         'max_loans': max_loans,
         'features': json.loads(features_json) if features_json else {}
