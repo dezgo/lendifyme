@@ -187,6 +187,8 @@ print("✅ Registered settings blueprint")
 
 from routes.subscription import subscription_bp
 app.register_blueprint(subscription_bp)
+# Exempt Stripe webhook from CSRF protection (Stripe uses signature verification instead)
+csrf.exempt(subscription_bp.view_functions['stripe_webhook'])
 app.logger.info("Registered subscription blueprint")
 print("✅ Registered subscription blueprint")
 
