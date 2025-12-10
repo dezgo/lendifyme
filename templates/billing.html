@@ -285,12 +285,43 @@ h1 {
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 </form>
 
+<!-- Cancel confirmation modal -->
+<div id="cancelModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: white; border-radius: 12px; padding: 2rem; max-width: 500px; margin: 0 1rem; box-shadow: 0 4px 20px rgba(0,0,0,0.3);">
+        <h3 style="margin-top: 0; margin-bottom: 1rem; font-size: 1.5rem; color: #dc3545;">Cancel Subscription?</h3>
+        <p id="cancelMessage" style="color: #212529; line-height: 1.6; margin-bottom: 2rem;">
+            {% if subscription.status == 'trialing' %}
+                Your trial will end immediately and your account will be downgraded to the Free plan.
+            {% else %}
+                You'll retain access to {{ subscription.tier_name }} features until {{ subscription.period_end }}, after which your account will be downgraded to the Free plan.
+            {% endif %}
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: flex-end;">
+            <button onclick="closeModal()" class="btn btn-secondary" style="margin: 0;">Keep Subscription</button>
+            <button onclick="submitCancel()" class="btn" style="background: #dc3545; color: white; margin: 0;">Yes, Cancel</button>
+        </div>
+    </div>
+</div>
+
 <script>
 function confirmCancel() {
-    if (confirm('Are you sure you want to cancel your subscription?\n\nYou\'ll retain access to {{ subscription.tier_name }} features until {{ subscription.period_end }}, after which your account will be downgraded to the Free plan.')) {
-        document.getElementById('cancelForm').submit();
-    }
+    document.getElementById('cancelModal').style.display = 'flex';
 }
+
+function closeModal() {
+    document.getElementById('cancelModal').style.display = 'none';
+}
+
+function submitCancel() {
+    document.getElementById('cancelForm').submit();
+}
+
+// Close modal if clicking outside
+document.getElementById('cancelModal').addEventListener('click', function(e) {
+    if (e.target === this) {
+        closeModal();
+    }
+});
 </script>
 
 {% endblock %}

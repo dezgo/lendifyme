@@ -504,7 +504,7 @@ def billing():
 @subscription_bp.route("/cancel-subscription", methods=["POST"])
 @login_required
 def cancel_subscription():
-    """Cancel user's subscription (sets to cancel at period end)."""
+    """Cancel user's subscription (immediately if trialing, at period end if active)."""
     import stripe
 
     user_id = get_current_user_id()
@@ -513,7 +513,7 @@ def cancel_subscription():
 
     # Get user's subscription
     c.execute("""
-        SELECT stripe_subscription_id, status, current_period_end
+        SELECT stripe_subscription_id, status, current_period_end, tier
         FROM user_subscriptions
         WHERE user_id = ? AND status IN ('active', 'trialing')
     """, (user_id,))
@@ -524,29 +524,46 @@ def cancel_subscription():
         flash("No active subscription found", "error")
         return redirect("/billing")
 
-    subscription_id, status, period_end = result
-    conn.close()
-
-    # Cancel subscription via Stripe API (cancel at period end)
+    subscription_id, status, period_end, tier = result
     stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 
     try:
-        subscription = stripe.Subscription.modify(
-            subscription_id,
-            cancel_at_period_end=True
-        )
+        if status == 'trialing':
+            # Cancel immediately for trials - no point keeping it
+            stripe.Subscription.delete(subscription_id)
 
-        # Log the cancellation
-        log_event('subscription_cancelled', event_data={
-            'subscription_id': subscription_id,
-            'cancel_at_period_end': True
-        })
+            # Update database
+            c.execute("UPDATE user_subscriptions SET status = 'canceled', updated_at = CURRENT_TIMESTAMP WHERE stripe_subscription_id = ?", (subscription_id,))
+            c.execute("UPDATE users SET subscription_tier = 'free' WHERE id = ?", (user_id,))
+            conn.commit()
 
-        flash(f"Subscription cancelled. You'll retain access to {get_user_subscription_tier().title()} features until {period_end}.", "success")
-        app.logger.info(f"User {user_id} cancelled subscription {subscription_id}")
+            log_event('subscription_cancelled', event_data={
+                'subscription_id': subscription_id,
+                'cancelled_immediately': True,
+                'was_trialing': True
+            })
+
+            flash("Trial cancelled. Your account has been downgraded to the Free plan.", "success")
+            app.logger.info(f"User {user_id} cancelled trial subscription {subscription_id} (immediate cancellation)")
+        else:
+            # Cancel at period end for paid subscriptions
+            stripe.Subscription.modify(
+                subscription_id,
+                cancel_at_period_end=True
+            )
+
+            log_event('subscription_cancelled', event_data={
+                'subscription_id': subscription_id,
+                'cancel_at_period_end': True
+            })
+
+            flash(f"Subscription cancelled. You'll retain access to {tier.title()} features until {period_end}.", "success")
+            app.logger.info(f"User {user_id} cancelled subscription {subscription_id} (cancel at period end)")
 
     except Exception as e:
         app.logger.error(f"Error cancelling subscription: {e}")
         flash("Unable to cancel subscription. Please try again or contact support.", "error")
+    finally:
+        conn.close()
 
     return redirect("/billing")
