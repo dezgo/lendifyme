@@ -90,6 +90,17 @@ def repay(loan_id):
         flash("Loan not found", "error")
         return redirect("/")
 
+    # Check if loan is editable (tier limit enforcement)
+    from services.loans import is_loan_editable
+    c.execute("SELECT id FROM loans WHERE user_id = ? ORDER BY created_at DESC", (get_current_user_id(),))
+    loan_ids = [row[0] for row in c.fetchall()]
+    loan_index = loan_ids.index(loan_id) if loan_id in loan_ids else -1
+
+    if loan_index >= 0 and not is_loan_editable(loan_index):
+        conn.close()
+        flash("This loan is read-only due to your tier limit. Upgrade your plan to record payments on all loans, or delete some to get back under the limit.", "error")
+        return redirect("/")
+
     # Decrypt fields as needed
     user_password = get_user_password_from_session()
     dek = get_loan_dek(loan_id, user_password=user_password)
@@ -155,6 +166,17 @@ def edit_loan(loan_id):
     if not loan_row:
         conn.close()
         flash("Loan not found", "error")
+        return redirect("/")
+
+    # Check if loan is editable (tier limit enforcement)
+    from services.loans import is_loan_editable
+    c.execute("SELECT id FROM loans WHERE user_id = ? ORDER BY created_at DESC", (get_current_user_id(),))
+    loan_ids = [row[0] for row in c.fetchall()]
+    loan_index = loan_ids.index(loan_id) if loan_id in loan_ids else -1
+
+    if loan_index >= 0 and not is_loan_editable(loan_index):
+        conn.close()
+        flash("This loan is read-only due to your tier limit. Upgrade your plan to edit all loans, or delete some to get back under the limit.", "error")
         return redirect("/")
 
     # Helper: get DEK only if we need it

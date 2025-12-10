@@ -701,6 +701,9 @@ def index():
             email_verified=context_or_redirect["email_verified"],
             has_password=context_or_redirect["has_password"],
             needs_password_unlock=context_or_redirect.get("needs_password_unlock", False),
+            over_limit=context_or_redirect.get("over_limit", False),
+            current_count=context_or_redirect.get("current_count", 0),
+            max_loans=context_or_redirect.get("max_loans"),
         )
     # it's a redirect target
     return redirect(context_or_redirect)
@@ -1028,10 +1031,22 @@ def _build_dashboard_context():
         encrypted_rows = c.fetchall()
         loans = decrypt_loans(c, encrypted_rows, user_password)
 
+        # Mark loans as editable/read-only based on tier limit
+        from services.loans import is_loan_editable
+        for index, loan in enumerate(loans):
+            loan['is_editable'] = is_loan_editable(index)
+
+        # Get tier info for over-limit banner
+        current_count, max_loans, can_create = check_loan_limit()
+        over_limit = max_loans is not None and current_count > max_loans
+
         return {
             "loans": loans,
             "email_verified": is_email_verified(),
             "has_password": True,
+            "over_limit": over_limit,
+            "current_count": current_count,
+            "max_loans": max_loans,
         }
     finally:
         conn.close()

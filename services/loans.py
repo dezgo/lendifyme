@@ -195,6 +195,39 @@ def check_loan_limit(user_id=None):
     return (current_count, max_loans, can_create)
 
 
+def is_loan_editable(loan_index, user_id=None):
+    """
+    Check if a loan at given index (0-based) can be edited based on tier limits.
+
+    Users can view all loans but can only edit loans within their tier limit.
+    Example: Free tier (3 loans) - loans 0,1,2 are editable, 3+ are read-only.
+
+    Args:
+        loan_index: Zero-based index of loan in user's loan list (ordered by created_at DESC)
+        user_id: User ID (defaults to current user)
+
+    Returns:
+        bool: True if loan can be edited, False if read-only
+    """
+    if user_id is None:
+        user_id = get_current_user_id()
+
+    if not user_id:
+        return False
+
+    # Get tier limit
+    tier = get_user_subscription_tier(user_id)
+    limits = get_subscription_limits(tier)
+    max_loans = limits.get('max_loans')
+
+    # Unlimited tier
+    if max_loans is None:
+        return True
+
+    # Check if this loan index is within the editable range
+    return loan_index < max_loans
+
+
 def has_feature(user_id, feature_name):
     """
     Check if user has access to a specific feature.

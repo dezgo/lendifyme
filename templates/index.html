@@ -655,6 +655,15 @@ function toggleUnlockMethod() {
 </div>
 {% endif %}
 
+{% if over_limit %}
+    <!-- Over Limit Warning Banner -->
+    <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 1rem 1.25rem; margin-bottom: 1.5rem;">
+        <strong>⚠️ Tier Limit Exceeded:</strong> You have {{ current_count }} loans but your plan only allows {{ max_loans }} editable loans.
+        Loans beyond the limit are <strong>read-only</strong> (you can view but not edit or record payments).
+        <a href="/pricing" style="color: #667eea; font-weight: 600; text-decoration: underline;">Upgrade your plan</a> to edit all loans, or delete some to get back under the limit.
+    </div>
+{% endif %}
+
 {% if loans %}
     <!-- Summary Cards -->
     {% set ns = namespace(total_lent=0, total_borrowed=0, total_repaid_lending=0, total_repaid_borrowing=0) %}
@@ -692,12 +701,18 @@ function toggleUnlockMethod() {
         {% for loan in loans %}
             {% set remaining = loan[2] - loan[5] %}
             {% set progress = (loan[5] / loan[2] * 100) if loan[2] > 0 else 0 %}
-            <div class="loan-card">
+            {% set is_editable = loan['is_editable'] if loan.get('is_editable') is not none else true %}
+            <div class="loan-card" style="{% if not is_editable %}opacity: 0.6; border: 2px dashed #ccc;{% endif %}">
                 <div class="loan-header">
                     <h3 class="loan-person">{{ loan[1] }}</h3>
-                    <span class="loan-type-badge {% if loan[12] == 'lending' %}badge-lending{% else %}badge-borrowing{% endif %}">
-                        {{ '📤 Lending' if loan[12] == 'lending' else '📥 Borrowing' }}
-                    </span>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <span class="loan-type-badge {% if loan[12] == 'lending' %}badge-lending{% else %}badge-borrowing{% endif %}">
+                            {{ '📤 Lending' if loan[12] == 'lending' else '📥 Borrowing' }}
+                        </span>
+                        {% if not is_editable %}
+                            <span style="background: #e9ecef; color: #6c757d; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.75rem; font-weight: 600;">🔒 READ ONLY</span>
+                        {% endif %}
+                    </div>
                 </div>
 
                 <div class="loan-amounts">
@@ -740,9 +755,16 @@ function toggleUnlockMethod() {
 
                 <div class="loan-actions">
                     <a href="/loan/{{ loan[0] }}/transactions" class="btn-small btn-view">View Details</a>
-                    <a href="/edit/{{ loan[0] }}" class="btn-small btn-edit">Edit</a>
-                    {% if loan[5] < loan[2] %}
-                        <button onclick="openPaymentModal({{ loan[0] }}, '{{ loan[1] }}', {{ loan[2] }}, {{ loan[5] }})" class="btn-small btn-success">💰 Record Payment</button>
+                    {% if is_editable %}
+                        <a href="/edit/{{ loan[0] }}" class="btn-small btn-edit">Edit</a>
+                        {% if loan[5] < loan[2] %}
+                            <button onclick="openPaymentModal({{ loan[0] }}, '{{ loan[1] }}', {{ loan[2] }}, {{ loan[5] }})" class="btn-small btn-success">💰 Record Payment</button>
+                        {% endif %}
+                    {% else %}
+                        <span class="btn-small" style="background: #e9ecef; color: #999; cursor: not-allowed;" title="Upgrade to edit this loan">Edit (Locked)</span>
+                        {% if loan[5] < loan[2] %}
+                            <span class="btn-small" style="background: #e9ecef; color: #999; cursor: not-allowed;" title="Upgrade to record payments">💰 Payment (Locked)</span>
+                        {% endif %}
                     {% endif %}
                     {% if loan[10] %}
                         <button onclick="copyLink('{{ app_url }}/borrower/{{ loan[10] }}')" class="btn-small btn-invite">📋 Copy Portal Link</button>
