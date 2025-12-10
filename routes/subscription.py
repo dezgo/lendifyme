@@ -118,6 +118,16 @@ def subscribe(tier):
     result = c.fetchone()
     stripe_customer_id, user_email = result
 
+    # Check if normalized email has already used a trial
+    from services.email_utils import normalize_email
+    normalized_email = normalize_email(user_email)
+
+    c.execute("SELECT id FROM trial_usage WHERE normalized_email = ?", (normalized_email,))
+    if c.fetchone():
+        flash("This email address has already used a free trial. Please use a different email or contact support.", "error")
+        conn.close()
+        return redirect("/pricing")
+
     # Initialize Stripe
     stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 
@@ -302,6 +312,44 @@ def stripe_webhook():
                     (user_id, stripe_subscription_id, stripe_customer_id, tier, status, created_at)
                     VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """, (user_id, subscription_id, customer_id, tier, initial_status))
+
+                # Track trial usage to prevent abuse
+                from services.email_utils import normalize_email
+                c.execute("SELECT email FROM users WHERE id = ?", (user_id,))
+                user_email_result = c.fetchone()
+                if user_email_result:
+                    user_email = user_email_result[0]
+                    normalized_email = normalize_email(user_email)
+
+                    # Get payment method fingerprint from Stripe
+                    payment_fingerprint = None
+                    try:
+                        if subscription_obj and subscription_obj.get('default_payment_method'):
+                            pm = stripe.PaymentMethod.retrieve(subscription_obj['default_payment_method'])
+                            payment_fingerprint = pm.get('card', {}).get('fingerprint')
+                    except Exception as e:
+                        app.logger.warning(f"Could not retrieve payment fingerprint: {e}")
+
+                    # Check if payment fingerprint has been used before (abuse detection)
+                    if payment_fingerprint:
+                        c.execute("""
+                            SELECT normalized_email, user_id FROM trial_usage
+                            WHERE payment_method_fingerprint = ?
+                        """, (payment_fingerprint,))
+                        existing_fingerprint = c.fetchone()
+                        if existing_fingerprint:
+                            app.logger.warning(f"⚠️ TRIAL ABUSE DETECTED: Payment fingerprint {payment_fingerprint[:8]}... already used by {existing_fingerprint[0]} (user {existing_fingerprint[1]}). New attempt by {normalized_email} (user {user_id})")
+
+                    # Store trial usage (ignore duplicates - first one wins)
+                    try:
+                        c.execute("""
+                            INSERT OR IGNORE INTO trial_usage
+                            (normalized_email, payment_method_fingerprint, user_id)
+                            VALUES (?, ?, ?)
+                        """, (normalized_email, payment_fingerprint, user_id))
+                        app.logger.info(f"Tracked trial usage for {normalized_email} (fingerprint: {payment_fingerprint[:8] if payment_fingerprint else 'none'}...)")
+                    except Exception as e:
+                        app.logger.warning(f"Could not track trial usage: {e}")
 
                 conn.commit()
                 app.logger.info(f"Subscription created for user {user_id}: {tier} (status: {initial_status})")

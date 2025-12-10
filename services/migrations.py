@@ -358,6 +358,19 @@ def run_migrations(conn):
             conn.rollback()
             raise
 
+    if current < 31:
+        try:
+            migrate_v31_trial_usage_tracking(conn)
+            _set_user_version(conn, 31)
+            conn.commit()
+            print("✅ Migration v31 applied.")
+        except Exception as e:
+            print(f"❌ Migration v31 failed: {e}")
+            import traceback
+            traceback.print_exc()
+            conn.rollback()
+            raise
+
     # Ensure all changes are committed
     conn.commit()
 
@@ -1695,3 +1708,27 @@ def migrate_v30_feedback_throttle(conn):
     """)
     conn.commit()
     print("  Created feedback throttle table with indexes.")
+
+
+def migrate_v31_trial_usage_tracking(conn):
+    """Track trial usage by normalized email and payment fingerprint to prevent abuse."""
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS trial_usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            normalized_email TEXT NOT NULL,
+            payment_method_fingerprint TEXT,
+            user_id INTEGER,
+            used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(normalized_email)
+        )
+    """)
+
+    c.execute("""
+        CREATE INDEX IF NOT EXISTS idx_trial_usage_fingerprint
+        ON trial_usage(payment_method_fingerprint)
+    """)
+
+    conn.commit()
+    print("  Created trial_usage table with indexes for abuse prevention.")
