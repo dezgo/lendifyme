@@ -495,24 +495,10 @@ def billing():
         'features': json.loads(features_json) if features_json else {}
     }
 
-    # Create Stripe portal session for managing subscription
-    portal_url = None
-    if stripe_customer_id and not manual_override:
-        stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
-        try:
-            portal_session = stripe.billing_portal.Session.create(
-                customer=stripe_customer_id,
-                return_url=f"{app.config['APP_URL']}/billing"
-            )
-            portal_url = portal_session.url
-        except Exception as e:
-            app.logger.error(f"Error creating portal session: {e}")
-
     conn.close()
 
     return render_template("billing.html",
-                         subscription=subscription_data,
-                         portal_url=portal_url)
+                         subscription=subscription_data)
 
 
 @subscription_bp.route("/cancel-subscription", methods=["POST"])

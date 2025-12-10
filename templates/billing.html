@@ -278,14 +278,6 @@ h1 {
             {% endif %}
         </div>
     </div>
-
-    {% if not subscription.manual_override and subscription.tier != 'free' and portal_url %}
-        <div class="subscription-card">
-            <h2>Need Help?</h2>
-            <p>For payment methods, invoices, and other billing details, use the Stripe Customer Portal.</p>
-            <a href="{{ portal_url }}" class="btn btn-secondary">Open Customer Portal</a>
-        </div>
-    {% endif %}
 </div>
 
 <!-- Hidden form for subscription cancellation -->
