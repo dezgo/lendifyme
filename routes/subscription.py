@@ -353,14 +353,30 @@ def stripe_webhook():
             subscription_id = invoice.get('subscription')
 
             if subscription_id:
+                # Update subscription status to active
                 c.execute("""
                     UPDATE user_subscriptions
                     SET status = 'active',
                         updated_at = CURRENT_TIMESTAMP
                     WHERE stripe_subscription_id = ?
                 """, (subscription_id,))
+
+                # Also update user's subscription tier to ensure it's set correctly
+                # (in case customer.subscription.updated event didn't fire)
+                c.execute("""
+                    UPDATE users
+                    SET subscription_tier = (
+                        SELECT tier FROM user_subscriptions
+                        WHERE stripe_subscription_id = ?
+                    )
+                    WHERE id = (
+                        SELECT user_id FROM user_subscriptions
+                        WHERE stripe_subscription_id = ?
+                    )
+                """, (subscription_id, subscription_id))
+
                 conn.commit()
-                app.logger.info(f"Payment succeeded for subscription {subscription_id}")
+                app.logger.info(f"Payment succeeded for subscription {subscription_id}, user tier updated")
 
         elif event_type == 'invoice.payment_failed':
             # Failed payment
