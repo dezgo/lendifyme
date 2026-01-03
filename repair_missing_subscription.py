@@ -135,9 +135,8 @@ def repair_subscription(email, dry_run=False):
         active_sub = stripe.Subscription.retrieve(active_sub['id'])
         print(f"   Retrieved subscription with {len(active_sub.keys())} fields")
 
-        # Debug: show what period-related fields exist
-        period_keys = [k for k in active_sub.keys() if 'period' in k.lower() or 'current' in k.lower()]
-        print(f"   Period/current related fields: {period_keys}")
+        # Debug: show ALL keys
+        print(f"   ALL keys: {sorted(list(active_sub.keys()))}")
         print()
 
         # Determine tier from metadata or price ID
