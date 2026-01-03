@@ -283,14 +283,29 @@ def stripe_webhook():
 
                 conn.commit()
                 app.logger.info(f"Subscription created for user {user_id}: {tier}")
+            else:
+                app.logger.error(f"checkout.session.completed missing metadata: user_id={user_id}, tier={tier}, session_id={session.get('id')}")
 
         elif event_type == 'customer.subscription.updated':
             # Subscription status changed
             subscription = data_object
             subscription_id = subscription['id']
             status = subscription['status']
-            current_period_start = datetime.fromtimestamp(subscription['current_period_start']).isoformat()
-            current_period_end = datetime.fromtimestamp(subscription['current_period_end']).isoformat()
+
+            # Get billing period - Stripe deprecated current_period_* on subscription in API v2025-03-31
+            # Try items first (new API), fallback to subscription-level fields
+            items = subscription.get('items', {}).get('data', [])
+            if items and items[0].get('current_period_start'):
+                # New API: period on items
+                period_start = items[0]['current_period_start']
+                period_end = items[0]['current_period_end']
+            else:
+                # Fallback: use start_date and billing_cycle_anchor
+                period_start = subscription.get('start_date') or subscription.get('created')
+                period_end = subscription.get('billing_cycle_anchor')
+
+            current_period_start = datetime.fromtimestamp(period_start).isoformat()
+            current_period_end = datetime.fromtimestamp(period_end).isoformat()
             cancel_at_period_end = subscription.get('cancel_at_period_end', False)
 
             # Update subscription record
