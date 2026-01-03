@@ -97,23 +97,28 @@ def repair_subscription(email, dry_run=False):
         active_sub = None
         for i, sub in enumerate(subscriptions.data, 1):
             print(f"   Subscription #{i}:")
-            print(f"   - ID: {sub.id}")
-            print(f"   - Status: {sub.status}")
-            print(f"   - Created: {datetime.fromtimestamp(sub.created)}")
+            print(f"   - ID: {sub['id']}")
+            print(f"   - Status: {sub['status']}")
+            print(f"   - Created: {datetime.fromtimestamp(sub['created'])}")
 
-            if sub.items.data:
-                price_id = sub.items.data[0].price.id
-                amount = sub.items.data[0].price.unit_amount / 100
-                interval = sub.items.data[0].price.recurring.interval
+            # Access items list
+            items = sub.get('items', {}).get('data', [])
+            if items:
+                item = items[0]
+                price = item.get('price', {})
+                price_id = price.get('id')
+                amount = price.get('unit_amount', 0) / 100
+                interval = price.get('recurring', {}).get('interval', 'unknown')
                 print(f"   - Price: ${amount}/{interval} (ID: {price_id})")
 
-            if sub.metadata:
-                print(f"   - Metadata: {dict(sub.metadata)}")
+            metadata = sub.get('metadata', {})
+            if metadata:
+                print(f"   - Metadata: {dict(metadata)}")
 
             print()
 
             # Use the first active or trialing subscription
-            if sub.status in ['active', 'trialing'] and not active_sub:
+            if sub['status'] in ['active', 'trialing'] and not active_sub:
                 active_sub = sub
 
         if not active_sub:
@@ -122,32 +127,40 @@ def repair_subscription(email, dry_run=False):
             conn.close()
             return
 
-        print(f"✅ Will use subscription: {active_sub.id} (status: {active_sub.status})")
+        print(f"✅ Will use subscription: {active_sub['id']} (status: {active_sub['status']})")
         print()
 
         # Determine tier from metadata or price ID
-        tier = active_sub.metadata.get('tier') if active_sub.metadata else None
+        metadata = active_sub.get('metadata', {})
+        tier = metadata.get('tier') if metadata else None
 
         if not tier:
             # Try to determine tier from price ID by checking env vars
-            price_id = active_sub.items.data[0].price.id
-            if price_id == os.getenv('STRIPE_PRICE_ID_BASIC_MONTHLY') or price_id == os.getenv('STRIPE_PRICE_ID_BASIC_YEARLY'):
-                tier = 'basic'
-            elif price_id == os.getenv('STRIPE_PRICE_ID_PRO_MONTHLY') or price_id == os.getenv('STRIPE_PRICE_ID_PRO_YEARLY'):
-                tier = 'pro'
+            items = active_sub.get('items', {}).get('data', [])
+            if items:
+                price = items[0].get('price', {})
+                price_id = price.get('id')
+                if price_id == os.getenv('STRIPE_PRICE_ID_BASIC_MONTHLY') or price_id == os.getenv('STRIPE_PRICE_ID_BASIC_YEARLY'):
+                    tier = 'basic'
+                elif price_id == os.getenv('STRIPE_PRICE_ID_PRO_MONTHLY') or price_id == os.getenv('STRIPE_PRICE_ID_PRO_YEARLY'):
+                    tier = 'pro'
+                else:
+                    print(f"⚠️  Cannot determine tier from price ID: {price_id}")
+                    print("   Please specify tier manually or check .env file")
+                    conn.close()
+                    return
             else:
-                print(f"⚠️  Cannot determine tier from price ID: {price_id}")
-                print("   Please specify tier manually or check .env file")
+                print(f"⚠️  Cannot determine tier - no items in subscription")
                 conn.close()
                 return
 
         print(f"💾 Creating subscription record:")
         print(f"   - User ID: {user_id}")
-        print(f"   - Stripe Subscription ID: {active_sub.id}")
+        print(f"   - Stripe Subscription ID: {active_sub['id']}")
         print(f"   - Stripe Customer ID: {stripe_customer_id}")
         print(f"   - Tier: {tier}")
-        print(f"   - Status: {active_sub.status}")
-        print(f"   - Period: {datetime.fromtimestamp(active_sub.current_period_start)} to {datetime.fromtimestamp(active_sub.current_period_end)}")
+        print(f"   - Status: {active_sub['status']}")
+        print(f"   - Period: {datetime.fromtimestamp(active_sub['current_period_start'])} to {datetime.fromtimestamp(active_sub['current_period_end'])}")
         print()
 
         if not dry_run:
@@ -160,13 +173,13 @@ def repair_subscription(email, dry_run=False):
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """, (
                 user_id,
-                active_sub.id,
+                active_sub['id'],
                 stripe_customer_id,
                 tier,
-                active_sub.status,
-                datetime.fromtimestamp(active_sub.current_period_start).isoformat(),
-                datetime.fromtimestamp(active_sub.current_period_end).isoformat(),
-                active_sub.cancel_at_period_end
+                active_sub['status'],
+                datetime.fromtimestamp(active_sub['current_period_start']).isoformat(),
+                datetime.fromtimestamp(active_sub['current_period_end']).isoformat(),
+                active_sub.get('cancel_at_period_end', False)
             ))
 
             # Update user's tier
@@ -185,8 +198,6 @@ def repair_subscription(email, dry_run=False):
         else:
             print("🔍 DRY RUN - No changes made. Run without --dry-run to apply.")
 
-    except stripe.error.StripeError as e:
-        print(f"❌ Stripe API error: {e}")
     except Exception as e:
         print(f"❌ Error: {e}")
         import traceback
