@@ -135,8 +135,17 @@ def repair_subscription(email, dry_run=False):
         active_sub = stripe.Subscription.retrieve(active_sub['id'])
         print(f"   Retrieved subscription with {len(active_sub.keys())} fields")
 
-        # Debug: show ALL keys
-        print(f"   ALL keys: {sorted(list(active_sub.keys()))}")
+        # Debug: show date-related field values
+        print(f"   billing_cycle_anchor: {active_sub.get('billing_cycle_anchor')}")
+        print(f"   start_date: {active_sub.get('start_date')}")
+        print(f"   trial_start: {active_sub.get('trial_start')}")
+        print(f"   trial_end: {active_sub.get('trial_end')}")
+        print(f"   created: {active_sub.get('created')}")
+
+        # Check if plan object has period info
+        plan = active_sub.get('plan')
+        if plan:
+            print(f"   plan object exists, keys: {list(plan.keys()) if hasattr(plan, 'keys') else 'not a dict'}")
         print()
 
         # Determine tier from metadata or price ID
