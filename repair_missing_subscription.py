@@ -172,13 +172,24 @@ def repair_subscription(email, dry_run=False):
                 conn.close()
                 return
 
+        # Get billing period - Stripe moved these to items level in API v2025-03-31
+        items = active_sub.get('items', {}).get('data', [])
+        if items and items[0].get('current_period_start'):
+            # New API: period on items
+            period_start = items[0]['current_period_start']
+            period_end = items[0]['current_period_end']
+        else:
+            # Fallback: use start_date and billing_cycle_anchor
+            period_start = active_sub.get('start_date') or active_sub.get('created')
+            period_end = active_sub.get('billing_cycle_anchor')
+
         print(f"💾 Creating subscription record:")
         print(f"   - User ID: {user_id}")
         print(f"   - Stripe Subscription ID: {active_sub['id']}")
         print(f"   - Stripe Customer ID: {stripe_customer_id}")
         print(f"   - Tier: {tier}")
         print(f"   - Status: {active_sub['status']}")
-        print(f"   - Period: {datetime.fromtimestamp(active_sub['current_period_start'])} to {datetime.fromtimestamp(active_sub['current_period_end'])}")
+        print(f"   - Period: {datetime.fromtimestamp(period_start)} to {datetime.fromtimestamp(period_end)}")
         print()
 
         if not dry_run:
@@ -195,8 +206,8 @@ def repair_subscription(email, dry_run=False):
                 stripe_customer_id,
                 tier,
                 active_sub['status'],
-                datetime.fromtimestamp(active_sub['current_period_start']).isoformat(),
-                datetime.fromtimestamp(active_sub['current_period_end']).isoformat(),
+                datetime.fromtimestamp(period_start).isoformat(),
+                datetime.fromtimestamp(period_end).isoformat(),
                 active_sub.get('cancel_at_period_end', False)
             ))
 
