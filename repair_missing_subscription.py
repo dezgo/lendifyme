@@ -130,6 +130,12 @@ def repair_subscription(email, dry_run=False):
         print(f"✅ Will use subscription: {active_sub['id']} (status: {active_sub['status']})")
         print()
 
+        # Fetch full subscription details (list() might not expand all fields)
+        print("🔍 Fetching full subscription details...")
+        active_sub = stripe.Subscription.retrieve(active_sub['id'])
+        print(f"   Retrieved subscription with {len(active_sub.keys())} fields")
+        print()
+
         # Determine tier from metadata or price ID
         metadata = active_sub.get('metadata', {})
         tier = metadata.get('tier') if metadata else None
