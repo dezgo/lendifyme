@@ -7,6 +7,10 @@ Usage: python check_user_subscription.py <email>
 import sqlite3
 import sys
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def check_user(email):

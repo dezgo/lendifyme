@@ -12,6 +12,10 @@ import sqlite3
 import sys
 import os
 from datetime import datetime
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def repair_subscription(email, dry_run=False):

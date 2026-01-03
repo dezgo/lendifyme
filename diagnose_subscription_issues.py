@@ -12,6 +12,10 @@ Usage: python diagnose_subscription_issues.py
 """
 import sqlite3
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def diagnose_subscriptions():
