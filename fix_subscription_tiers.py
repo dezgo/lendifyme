@@ -13,6 +13,10 @@ Usage: python fix_subscription_tiers.py [--dry-run]
 """
 import sqlite3
 import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 def fix_subscription_tiers(dry_run=False):
