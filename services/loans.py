@@ -98,6 +98,10 @@ def get_user_subscription_tier(user_id=None):
     """
     Get user's current subscription tier (free/basic/pro).
 
+    Checks users.subscription_tier first.  If it's NULL or missing,
+    falls back to the most-recent active/trialing user_subscriptions row
+    (defence-in-depth against webhooks that set the column to NULL).
+
     Args:
         user_id: User ID (defaults to current user)
 
@@ -112,11 +116,55 @@ def get_user_subscription_tier(user_id=None):
 
     conn = get_db_connection()
     c = conn.cursor()
-    c.execute("SELECT subscription_tier FROM users WHERE id = ?", (user_id,))
-    result = c.fetchone()
-    conn.close()
 
-    return result[0] if result else 'free'
+    c.execute(
+        "SELECT subscription_tier, manual_override FROM users WHERE id = ?",
+        (user_id,),
+    )
+    result = c.fetchone()
+    if not result:
+        conn.close()
+        return 'free'
+
+    tier, manual_override = result
+
+    # Admin-granted access — trust the column as-is
+    if manual_override and tier:
+        conn.close()
+        return tier
+
+    # If tier is properly set and non-NULL, use it
+    if tier and tier != 'free':
+        conn.close()
+        return tier
+
+    # Defence-in-depth: if tier is NULL or 'free', cross-check
+    # user_subscriptions for an active/trialing record that may have been
+    # missed by a failed webhook.
+    c.execute("""
+        SELECT tier FROM user_subscriptions
+        WHERE user_id = ? AND status IN ('active', 'trialing')
+        ORDER BY updated_at DESC
+        LIMIT 1
+    """, (user_id,))
+    sub_row = c.fetchone()
+
+    if sub_row and sub_row[0]:
+        # Repair: sync users.subscription_tier so future lookups are fast
+        c.execute(
+            "UPDATE users SET subscription_tier = ? WHERE id = ?",
+            (sub_row[0], user_id),
+        )
+        conn.commit()
+        current_app.logger.warning(
+            "Auto-repaired subscription_tier for user %s: NULL/free -> %s",
+            user_id, sub_row[0],
+        )
+        conn.close()
+        return sub_row[0]
+
+    conn.close()
+    return tier if tier else 'free'
 
 
 def get_subscription_limits(tier):
