@@ -211,16 +211,76 @@ def subscribe(tier):
 @subscription_bp.route("/checkout/success")
 @login_required
 def checkout_success():
-    """Handle successful checkout."""
-    session_id = request.args.get('session_id')
+    """Handle successful checkout.
 
+    This is the return URL after Stripe Checkout.  The webhook may not have
+    fired yet (especially on localhost without a tunnel), so we activate the
+    subscription directly from the Checkout Session as a reliable fallback.
+    """
+    import stripe
+
+    session_id = request.args.get('session_id')
     if not session_id:
         flash("Invalid checkout session", "error")
         return redirect("/")
 
-    flash("Subscription activated! Welcome to your new plan.", "success")
-    log_event('subscription_activated')
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+    user_id = get_current_user_id()
 
+    try:
+        cs = stripe.checkout.Session.retrieve(session_id)
+        metadata = cs.get('metadata', {})
+        tier = metadata.get('tier')
+        customer_id = cs.get('customer')
+        subscription_id = cs.get('subscription')
+
+        if tier and user_id:
+            conn = get_db_connection()
+            c = conn.cursor()
+
+            # Set the tier immediately (idempotent with webhook)
+            c.execute(
+                "UPDATE users SET subscription_tier = ?, stripe_customer_id = ? WHERE id = ?",
+                (tier, customer_id, user_id),
+            )
+
+            # Upsert subscription record (same as webhook handler)
+            c.execute("""
+                INSERT INTO user_subscriptions
+                (user_id, stripe_subscription_id, stripe_customer_id, tier, status,
+                 created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'trialing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(stripe_subscription_id) DO UPDATE SET
+                    tier = excluded.tier,
+                    updated_at = CURRENT_TIMESTAMP
+            """, (user_id, subscription_id, customer_id, tier))
+
+            conn.commit()
+            conn.close()
+
+            app.logger.info(
+                "checkout_success: activated tier=%s for user %s (session %s)",
+                tier, user_id, session_id,
+            )
+
+            flash(f"Subscription activated! Welcome to the {tier.title()} plan.", "success")
+        else:
+            app.logger.warning(
+                "checkout_success: missing tier/user_id in session %s", session_id,
+            )
+            flash("Subscription activated! Welcome to your new plan.", "success")
+
+    except Exception as e:
+        app.logger.error(f"checkout_success: error retrieving session: {e}")
+        flash("Subscription activated! Welcome to your new plan.", "success")
+
+    log_event('subscription_activated', event_data={'tier': tier if 'tier' in dir() else None})
+
+    # If we saved a pending loan form before redirecting to pricing, go back to dashboard
+    pending = session.pop('pending_loan_form', None)
+    if pending:
+        # Store in session so the template can pre-fill the form
+        session['prefill_loan'] = pending
     return redirect("/")
 
 

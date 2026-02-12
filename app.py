@@ -809,6 +809,17 @@ def _handle_index_post(form):
                 "Upgrade to create more!",
                 "error",
             )
+        # Save form data so it can be restored after subscribing
+        session['pending_loan_form'] = {
+            'borrower': borrower,
+            'bank_name': bank_name,
+            'date_borrowed': date_borrowed,
+            'amount': amount,
+            'note': note,
+            'repayment_amount': repayment_amount,
+            'repayment_frequency': repayment_frequency,
+            'loan_type': loan_type,
+        }
         return "/pricing"
 
     # Create loan if required fields present
