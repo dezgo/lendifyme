@@ -694,6 +694,8 @@ def index():
     # Dashboard (GET)
     context_or_redirect = _build_dashboard_context()
     if isinstance(context_or_redirect, dict):
+        # Pop any prefill data saved before the subscribe redirect
+        prefill = session.pop('prefill_loan', None) or {}
         return render_template(
             "index.html",
             loans=context_or_redirect["loans"],
@@ -701,6 +703,7 @@ def index():
             email_verified=context_or_redirect["email_verified"],
             has_password=context_or_redirect["has_password"],
             needs_password_unlock=context_or_redirect.get("needs_password_unlock", False),
+            prefill=prefill,
         )
     # it's a redirect target
     return redirect(context_or_redirect)

@@ -788,30 +788,30 @@ function toggleUnlockMethod() {
                 <div class="form-group">
                     <label class="form-label">Loan Type</label>
                     <select name="loan_type" id="loan_type" class="form-control" onchange="updateLoanLabels()">
-                        <option value="lending">Lending (I gave money to someone)</option>
-                        <option value="borrowing">Borrowing (I received money from someone)</option>
+                        <option value="lending" {{ 'selected' if prefill.get('loan_type') == 'lending' else '' }}>Lending (I gave money to someone)</option>
+                        <option value="borrowing" {{ 'selected' if prefill.get('loan_type') == 'borrowing' else '' }}>Borrowing (I received money from someone)</option>
                     </select>
                 </div>
 
                 <div class="form-group">
                     <label class="form-label" id="label_person">Borrower Name</label>
-                    <input type="text" name="borrower" id="input_person" class="form-control" placeholder="e.g. Alice Smith" required data-lpignore="true" autocomplete="off">
+                    <input type="text" name="borrower" id="input_person" class="form-control" placeholder="e.g. Alice Smith" required data-lpignore="true" autocomplete="off" value="{{ prefill.get('borrower', '') }}">
                 </div>
 
                 <div class="form-group">
                     <label class="form-label">Bank Statement Name (optional)</label>
-                    <input type="text" name="bank_name" class="form-control" placeholder="e.g. Alice S or A Smith" data-lpignore="true" autocomplete="off">
+                    <input type="text" name="bank_name" class="form-control" placeholder="e.g. Alice S or A Smith" data-lpignore="true" autocomplete="off" value="{{ prefill.get('bank_name', '') }}">
                     <small class="form-text">Use this if their name appears differently in your bank transactions</small>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
                         <label class="form-label">Date Borrowed</label>
-                        <input type="date" name="date_borrowed" class="form-control" required>
+                        <input type="date" name="date_borrowed" class="form-control" required value="{{ prefill.get('date_borrowed', '') }}">
                     </div>
                     <div class="form-group">
                         <label class="form-label">Amount ($)</label>
-                        <input type="number" step="0.01" name="amount" class="form-control" required>
+                        <input type="number" step="0.01" name="amount" class="form-control" required value="{{ prefill.get('amount', '') }}">
                     </div>
                 </div>
 
@@ -819,14 +819,14 @@ function toggleUnlockMethod() {
                     <label class="form-label">Repayment Schedule (optional)</label>
                     <div class="form-row">
                         <div class="form-group">
-                            <input type="number" step="0.01" name="repayment_amount" class="form-control" placeholder="Amount">
+                            <input type="number" step="0.01" name="repayment_amount" class="form-control" placeholder="Amount" value="{{ prefill.get('repayment_amount', '') }}">
                         </div>
                         <div class="form-group">
                             <select name="repayment_frequency" class="form-control">
-                                <option value="">No schedule</option>
-                                <option value="weekly">Weekly</option>
-                                <option value="fortnightly">Fortnightly</option>
-                                <option value="monthly">Monthly</option>
+                                <option value="" {{ 'selected' if not prefill.get('repayment_frequency') else '' }}>No schedule</option>
+                                <option value="weekly" {{ 'selected' if prefill.get('repayment_frequency') == 'weekly' else '' }}>Weekly</option>
+                                <option value="fortnightly" {{ 'selected' if prefill.get('repayment_frequency') == 'fortnightly' else '' }}>Fortnightly</option>
+                                <option value="monthly" {{ 'selected' if prefill.get('repayment_frequency') == 'monthly' else '' }}>Monthly</option>
                             </select>
                         </div>
                     </div>
@@ -834,7 +834,7 @@ function toggleUnlockMethod() {
 
                 <div class="form-group">
                     <label class="form-label">Note (optional)</label>
-                    <textarea name="note" class="form-control" rows="3"></textarea>
+                    <textarea name="note" class="form-control" rows="3">{{ prefill.get('note', '') }}</textarea>
                 </div>
 
                 <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 1rem;">Add Loan</button>
@@ -974,4 +974,9 @@ function updateLoanLabels() {
         inputPerson.placeholder = 'e.g. Alice Smith';
     }
 }
+
+// Auto-open the loan modal if we have prefill data (returning from subscribe flow)
+{% if prefill %}
+openModal();
+{% endif %}
 {% endblock %}
