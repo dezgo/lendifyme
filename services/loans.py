@@ -40,38 +40,32 @@ def encrypt_loan_data(loan_data, dek):
 
 def decrypt_loan_row(row, dek):
     """
-    Decrypt a loan row that may contain plaintext and/or encrypted columns.
+    Decrypt a loan row's encrypted columns into a dict of plaintext values.
 
-    Works with sqlite3.Row, dict, or anything supporting `key in row.keys()` and
-    `row[key]`. Encrypted columns take precedence; falls back to plaintext if
-    the encrypted variant is missing/empty or no DEK is available.
+    Works with sqlite3.Row, dict, or anything supporting `key in row.keys()`
+    and `row[key]`. Returns None for any column that is missing from the row
+    or empty, or if no DEK is available.
 
     Args:
-        row: Loan row from a SELECT that includes any subset of the columns:
-             borrower, borrower_encrypted, amount, amount_encrypted, note,
-             note_encrypted, bank_name, bank_name_encrypted, borrower_email,
-             borrower_email_encrypted, repayment_amount,
-             repayment_amount_encrypted, repayment_frequency,
-             repayment_frequency_encrypted.
+        row: Loan row from a SELECT that includes any subset of the encrypted
+             columns: borrower_encrypted, amount_encrypted, note_encrypted,
+             bank_name_encrypted, borrower_email_encrypted,
+             repayment_amount_encrypted, repayment_frequency_encrypted.
         dek: Data encryption key (bytes) or None.
 
     Returns:
         Dict with keys: borrower, amount (float|None), note, bank_name,
         borrower_email, repayment_amount (float|None), repayment_frequency.
-        Missing columns surface as None.
     """
     from services.encryption import decrypt_field
 
     keys = set(row.keys())
 
-    def pick(plain_col, encrypted_col):
-        if encrypted_col in keys:
-            encrypted = row[encrypted_col]
-            if encrypted and dek:
-                return decrypt_field(encrypted, dek)
-        if plain_col in keys:
-            return row[plain_col]
-        return None
+    def pick(encrypted_col):
+        if not dek or encrypted_col not in keys:
+            return None
+        encrypted = row[encrypted_col]
+        return decrypt_field(encrypted, dek) if encrypted else None
 
     def to_float(val):
         if val is None or val == '':
@@ -82,13 +76,13 @@ def decrypt_loan_row(row, dek):
             return None
 
     return {
-        'borrower': pick('borrower', 'borrower_encrypted'),
-        'amount': to_float(pick('amount', 'amount_encrypted')),
-        'note': pick('note', 'note_encrypted'),
-        'bank_name': pick('bank_name', 'bank_name_encrypted'),
-        'borrower_email': pick('borrower_email', 'borrower_email_encrypted'),
-        'repayment_amount': to_float(pick('repayment_amount', 'repayment_amount_encrypted')),
-        'repayment_frequency': pick('repayment_frequency', 'repayment_frequency_encrypted'),
+        'borrower': pick('borrower_encrypted'),
+        'amount': to_float(pick('amount_encrypted')),
+        'note': pick('note_encrypted'),
+        'bank_name': pick('bank_name_encrypted'),
+        'borrower_email': pick('borrower_email_encrypted'),
+        'repayment_amount': to_float(pick('repayment_amount_encrypted')),
+        'repayment_frequency': pick('repayment_frequency_encrypted'),
     }
 
 

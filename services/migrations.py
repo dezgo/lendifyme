@@ -1393,6 +1393,51 @@ def migrate_v31_free_tier_one_loan(conn):
     print("  Free tier loan limit set to 1.")
 
 
+def migrate_v32_null_plaintext_loan_columns(conn):
+    """
+    Null out plaintext columns on loans where the encrypted equivalents are
+    populated. After v25 migrated rows into encrypted columns it left the
+    original plaintext values in place. This migration removes that residue
+    so decryption code can stop falling back to plaintext.
+
+    Idempotent: safe to run on a fresh database (no matching rows) or a
+    partially-cleaned one.
+    """
+    c = conn.cursor()
+
+    plaintext_to_encrypted = [
+        ('borrower', 'borrower_encrypted'),
+        ('amount', 'amount_encrypted'),
+        ('note', 'note_encrypted'),
+        ('bank_name', 'bank_name_encrypted'),
+        ('borrower_email', 'borrower_email_encrypted'),
+        ('repayment_amount', 'repayment_amount_encrypted'),
+        ('repayment_frequency', 'repayment_frequency_encrypted'),
+    ]
+
+    total = 0
+    for plain, encrypted in plaintext_to_encrypted:
+        c.execute(
+            f"UPDATE loans SET {plain} = NULL "
+            f"WHERE {plain} IS NOT NULL AND {encrypted} IS NOT NULL"
+        )
+        total += c.rowcount
+
+    # Warn (but don't fail) if any loans still have plaintext without an
+    # encrypted twin — those need manual attention.
+    c.execute("""
+        SELECT id, user_id FROM loans
+        WHERE borrower IS NOT NULL AND borrower_encrypted IS NULL
+    """)
+    orphans = c.fetchall()
+    if orphans:
+        print(f"  ⚠️  {len(orphans)} loan(s) have plaintext without encrypted twin: {orphans}")
+        print("  ⚠️  These rows kept their plaintext data. Investigate manually.")
+
+    conn.commit()
+    print(f"  Nulled {total} plaintext column value(s) on loans.")
+
+
 
 # ---------------------------------------------------------------------------
 # Migration table — add new migrations here as (version, function) tuples.
@@ -1430,4 +1475,5 @@ MIGRATIONS = [
     (29, migrate_v29_create_feedback_table),
     (30, migrate_v30_feedback_throttle),
     (31, migrate_v31_free_tier_one_loan),
+    (32, migrate_v32_null_plaintext_loan_columns),
 ]
