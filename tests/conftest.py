@@ -31,8 +31,6 @@ def _disable_csrf(app, monkeypatch):
 
 @pytest.fixture
 def app(tmp_path, monkeypatch):
-    monkeypatch.setenv("ENCRYPTION_KEY", "ISO-GA14bRMefte-maLgDXga80SEn-M_Lz-MSLP5fhY=")
-
     from app import app as flask_app
 
     db_path = tmp_path / "test.db"
@@ -55,8 +53,6 @@ def app(tmp_path, monkeypatch):
             conn.close()
 
     yield flask_app
-
-    monkeypatch.delenv("ENCRYPTION_KEY", raising=False)
 
 
 @pytest.fixture

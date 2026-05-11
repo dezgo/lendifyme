@@ -2,42 +2,14 @@
 Subscription routes - pricing, billing, Stripe integration, webhooks.
 """
 from flask import Blueprint, render_template, request, session, redirect, flash, current_app as app
-from helpers.decorators import login_required, get_current_user_id
+from helpers.decorators import login_required
+from helpers.session_helpers import get_current_user_id
+from helpers.events import log_event
 from helpers.db import get_db_connection
 from services.loans import get_user_subscription_tier, check_loan_limit
 from datetime import datetime, timedelta
 import json
 import os
-
-
-def _tier_from_subscription_items(items):
-    """Determine tier from Stripe subscription items by matching price IDs."""
-    if not items:
-        return 'basic'  # safe default for paid
-    price_id = items[0].get('price', {}).get('id', '')
-    if price_id in (os.getenv('STRIPE_PRICE_ID_PRO_MONTHLY', ''),
-                    os.getenv('STRIPE_PRICE_ID_PRO_YEARLY', '')):
-        return 'pro'
-    return 'basic'
-
-
-def log_event(event_name, event_data=None, user_id=None):
-    """Log an event to the events table."""
-    if user_id is None:
-        user_id = get_current_user_id()
-
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    event_data_json = json.dumps(event_data) if event_data else '{}'
-
-    c.execute("""
-        INSERT INTO events (user_id, event_name, event_data, created_at)
-        VALUES (?, ?, ?, datetime('now'))
-    """, (user_id, event_name, event_data_json))
-
-    conn.commit()
-    conn.close()
 
 
 # Create blueprint (no prefix - routes are at root level)
@@ -294,8 +266,9 @@ def checkout_cancel():
 
 @subscription_bp.route("/webhooks/stripe", methods=["POST"])
 def stripe_webhook():
-    """Handle Stripe webhook events."""
+    """Validate Stripe signature and dispatch to a handler in services/stripe_webhooks.py."""
     import stripe
+    from services.stripe_webhooks import dispatch
 
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
@@ -308,9 +281,7 @@ def stripe_webhook():
     stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
 
     try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, webhook_secret
-        )
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
     except ValueError:
         app.logger.error("Invalid webhook payload")
         return ('Invalid payload', 400)
@@ -318,317 +289,19 @@ def stripe_webhook():
         app.logger.error("Invalid webhook signature")
         return ('Invalid signature', 400)
 
-    # Handle the event
     event_type = event['type']
-    data_object = event['data']['object']
-
     app.logger.info(f"Received Stripe webhook: {event_type}")
 
     conn = get_db_connection()
-    c = conn.cursor()
-
     try:
-        if event_type == 'checkout.session.completed':
-            # Payment successful, subscription created
-            session = data_object
-            customer_id = session.get('customer')
-            subscription_id = session.get('subscription')
-            metadata = session.get('metadata', {})
-            user_id = metadata.get('user_id')
-            tier = metadata.get('tier')
-
-            app.logger.info(
-                "checkout.session.completed: user_id=%s tier=%s customer=%s sub=%s",
-                user_id, tier, customer_id, subscription_id,
-            )
-
-            if user_id and tier:
-                # Update user's subscription tier
-                c.execute("""
-                    UPDATE users
-                    SET subscription_tier = ?, stripe_customer_id = ?
-                    WHERE id = ?
-                """, (tier, customer_id, user_id))
-
-                # Idempotent upsert: safe if webhook fires twice
-                c.execute("""
-                    INSERT INTO user_subscriptions
-                    (user_id, stripe_subscription_id, stripe_customer_id, tier, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'trialing', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    ON CONFLICT(stripe_subscription_id) DO UPDATE SET
-                        tier = excluded.tier,
-                        status = CASE WHEN user_subscriptions.status = 'canceled'
-                                      THEN excluded.status
-                                      ELSE user_subscriptions.status END,
-                        updated_at = CURRENT_TIMESTAMP
-                """, (user_id, subscription_id, customer_id, tier))
-
-                conn.commit()
-                app.logger.info(f"Subscription created/updated for user {user_id}: {tier}")
-            else:
-                app.logger.error(f"checkout.session.completed missing metadata: user_id={user_id}, tier={tier}, session_id={session.get('id')}")
-
-        elif event_type == 'customer.subscription.updated':
-            # Subscription status changed
-            subscription = data_object
-            subscription_id = subscription['id']
-            status = subscription['status']
-
-            app.logger.info(
-                "customer.subscription.updated: sub=%s status=%s",
-                subscription_id, status,
-            )
-
-            # Get billing period - Stripe deprecated current_period_* on subscription
-            # in API v2025-03-31; they now live on subscription items.
-            period_start = None
-            period_end = None
-
-            items = subscription.get('items', {}).get('data', [])
-            if items and items[0].get('current_period_start'):
-                period_start = items[0]['current_period_start']
-                period_end = items[0]['current_period_end']
-
-            # Fallback: compute period from start_date + interval
-            if not period_start:
-                period_start = subscription.get('start_date') or subscription.get('created')
-            if not period_end:
-                # Try cancel_at or trial_end as hints, then compute from interval
-                period_end = subscription.get('cancel_at')
-                if not period_end and items:
-                    # Compute from price interval
-                    price = items[0].get('price', {}) if items else {}
-                    interval = price.get('recurring', {}).get('interval')
-                    interval_count = price.get('recurring', {}).get('interval_count', 1)
-                    if interval and period_start:
-                        start_dt = datetime.fromtimestamp(period_start)
-                        if interval == 'month':
-                            end_dt = start_dt + timedelta(days=30 * interval_count)
-                        elif interval == 'year':
-                            end_dt = start_dt + timedelta(days=365 * interval_count)
-                        elif interval == 'week':
-                            end_dt = start_dt + timedelta(weeks=interval_count)
-                        elif interval == 'day':
-                            end_dt = start_dt + timedelta(days=interval_count)
-                        else:
-                            end_dt = start_dt + timedelta(days=30)
-                        period_end = int(end_dt.timestamp())
-                if not period_end:
-                    # Last resort: billing_cycle_anchor + 30 days
-                    anchor = subscription.get('billing_cycle_anchor')
-                    if anchor:
-                        period_end = anchor + (30 * 86400)
-                    else:
-                        period_end = period_start + (30 * 86400) if period_start else None
-
-            current_period_start = datetime.fromtimestamp(period_start).isoformat() if period_start else None
-            current_period_end = datetime.fromtimestamp(period_end).isoformat() if period_end else None
-            cancel_at_period_end = subscription.get('cancel_at_period_end', False)
-
-            app.logger.info(
-                "  period: %s to %s, cancel_at_period_end=%s",
-                current_period_start, current_period_end, cancel_at_period_end,
-            )
-
-            # Upsert subscription record — creates if checkout webhook was missed
-            metadata = subscription.get('metadata', {})
-            meta_user_id = metadata.get('user_id')
-            meta_tier = metadata.get('tier')
-            customer_id = subscription.get('customer')
-
-            # Try to find existing row first
-            c.execute(
-                "SELECT user_id, tier FROM user_subscriptions WHERE stripe_subscription_id = ?",
-                (subscription_id,),
-            )
-            existing = c.fetchone()
-
-            if existing:
-                # Normal path: row exists, update it
-                c.execute("""
-                    UPDATE user_subscriptions
-                    SET status = ?,
-                        current_period_start = ?,
-                        current_period_end = ?,
-                        cancel_at_period_end = ?,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE stripe_subscription_id = ?
-                """, (status, current_period_start, current_period_end, cancel_at_period_end, subscription_id))
-                sub_user_id, sub_tier = existing
-            elif meta_user_id and meta_tier:
-                # Row missing (checkout webhook failed) — create it from metadata
-                app.logger.warning(
-                    "user_subscriptions row missing for sub %s, creating from metadata",
-                    subscription_id,
-                )
-                c.execute("""
-                    INSERT INTO user_subscriptions
-                    (user_id, stripe_subscription_id, stripe_customer_id, tier, status,
-                     current_period_start, current_period_end, cancel_at_period_end,
-                     created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """, (meta_user_id, subscription_id, customer_id, meta_tier, status,
-                      current_period_start, current_period_end, cancel_at_period_end))
-                sub_user_id, sub_tier = meta_user_id, meta_tier
-            else:
-                # No row and no metadata — try to find user by stripe customer ID
-                c.execute(
-                    "SELECT id FROM users WHERE stripe_customer_id = ?",
-                    (customer_id,),
-                )
-                user_row = c.fetchone()
-                if user_row:
-                    app.logger.warning(
-                        "Creating user_subscriptions from customer lookup for sub %s",
-                        subscription_id,
-                    )
-                    # Determine tier from price
-                    tier_from_price = _tier_from_subscription_items(items)
-                    c.execute("""
-                        INSERT INTO user_subscriptions
-                        (user_id, stripe_subscription_id, stripe_customer_id, tier, status,
-                         current_period_start, current_period_end, cancel_at_period_end,
-                         created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (user_row[0], subscription_id, customer_id,
-                          tier_from_price, status,
-                          current_period_start, current_period_end, cancel_at_period_end))
-                    sub_user_id, sub_tier = user_row[0], tier_from_price
-                else:
-                    app.logger.error(
-                        "Cannot find user for subscription %s (customer %s), skipping tier update",
-                        subscription_id, customer_id,
-                    )
-                    sub_user_id, sub_tier = None, None
-
-            # If subscription becomes active, update user tier (only if we know who they are)
-            if status == 'active' and sub_user_id and sub_tier:
-                c.execute(
-                    "UPDATE users SET subscription_tier = ? WHERE id = ?",
-                    (sub_tier, sub_user_id),
-                )
-
-            conn.commit()
-            app.logger.info(f"Subscription {subscription_id} updated: {status}")
-
-        elif event_type == 'customer.subscription.deleted':
-            # Subscription cancelled or ended
-            subscription = data_object
-            subscription_id = subscription['id']
-            customer_id = subscription.get('customer')
-
-            app.logger.info(
-                "customer.subscription.deleted: sub=%s customer=%s",
-                subscription_id, customer_id,
-            )
-
-            # Get user_id from subscription record
-            c.execute("SELECT user_id FROM user_subscriptions WHERE stripe_subscription_id = ?", (subscription_id,))
-            result = c.fetchone()
-
-            if not result and customer_id:
-                # Fallback: find user by Stripe customer ID
-                c.execute("SELECT id FROM users WHERE stripe_customer_id = ?", (customer_id,))
-                result = c.fetchone()
-
-            if result:
-                user_id = result[0]
-
-                # Only downgrade if user doesn't have manual_override
-                c.execute("SELECT manual_override FROM users WHERE id = ?", (user_id,))
-                override = c.fetchone()
-                if override and override[0]:
-                    app.logger.info(
-                        "Skipping downgrade for user %s — manual_override is set",
-                        user_id,
-                    )
-                else:
-                    # Downgrade user to free tier
-                    c.execute("UPDATE users SET subscription_tier = 'free' WHERE id = ?", (user_id,))
-                    app.logger.info(f"User {user_id} downgraded to free")
-
-                # Update subscription status
-                c.execute("""
-                    UPDATE user_subscriptions
-                    SET status = 'canceled',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE stripe_subscription_id = ?
-                """, (subscription_id,))
-
-                conn.commit()
-                app.logger.info(f"Subscription {subscription_id} cancelled")
-            else:
-                app.logger.warning(
-                    "customer.subscription.deleted: cannot find user for sub %s",
-                    subscription_id,
-                )
-
-        elif event_type == 'invoice.payment_succeeded':
-            # Successful payment — safety net for tier activation
-            invoice = data_object
-            subscription_id = invoice.get('subscription')
-
-            app.logger.info(
-                "invoice.payment_succeeded: sub=%s invoice=%s",
-                subscription_id, invoice.get('id'),
-            )
-
-            if subscription_id:
-                # Update subscription status to active
-                c.execute("""
-                    UPDATE user_subscriptions
-                    SET status = 'active',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE stripe_subscription_id = ?
-                """, (subscription_id,))
-
-                # Safely update user's tier — only if we have a valid row
-                c.execute(
-                    "SELECT user_id, tier FROM user_subscriptions WHERE stripe_subscription_id = ?",
-                    (subscription_id,),
-                )
-                sub_row = c.fetchone()
-                if sub_row and sub_row[0] and sub_row[1]:
-                    c.execute(
-                        "UPDATE users SET subscription_tier = ? WHERE id = ?",
-                        (sub_row[1], sub_row[0]),
-                    )
-                    app.logger.info(
-                        "Payment succeeded: user %s tier set to %s",
-                        sub_row[0], sub_row[1],
-                    )
-                else:
-                    app.logger.warning(
-                        "invoice.payment_succeeded: no user_subscriptions row for sub %s, "
-                        "cannot update user tier",
-                        subscription_id,
-                    )
-
-                conn.commit()
-
-        elif event_type == 'invoice.payment_failed':
-            # Failed payment
-            invoice = data_object
-            subscription_id = invoice.get('subscription')
-
-            if subscription_id:
-                c.execute("""
-                    UPDATE user_subscriptions
-                    SET status = 'past_due',
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE stripe_subscription_id = ?
-                """, (subscription_id,))
-                conn.commit()
-                app.logger.warning(f"Payment failed for subscription {subscription_id}")
-
-        conn.close()
+        dispatch(event_type, conn, event['data']['object'], app.logger)
         return ('Success', 200)
-
-    except Exception as e:
-        app.logger.error(f"Error processing webhook: {e}")
+    except Exception:
+        app.logger.exception(f"Error processing webhook {event_type}")
         conn.rollback()
-        conn.close()
         return ('Error processing webhook', 500)
+    finally:
+        conn.close()
 
 
 @subscription_bp.route("/billing")

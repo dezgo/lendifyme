@@ -8,11 +8,13 @@ from io import StringIO
 import csv
 import sqlite3
 from helpers.decorators import login_required
-from helpers.utils import get_db_path, log_event, get_current_user_id
-from helpers.session_helpers import get_user_password_from_session
+from helpers.session_helpers import get_current_user_id, get_user_password_from_session
+from helpers.events import log_event
+from helpers.db import get_db_path
 from services.loans import (
     get_loan_dek,
-    has_feature
+    has_feature,
+    decrypt_loan_row,
 )
 
 # Create blueprint
@@ -398,14 +400,8 @@ def loan_transactions(loan_id):
 
     # Get DEK for decryption using user password
     dek = get_loan_dek(loan_row['id'], user_password=user_password)
-
-    # Decrypt loan data
-    borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] and dek else loan_row['borrower']
-    amount_str = decrypt_field(loan_row['amount_encrypted'], dek) if loan_row['amount_encrypted'] and dek else loan_row['amount']
-    bank_name = decrypt_field(loan_row['bank_name_encrypted'], dek) if loan_row['bank_name_encrypted'] and dek else loan_row['bank_name']
-    note = decrypt_field(loan_row['note_encrypted'], dek) if loan_row['note_encrypted'] and dek else loan_row['note']
-
-    amount = float(amount_str) if amount_str is not None else 0.0
+    fields = decrypt_loan_row(loan_row, dek)
+    amount = fields['amount'] or 0.0
 
     # Calculate total repaid from applied_transactions
     c.execute("""
@@ -430,7 +426,7 @@ def loan_transactions(loan_id):
             amount_repaid += float(amount_val_str)
 
     # Build loan tuple for template compatibility
-    loan = (loan_row['id'], borrower, amount, loan_row['date_borrowed'], amount_repaid, bank_name, note)
+    loan = (loan_row['id'], fields['borrower'], amount, loan_row['date_borrowed'], amount_repaid, fields['bank_name'], fields['note'])
 
     # Get all applied transactions for this loan (query both plaintext and encrypted)
     c.execute("""
@@ -516,14 +512,8 @@ def export_loan_transactions(loan_id):
 
     # Get DEK for decryption using user password
     dek = get_loan_dek(loan_row['id'], user_password=user_password)
-
-    # Decrypt loan data
-    borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] and dek else loan_row['borrower']
-    amount_str = decrypt_field(loan_row['amount_encrypted'], dek) if loan_row['amount_encrypted'] and dek else loan_row['amount']
-    bank_name = decrypt_field(loan_row['bank_name_encrypted'], dek) if loan_row['bank_name_encrypted'] and dek else loan_row['bank_name']
-    note = decrypt_field(loan_row['note_encrypted'], dek) if loan_row['note_encrypted'] and dek else loan_row['note']
-
-    amount = float(amount_str) if amount_str is not None else 0.0
+    fields = decrypt_loan_row(loan_row, dek)
+    amount = fields['amount'] or 0.0
 
     # Calculate total repaid
     c.execute("""
@@ -548,7 +538,7 @@ def export_loan_transactions(loan_id):
             amount_repaid += float(amount_val_str)
 
     # Build loan tuple for CSV generation
-    loan = (loan_row['id'], borrower, amount, loan_row['date_borrowed'], amount_repaid, bank_name, note)
+    loan = (loan_row['id'], fields['borrower'], amount, loan_row['date_borrowed'], amount_repaid, fields['bank_name'], fields['note'])
 
     # Get all applied transactions for this loan (query both plaintext and encrypted)
     c.execute("""

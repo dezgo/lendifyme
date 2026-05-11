@@ -272,35 +272,6 @@ class TestMatchWorkflow:
         assert b'Bob' in response.data
 
 
-class TestDateRangeFeature:
-    """Test date range selection for API connectors."""
-
-    def test_match_page_has_date_range_selector(self, logged_in_client):
-        """Test that match page includes date range selector."""
-        response = logged_in_client.get('/match')
-
-        assert response.status_code == 200
-        assert b'Date Range' in response.data
-        assert b'Last 7 days' in response.data
-        assert b'Last 30 days' in response.data
-        assert b'Last 90 days' in response.data
-        assert b'Custom date' in response.data
-
-    def test_csv_upload_ignores_date_range(self, client_with_loan):
-        """Test that CSV upload works regardless of date_range parameter."""
-        csv_data = """Date,Description,Amount
-2025-10-15,Transfer from Alice,50.00"""
-
-        response = client_with_loan.post('/match', data={
-            'import_source': 'csv',
-            'transactions_csv': csv_data,
-            'date_range': '90'  # Should be ignored for CSV
-        }, follow_redirects=True)
-
-        assert response.status_code == 200
-        assert b'Alice' in response.data
-
-
 class TestRejectMatch:
     """Test /reject-match POST route."""
 

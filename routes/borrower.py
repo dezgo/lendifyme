@@ -2,10 +2,10 @@
 Borrower portal routes - self-service access for borrowers.
 """
 from flask import Blueprint, render_template, request, session, redirect, flash, current_app as app
-from helpers.decorators import login_required, get_current_user_id
+from helpers.decorators import login_required
+from helpers.session_helpers import get_current_user_id, get_user_password_from_session
 from helpers.db import get_db_connection
-from services.loans import get_loan_dek
-from services.encryption import decrypt_field
+from services.loans import get_loan_dek, decrypt_loan_row
 import sqlite3
 
 # Create blueprint
@@ -54,19 +54,14 @@ def borrower_portal(token):
         return render_template("borrower_portal_error.html"), 500
 
     # Decrypt loan fields
-    borrower = decrypt_field(loan_row['borrower_encrypted'], dek) if loan_row['borrower_encrypted'] else loan_row['borrower']
-    amount = float(decrypt_field(loan_row['amount_encrypted'], dek)) if loan_row['amount_encrypted'] else loan_row['amount']
-    note = decrypt_field(loan_row['note_encrypted'], dek) if loan_row['note_encrypted'] else loan_row['note']
-    bank_name = decrypt_field(loan_row['bank_name_encrypted'], dek) if loan_row['bank_name_encrypted'] else loan_row['bank_name']
-    borrower_email = decrypt_field(loan_row['borrower_email_encrypted'], dek) if loan_row['borrower_email_encrypted'] else loan_row['borrower_email']
-
-    repayment_amount = None
-    if loan_row['repayment_amount_encrypted']:
-        repayment_amount = float(decrypt_field(loan_row['repayment_amount_encrypted'], dek))
-    elif loan_row['repayment_amount'] is not None:
-        repayment_amount = loan_row['repayment_amount']
-
-    repayment_frequency = decrypt_field(loan_row['repayment_frequency_encrypted'], dek) if loan_row['repayment_frequency_encrypted'] else loan_row['repayment_frequency']
+    fields = decrypt_loan_row(loan_row, dek)
+    borrower = fields['borrower']
+    amount = fields['amount'] or 0.0
+    note = fields['note']
+    bank_name = fields['bank_name']
+    borrower_email = fields['borrower_email']
+    repayment_amount = fields['repayment_amount']
+    repayment_frequency = fields['repayment_frequency']
 
     # Calculate amount_repaid from applied_transactions
     c.execute("""
@@ -174,31 +169,13 @@ def send_borrower_invite(loan_id):
         return redirect("/")
 
     # Get DEK to decrypt loan data
-    from helpers.session_helpers import get_user_password_from_session
     user_password = get_user_password_from_session()
     dek = get_loan_dek(loan_id, user_password=user_password)
+    fields = decrypt_loan_row(loan_row, dek)
 
-    # Decrypt fields
-    borrower = (
-        decrypt_field(loan_row['borrower_encrypted'], dek)
-        if loan_row['borrower_encrypted'] and dek
-        else loan_row['borrower']
-    )
-
-    amount_str = (
-        decrypt_field(loan_row['amount_encrypted'], dek)
-        if loan_row['amount_encrypted'] and dek
-        else loan_row['amount']
-    )
-    # Convert to float, handle None
-    amount = float(amount_str) if amount_str is not None else 0.0
-
-    borrower_email = (
-        decrypt_field(loan_row['borrower_email_encrypted'], dek)
-        if loan_row['borrower_email_encrypted'] and dek
-        else loan_row['borrower_email']
-    )
-
+    borrower = fields['borrower']
+    amount = fields['amount'] or 0.0
+    borrower_email = fields['borrower_email']
     access_token = loan_row['borrower_access_token']
     amount_repaid = float(loan_row['amount_repaid']) if loan_row['amount_repaid'] is not None else 0.0
 

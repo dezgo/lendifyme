@@ -15,8 +15,9 @@ from services.auth_helpers import (
 )
 from services.email_sender import send_magic_link_email
 from helpers.decorators import login_required
-from helpers.utils import get_db_path, log_event, get_current_user_id
-from helpers.db import get_db_connection
+from helpers.session_helpers import get_current_user_id
+from helpers.events import log_event
+from helpers.db import get_db_connection, get_db_path
 
 # Get ENV from environment
 ENV = os.environ.get("FLASK_ENV") or "production"
@@ -326,9 +327,6 @@ def login():
                 current_app.logger.info(f"Password login successful for {user_email}")
                 log_event('login_success', user_id=user_id, event_data={'method': 'password'})
 
-                # Clear any old sync results
-                session.pop('sync_results', None)
-
                 flash("Welcome back!", "success")
                 return redirect("/")
             else:
@@ -393,9 +391,9 @@ LendifyMe
                     current_app.logger.info(f"Magic link sent via SMTP to {user_email}")
                     flash("Check your email! We've sent you a magic link to sign in.", "success")
                     email_sent = True
-                except Exception as e:
-                    current_app.logger.error(f"SMTP failed for {user_email}: {str(e)}")
-                    flash(f"Error sending email: {str(e)}", "error")
+                except Exception:
+                    current_app.logger.exception(f"SMTP failed for {user_email}")
+                    flash("We couldn't send your login email. Please try again in a moment.", "error")
 
         # Development mode - print link to console if email failed
         if not email_sent:
@@ -475,7 +473,7 @@ def magic_link_auth(token):
 
     flash(f"Welcome back, {user_name or user_email}!", "success")
     current_app.logger.info(f"Redirecting to index for user: {user_email}")
-    return redirect(url_for('index'))
+    return redirect(url_for('dashboard.index'))
 
 
 @auth_bp.route("/auth/verify/<token>")
@@ -530,7 +528,7 @@ def verify_email(token):
         session['user_name'] = user_name
 
     flash("Email verified successfully! 🎉", "success")
-    return redirect(url_for('index'))
+    return redirect(url_for('dashboard.index'))
 
 
 @auth_bp.route("/resend-verification", methods=["POST"])
@@ -596,7 +594,7 @@ def show_recovery_phrase():
     """Show master recovery phrase after password setup (one-time view)."""
     if 'show_master_recovery_phrase' not in session:
         flash("No recovery phrase to show", "error")
-        return redirect(url_for('index'))
+        return redirect(url_for('dashboard.index'))
 
     master_recovery_phrase = session.get('show_master_recovery_phrase')
     redirect_to = request.args.get('redirect')  # Where to redirect after showing phrase
@@ -612,4 +610,4 @@ def logout():
     """User logout."""
     session.clear()
     flash("You have been logged out", "success")
-    return redirect(url_for('index'))
+    return redirect(url_for('dashboard.index'))

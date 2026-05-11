@@ -1,4 +1,6 @@
 # services/migrations.py
+import traceback
+
 
 def _get_user_version(conn) -> int:
     return int(conn.execute("PRAGMA user_version").fetchone()[0])
@@ -9,361 +11,28 @@ def _set_user_version(conn, version: int) -> None:
 
 
 def run_migrations(conn):
+    """Apply every migration in MIGRATIONS whose version is greater than the
+    database's current user_version. Each migration runs in its own transaction
+    so a failure rolls back only that migration."""
     current = _get_user_version(conn)
     print(f"📊 Current database version: {current}")
 
-    if current < 1:
-        migrate_v1_create_loans_table(conn)
-        _set_user_version(conn, 1)
-        conn.commit()
-        print("✅ Migration v1 applied.")
-
-    if current < 2:
-        migrate_v2_add_amount_repaid(conn)
-        _set_user_version(conn, 2)
-        conn.commit()
-        print("✅ Migration v2 applied.")
-
-    if current < 3:
-        migrate_v3_add_repayment_schedule(conn)
-        _set_user_version(conn, 3)
-        conn.commit()
-        print("✅ Migration v3 applied.")
-
-    if current < 4:
-        migrate_v4_create_applied_transactions(conn)
-        _set_user_version(conn, 4)
-        conn.commit()
-        print("✅ Migration v4 applied.")
-
-    if current < 5:
-        migrate_v5_add_bank_name(conn)
-        _set_user_version(conn, 5)
-        conn.commit()
-        print("✅ Migration v5 applied.")
-
-    if current < 6:
-        migrate_v6_create_rejected_matches(conn)
-        _set_user_version(conn, 6)
-        conn.commit()
-        print("✅ Migration v6 applied.")
-
-    if current < 7:
-        migrate_v7_create_users_table(conn)
-        _set_user_version(conn, 7)
-        conn.commit()
-        print("✅ Migration v7 applied.")
-
-    if current < 8:
-        migrate_v8_add_user_id_to_loans(conn)
-        _set_user_version(conn, 8)
-        conn.commit()
-        print("✅ Migration v8 applied.")
-
-    if current < 9:
+    for version, fn in MIGRATIONS:
+        if current >= version:
+            continue
         try:
-            migrate_v9_remove_amount_repaid(conn)
-            _set_user_version(conn, 9)
+            fn(conn)
+            _set_user_version(conn, version)
             conn.commit()
-            print("✅ Migration v9 applied.")
-
-            # Verify the migration worked
-            new_version = _get_user_version(conn)
-            print(f"   Database version now: {new_version}")
+            print(f"✅ Migration v{version} applied.")
         except Exception as e:
-            print(f"❌ Migration v9 failed: {e}")
-            import traceback
+            print(f"❌ Migration v{version} failed: {e}")
             traceback.print_exc()
             conn.rollback()
             raise
 
-    if current < 10:
-        try:
-            migrate_v10_passwordless_auth(conn)
-            _set_user_version(conn, 10)
-            conn.commit()
-            print("✅ Migration v10 applied.")
-
-            # Verify the migration worked
-            c = conn.cursor()
-            c.execute("PRAGMA table_info(users)")
-            columns = [col[1] for col in c.fetchall()]
-            print(f"   Users table columns: {columns}")
-            new_version = _get_user_version(conn)
-            print(f"   Database version now: {new_version}")
-        except Exception as e:
-            print(f"❌ Migration v10 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 11:
-        try:
-            migrate_v11_create_pending_matches_table(conn)
-            _set_user_version(conn, 11)
-            conn.commit()
-            print("✅ Migration v11 applied.")
-        except Exception as e:
-            print(f"❌ Migration v11 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 12:
-        try:
-            migrate_v12_add_borrower_access_token(conn)
-            _set_user_version(conn, 12)
-            conn.commit()
-            print("✅ Migration v12 applied.")
-        except Exception as e:
-            print(f"❌ Migration v12 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 13:
-        try:
-            migrate_v13_add_loan_type(conn)
-            _set_user_version(conn, 13)
-            conn.commit()
-            print("✅ Migration v13 applied.")
-        except Exception as e:
-            print(f"❌ Migration v13 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 14:
-        try:
-            migrate_v14_fix_negative_amounts(conn)
-            _set_user_version(conn, 14)
-            conn.commit()
-            print("✅ Migration v14 applied.")
-        except Exception as e:
-            print(f"❌ Migration v14 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 15:
-        try:
-            migrate_v15_create_bank_connections(conn)
-            _set_user_version(conn, 15)
-            conn.commit()
-            print("✅ Migration v15 applied.")
-        except Exception as e:
-            print(f"❌ Migration v15 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 16:
-        try:
-            migrate_v16_add_password_hash(conn)
-            _set_user_version(conn, 16)
-            conn.commit()
-            print("✅ Migration v16 applied.")
-        except Exception as e:
-            print(f"❌ Migration v16 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 17:
-        try:
-            migrate_v17_add_onboarding_completed(conn)
-            _set_user_version(conn, 17)
-            conn.commit()
-            print("✅ Migration v17 applied.")
-        except Exception as e:
-            print(f"❌ Migration v17 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 18:
-        try:
-            migrate_v18_add_email_verification(conn)
-            _set_user_version(conn, 18)
-            conn.commit()
-            print("✅ Migration v18 applied.")
-        except Exception as e:
-            print(f"❌ Migration v18 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 19:
-        try:
-            migrate_v19_add_borrower_notification_preference(conn)
-            _set_user_version(conn, 19)
-            conn.commit()
-            print("✅ Migration v19 applied.")
-        except Exception as e:
-            print(f"❌ Migration v19 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 20:
-        try:
-            migrate_v20_create_events_table(conn)
-            _set_user_version(conn, 20)
-            conn.commit()
-            print("✅ Migration v20 applied.")
-        except Exception as e:
-            print(f"❌ Migration v20 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 21:
-        try:
-            migrate_v21_add_user_roles(conn)
-            _set_user_version(conn, 21)
-            conn.commit()
-            print("✅ Migration v21 applied.")
-        except Exception as e:
-            print(f"❌ Migration v21 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 22:
-        try:
-            migrate_v22_add_subscriptions(conn)
-            _set_user_version(conn, 22)
-            conn.commit()
-            print("✅ Migration v22 applied.")
-        except Exception as e:
-            print(f"❌ Migration v22 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 23:
-        try:
-            migrate_v23_add_encryption_salt(conn)
-            _set_user_version(conn, 23)
-            conn.commit()
-            print("✅ Migration v23 applied.")
-        except Exception as e:
-            print(f"❌ Migration v23 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 24:
-        try:
-            migrate_v24_add_auto_match_tracking(conn)
-            _set_user_version(conn, 24)
-            conn.commit()
-            print("✅ Migration v24 applied.")
-        except Exception as e:
-            print(f"❌ Migration v24 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 25:
-        try:
-            migrate_v25_envelope_encryption(conn)
-            _set_user_version(conn, 25)
-            conn.commit()
-            print("✅ Migration v25 applied.")
-        except Exception as e:
-            print(f"❌ Migration v25 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 26:
-        try:
-            migrate_v26_create_rate_limits(conn)
-            _set_user_version(conn, 26)
-            conn.commit()
-            print("✅ Migration v26 applied.")
-        except Exception as e:
-            print(f"❌ Migration v26 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 27:
-        try:
-            migrate_v27_add_last_login(conn)
-            _set_user_version(conn, 27)
-            conn.commit()
-            print("✅ Migration v27 applied.")
-        except Exception as e:
-            print(f"❌ Migration v27 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 28:
-        try:
-            migrate_v28_master_recovery_key(conn)
-            _set_user_version(conn, 28)
-            conn.commit()
-            print("✅ Migration v28 applied.")
-        except Exception as e:
-            print(f"❌ Migration v28 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 29:
-        try:
-            migrate_v29_create_feedback_table(conn)
-            _set_user_version(conn, 29)
-            conn.commit()
-            print("✅ Migration v29 applied.")
-        except Exception as e:
-            print(f"❌ Migration v29 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    if current < 30:
-        try:
-            migrate_v30_feedback_throttle(conn)
-            _set_user_version(conn, 30)
-            conn.commit()
-            print("✅ Migration v30 applied.")
-        except Exception as e:
-            print(f"❌ Migration v30 failed: {e}")
-            import traceback
-            traceback.print_exc()
-            conn.rollback()
-            raise
-
-    # Ensure all changes are committed
     conn.commit()
-
-    # Final verification
-    final_version = _get_user_version(conn)
-    print(f"🎉 All migrations complete. Database version: {final_version}")
+    print(f"🎉 All migrations complete. Database version: {_get_user_version(conn)}")
 
 
 def migrate_v1_create_loans_table(conn):
@@ -1043,9 +712,9 @@ def migrate_v22_add_subscriptions(conn):
             'price_yearly': 0,
             'stripe_price_id_monthly': None,
             'stripe_price_id_yearly': None,
-            'max_loans': 3,
+            'max_loans': 1,
             'features': {
-                'max_loans': 3,
+                'max_loans': 1,
                 'manual_repayment': True,
                 'csv_import': True,
                 'borrower_portal': True,
@@ -1695,3 +1364,70 @@ def migrate_v30_feedback_throttle(conn):
     """)
     conn.commit()
     print("  Created feedback throttle table with indexes.")
+
+
+def migrate_v31_free_tier_one_loan(conn):
+    """
+    Reduce the Free plan loan limit from 3 to 1.
+    Updates both the max_loans column and the cached value inside features_json.
+    """
+    import json
+
+    c = conn.cursor()
+
+    # Update column
+    c.execute("UPDATE subscription_plans SET max_loans = 1 WHERE tier = 'free'")
+
+    # Update features_json (keep all other features intact)
+    c.execute("SELECT features_json FROM subscription_plans WHERE tier = 'free'")
+    row = c.fetchone()
+    if row and row[0]:
+        features = json.loads(row[0])
+        features['max_loans'] = 1
+        c.execute(
+            "UPDATE subscription_plans SET features_json = ? WHERE tier = 'free'",
+            (json.dumps(features),),
+        )
+
+    conn.commit()
+    print("  Free tier loan limit set to 1.")
+
+
+
+# ---------------------------------------------------------------------------
+# Migration table — add new migrations here as (version, function) tuples.
+# Defined at the bottom of the file so all migrate_vN functions are in scope.
+# ---------------------------------------------------------------------------
+MIGRATIONS = [
+    (1, migrate_v1_create_loans_table),
+    (2, migrate_v2_add_amount_repaid),
+    (3, migrate_v3_add_repayment_schedule),
+    (4, migrate_v4_create_applied_transactions),
+    (5, migrate_v5_add_bank_name),
+    (6, migrate_v6_create_rejected_matches),
+    (7, migrate_v7_create_users_table),
+    (8, migrate_v8_add_user_id_to_loans),
+    (9, migrate_v9_remove_amount_repaid),
+    (10, migrate_v10_passwordless_auth),
+    (11, migrate_v11_create_pending_matches_table),
+    (12, migrate_v12_add_borrower_access_token),
+    (13, migrate_v13_add_loan_type),
+    (14, migrate_v14_fix_negative_amounts),
+    (15, migrate_v15_create_bank_connections),
+    (16, migrate_v16_add_password_hash),
+    (17, migrate_v17_add_onboarding_completed),
+    (18, migrate_v18_add_email_verification),
+    (19, migrate_v19_add_borrower_notification_preference),
+    (20, migrate_v20_create_events_table),
+    (21, migrate_v21_add_user_roles),
+    (22, migrate_v22_add_subscriptions),
+    (23, migrate_v23_add_encryption_salt),
+    (24, migrate_v24_add_auto_match_tracking),
+    (25, migrate_v25_envelope_encryption),
+    (26, migrate_v26_create_rate_limits),
+    (27, migrate_v27_add_last_login),
+    (28, migrate_v28_master_recovery_key),
+    (29, migrate_v29_create_feedback_table),
+    (30, migrate_v30_feedback_throttle),
+    (31, migrate_v31_free_tier_one_loan),
+]

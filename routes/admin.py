@@ -2,31 +2,13 @@
 Admin routes - user management, feedback, analytics, cleanup.
 """
 from flask import Blueprint, render_template, request, session, redirect, url_for, flash, current_app
-from helpers.decorators import admin_required, get_current_user_id
+from helpers.decorators import admin_required
+from helpers.session_helpers import get_current_user_id
+from helpers.events import log_event
 from helpers.db import get_db_connection
 from schemas.feedback import ValidationError
 from services.feedback_service import admin_feedback, admin_feedback_update
 import json
-
-
-# Helper function to log events
-def log_event(event_name, event_data=None, user_id=None):
-    """Log an event to the events table."""
-    if user_id is None:
-        user_id = get_current_user_id()
-
-    conn = get_db_connection()
-    c = conn.cursor()
-
-    event_data_json = json.dumps(event_data) if event_data else '{}'
-
-    c.execute("""
-        INSERT INTO events (user_id, event_name, event_data, created_at)
-        VALUES (?, ?, ?, datetime('now'))
-    """, (user_id, event_name, event_data_json))
-
-    conn.commit()
-    conn.close()
 
 
 # Create blueprint

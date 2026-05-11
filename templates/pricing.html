@@ -347,13 +347,6 @@ h1 {
                     {% else %}
                         <li class="disabled">Transaction export</li>
                     {% endif %}
-
-                    {% if plan.features.bank_api %}
-                        <li>Bank API connectors</li>
-                        <li>Automatic transaction matching</li>
-                    {% else %}
-                        <li class="disabled">Bank API connectors</li>
-                    {% endif %}
                 </ul>
 
                 {% if current_tier %}
@@ -389,7 +382,7 @@ h1 {
 
         <div class="faq-item">
             <h3>What happens if I hit my loan limit?</h3>
-            <p>On the Free plan, you can have up to 3 active loans. If you reach the limit, you'll need to upgrade to Basic (25 loans) or Pro (unlimited) to create more.</p>
+            <p>The Free plan covers a single active loan. If you need to track more, upgrade to Basic (25 loans) or Pro (unlimited).</p>
         </div>
 
         <div class="faq-item">

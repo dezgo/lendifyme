@@ -1,5 +1,7 @@
 """
-Session and user-related helper functions.
+Session and user lookup helpers.
+
+Single source of truth for "given the current session, get X from the user record."
 """
 from flask import session
 from helpers.db import get_db_connection
@@ -8,6 +10,26 @@ from helpers.db import get_db_connection
 def get_current_user_id():
     """Get the current logged-in user's ID from session."""
     return session.get('user_id')
+
+
+def get_user_password_from_session():
+    """Get the user's password from session (needed for decryption)."""
+    return session.get('user_password')
+
+
+def is_user_admin():
+    """Check if current user has admin role."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return False
+
+    conn = get_db_connection()
+    c = conn.cursor()
+    c.execute("SELECT role FROM users WHERE id = ?", (user_id,))
+    result = c.fetchone()
+    conn.close()
+
+    return bool(result and result[0] == 'admin')
 
 
 def is_email_verified():
@@ -22,7 +44,7 @@ def is_email_verified():
     result = c.fetchone()
     conn.close()
 
-    return result and result[0] == 1
+    return bool(result and result[0] == 1)
 
 
 def get_unverified_loan_count():
@@ -53,8 +75,3 @@ def get_user_encryption_salt():
     conn.close()
 
     return result[0] if result else None
-
-
-def get_user_password_from_session():
-    """Get the user's password from session (needed for decryption)."""
-    return session.get('user_password')

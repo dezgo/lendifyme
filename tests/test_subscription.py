@@ -161,31 +161,30 @@ class TestGetUserSubscriptionTier:
 class TestLoanLimits:
     """Tests for check_loan_limit() enforcement."""
 
-    def test_free_user_limited_to_3(self, app):
-        """Free tier users cannot create more than 3 loans."""
+    def test_free_user_limited_to_1(self, app):
+        """Free tier users cannot create more than 1 loan."""
         from services.loans import check_loan_limit
 
         user_id = _create_user(app, tier="free")
 
-        # Insert 3 loans
+        # Insert 1 loan (at limit)
         conn = sqlite3.connect(app.config["DATABASE"])
         c = conn.cursor()
-        for i in range(3):
-            c.execute("""
-                INSERT INTO loans (user_id, borrower, amount, date_borrowed, created_at)
-                VALUES (?, ?, 100, '2026-01-01', datetime('now'))
-            """, (user_id, f"Borrower {i}"))
+        c.execute("""
+            INSERT INTO loans (user_id, borrower, amount, date_borrowed, created_at)
+            VALUES (?, ?, 100, '2026-01-01', datetime('now'))
+        """, (user_id, "Borrower 0"))
         conn.commit()
         conn.close()
 
         with app.app_context():
             current, max_loans, can_create = check_loan_limit(user_id)
-            assert current == 3
-            assert max_loans == 3
+            assert current == 1
+            assert max_loans == 1
             assert can_create is False
 
     def test_free_user_under_limit_can_create(self, app):
-        """Free tier users with <3 loans can create more."""
+        """Free tier users with 0 loans can create one."""
         from services.loans import check_loan_limit
 
         user_id = _create_user(app, tier="free")
@@ -193,11 +192,11 @@ class TestLoanLimits:
         with app.app_context():
             current, max_loans, can_create = check_loan_limit(user_id)
             assert current == 0
-            assert max_loans == 3
+            assert max_loans == 1
             assert can_create is True
 
-    def test_basic_user_can_exceed_3(self, app):
-        """Basic tier users can have more than 3 loans."""
+    def test_basic_user_can_exceed_free_limit(self, app):
+        """Basic tier users can have more than the free limit."""
         from services.loans import check_loan_limit
 
         user_id = _create_user(app, tier="basic")
@@ -243,7 +242,7 @@ class TestLoanLimits:
             assert can_create is True
 
     def test_null_tier_falls_back_to_free_limit(self, app):
-        """BUG FIX: NULL tier should be treated as free (3 loan limit)."""
+        """BUG FIX: NULL tier should be treated as free (1 loan limit)."""
         from services.loans import check_loan_limit
 
         user_id = _create_user(app, tier="free")
@@ -256,7 +255,7 @@ class TestLoanLimits:
 
         with app.app_context():
             current, max_loans, can_create = check_loan_limit(user_id)
-            assert max_loans == 3, f"NULL tier should limit to 3, got {max_loans}"
+            assert max_loans == 1, f"NULL tier should limit to 1, got {max_loans}"
 
 
 # ─── Webhook tests ────────────────────────────────────────────────────────

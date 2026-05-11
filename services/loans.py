@@ -5,33 +5,13 @@ Contains encryption, decryption, and subscription limit checking for loans.
 """
 import json
 import secrets
-from flask import current_app, session
+from flask import current_app
 from helpers.db import get_db_connection
-
-
-def get_current_user_id():
-    """Get current user ID from session."""
-    return session.get('user_id')
-
-
-def get_user_encryption_salt():
-    """Get the encryption salt for the current user."""
-    user_id = get_current_user_id()
-    if not user_id:
-        return None
-
-    conn = get_db_connection()
-    c = conn.cursor()
-    c.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
-    result = c.fetchone()
-    conn.close()
-
-    return result[0] if result else None
-
-
-def get_user_password_from_session():
-    """Get user's password from session (set at login for encryption/decryption)."""
-    return session.get('user_password')
+from helpers.session_helpers import (
+    get_current_user_id,
+    get_user_encryption_salt,
+    get_user_password_from_session,
+)
 
 
 def encrypt_loan_data(loan_data, dek):
@@ -58,40 +38,58 @@ def encrypt_loan_data(loan_data, dek):
     }
 
 
-def decrypt_loan_data(loan_row, dek):
+def decrypt_loan_row(row, dek):
     """
-    Decrypt loan data from database row.
+    Decrypt a loan row that may contain plaintext and/or encrypted columns.
+
+    Works with sqlite3.Row, dict, or anything supporting `key in row.keys()` and
+    `row[key]`. Encrypted columns take precedence; falls back to plaintext if
+    the encrypted variant is missing/empty or no DEK is available.
 
     Args:
-        loan_row: Database row (dict or tuple)
-        dek: Data encryption key (bytes)
+        row: Loan row from a SELECT that includes any subset of the columns:
+             borrower, borrower_encrypted, amount, amount_encrypted, note,
+             note_encrypted, bank_name, bank_name_encrypted, borrower_email,
+             borrower_email_encrypted, repayment_amount,
+             repayment_amount_encrypted, repayment_frequency,
+             repayment_frequency_encrypted.
+        dek: Data encryption key (bytes) or None.
 
     Returns:
-        Dict with decrypted loan data
+        Dict with keys: borrower, amount (float|None), note, bank_name,
+        borrower_email, repayment_amount (float|None), repayment_frequency.
+        Missing columns surface as None.
     """
     from services.encryption import decrypt_field
 
-    # Handle both dict and tuple row formats
-    if isinstance(loan_row, dict):
-        get_field = lambda key: loan_row.get(key)
-    else:
-        # Assume it's a row from c.fetchone() - need column names
-        # This will be handled by the calling code
+    keys = set(row.keys())
+
+    def pick(plain_col, encrypted_col):
+        if encrypted_col in keys:
+            encrypted = row[encrypted_col]
+            if encrypted and dek:
+                return decrypt_field(encrypted, dek)
+        if plain_col in keys:
+            return row[plain_col]
         return None
 
-    try:
-        return {
-            'borrower': decrypt_field(get_field('borrower_encrypted'), dek) if get_field('borrower_encrypted') else get_field('borrower'),
-            'amount': float(decrypt_field(get_field('amount_encrypted'), dek)) if get_field('amount_encrypted') else get_field('amount'),
-            'note': decrypt_field(get_field('note_encrypted'), dek) if get_field('note_encrypted') else get_field('note'),
-            'bank_name': decrypt_field(get_field('bank_name_encrypted'), dek) if get_field('bank_name_encrypted') else get_field('bank_name'),
-            'borrower_email': decrypt_field(get_field('borrower_email_encrypted'), dek) if get_field('borrower_email_encrypted') else get_field('borrower_email'),
-            'repayment_amount': float(decrypt_field(get_field('repayment_amount_encrypted'), dek)) if get_field('repayment_amount_encrypted') else get_field('repayment_amount'),
-            'repayment_frequency': decrypt_field(get_field('repayment_frequency_encrypted'), dek) if get_field('repayment_frequency_encrypted') else get_field('repayment_frequency'),
-        }
-    except Exception as e:
-        current_app.logger.error(f"Failed to decrypt loan data: {e}")
-        return None
+    def to_float(val):
+        if val is None or val == '':
+            return None
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            return None
+
+    return {
+        'borrower': pick('borrower', 'borrower_encrypted'),
+        'amount': to_float(pick('amount', 'amount_encrypted')),
+        'note': pick('note', 'note_encrypted'),
+        'bank_name': pick('bank_name', 'bank_name_encrypted'),
+        'borrower_email': pick('borrower_email', 'borrower_email_encrypted'),
+        'repayment_amount': to_float(pick('repayment_amount', 'repayment_amount_encrypted')),
+        'repayment_frequency': pick('repayment_frequency', 'repayment_frequency_encrypted'),
+    }
 
 
 def get_user_subscription_tier(user_id=None):
@@ -190,13 +188,12 @@ def get_subscription_limits(tier):
     if not result:
         # Fallback defaults
         return {
-            'max_loans': 3,
+            'max_loans': 1,
             'manual_repayment': True,
             'csv_import': True,
             'borrower_portal': True,
             'email_notifications': False,
             'transaction_export': False,
-            'bank_api': False,
             'analytics': False
         }
 
@@ -221,7 +218,7 @@ def check_loan_limit(user_id=None):
         user_id = get_current_user_id()
 
     if not user_id:
-        return (0, 3, False)
+        return (0, 1, False)
 
     # Get user's tier
     tier = get_user_subscription_tier(user_id)
@@ -297,6 +294,33 @@ def is_trial_active(user_id=None):
 def generate_borrower_access_token():
     """Generate a secure random token for borrower access."""
     return secrets.token_urlsafe(32)
+
+
+def decrypt_dek_for_loan(encrypted_dek, encryption_salt, user_password):
+    """
+    Pure function: decrypt a loan's DEK given its encrypted blob, the user's
+    encryption_salt, and their password. No DB access.
+
+    Handles the MIGRATION_PENDING placeholder format by stripping the prefix.
+    (Auto-finalization into the real encrypted form still happens lazily in
+    get_loan_dek for single-loan callers.)
+
+    Returns:
+        bytes: The DEK, or None if any input is missing or decryption fails.
+    """
+    from services.encryption import decrypt_dek_with_password
+
+    if not encrypted_dek or not encryption_salt or not user_password:
+        return None
+
+    if encrypted_dek.startswith("MIGRATION_PENDING:"):
+        return encrypted_dek.replace("MIGRATION_PENDING:", "").encode('utf-8')
+
+    try:
+        return decrypt_dek_with_password(encrypted_dek, user_password, encryption_salt)
+    except Exception as e:
+        current_app.logger.error(f"Failed to decrypt DEK: {e}")
+        return None
 
 
 def get_loan_dek(loan_id, user_password=None, borrower_token=None):
@@ -393,67 +417,58 @@ def get_loan_dek(loan_id, user_password=None, borrower_token=None):
 
 
 def decrypt_loans(cursor, rows, user_password):
-    """Return a list of decrypted loan tuples matching the original render shape."""
-    from services.encryption import decrypt_field
+    """Return a list of decrypted loan tuples matching the original render shape.
+
+    Performs the salt lookup once and the amount_repaid SUMs in a single query
+    instead of one-per-loan, so the dashboard scales with O(1) queries
+    regardless of how many loans the user has.
+    """
+    if not rows:
+        return []
+
+    user_id = get_current_user_id()
+
+    # Fetch encryption_salt once
+    cursor.execute("SELECT encryption_salt FROM users WHERE id = ?", (user_id,))
+    salt_row = cursor.fetchone()
+    encryption_salt = salt_row[0] if salt_row else None
+
+    # Batch-fetch amount_repaid for all loans in one query
+    loan_ids = [row["id"] for row in rows]
+    placeholders = ",".join("?" for _ in loan_ids)
+    cursor.execute(
+        f"SELECT loan_id, COALESCE(SUM(amount), 0) "
+        f"FROM applied_transactions WHERE loan_id IN ({placeholders}) "
+        f"GROUP BY loan_id",
+        loan_ids,
+    )
+    repaid_by_loan = {lid: total for lid, total in cursor.fetchall()}
 
     loans = []
     for row in rows:
         loan_id = row["id"]
-        dek = get_loan_dek(loan_id, user_password=user_password)
+        dek = decrypt_dek_for_loan(row["encrypted_dek"], encryption_salt, user_password)
         if not dek:
             current_app.logger.error("Failed to decrypt DEK for loan %s", loan_id)
             continue
 
-        borrower = decrypt_field(row["borrower_encrypted"], dek) if row["borrower_encrypted"] else row["borrower"]
-        amount = (
-            float(decrypt_field(row["amount_encrypted"], dek))
-            if row["amount_encrypted"]
-            else row["amount"]
-        )
-        note = decrypt_field(row["note_encrypted"], dek) if row["note_encrypted"] else row["note"]
-        bank_name = (
-            decrypt_field(row["bank_name_encrypted"], dek)
-            if row["bank_name_encrypted"]
-            else row["bank_name"]
-        )
-        borrower_email = (
-            decrypt_field(row["borrower_email_encrypted"], dek)
-            if row["borrower_email_encrypted"]
-            else row["borrower_email"]
-        )
-
-        if row["repayment_amount_encrypted"]:
-            repayment_amount = float(decrypt_field(row["repayment_amount_encrypted"], dek))
-        else:
-            repayment_amount = row["repayment_amount"]
-
-        repayment_frequency = (
-            decrypt_field(row["repayment_frequency_encrypted"], dek)
-            if row["repayment_frequency_encrypted"]
-            else row["repayment_frequency"]
-        )
-
-        # amount_repaid from applied_transactions
-        cursor.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM applied_transactions WHERE loan_id = ?",
-            (loan_id,),
-        )
-        amount_repaid = cursor.fetchone()[0]
+        fields = decrypt_loan_row(row, dek)
+        amount_repaid = repaid_by_loan.get(loan_id, 0)
 
         loans.append(
             (
                 loan_id,
-                borrower,
-                amount,
-                note,
+                fields['borrower'],
+                fields['amount'],
+                fields['note'],
                 row["date_borrowed"],
                 amount_repaid,
-                repayment_amount,
-                repayment_frequency,
-                bank_name,
+                fields['repayment_amount'],
+                fields['repayment_frequency'],
+                fields['bank_name'],
                 row["created_at"],
                 row["borrower_access_token"],
-                borrower_email,
+                fields['borrower_email'],
                 row["loan_type"],
             )
         )

@@ -85,7 +85,7 @@ pip install -r requirements.txt
 - Email notifications sent automatically when payments are applied (if borrower email is configured)
 
 ### Transaction Matching Routes
-- `/match` (GET, POST) - Upload CSV or select API connector, fetch transactions
+- `/match` (GET, POST) - Upload bank-statement CSV and find suggested matches
 - `/match/review` (GET) - Review pending matches from session
 - `/apply-match` (POST) - Apply a match (update loan, record in applied_transactions)
 - `/reject-match` (POST) - Reject a match (record in rejected_matches for this loan)
@@ -153,10 +153,6 @@ The application uses `python-dotenv` to load environment variables from `.env` f
 Required environment variables:
 - `SECRET_KEY` - Flask session secret (defaults to 'dev-secret-key-change-in-production' if not set)
 
-Optional bank API credentials (required only if using respective connector):
-- `UP_BANK_API_KEY` - Up Bank API token (get from https://api.up.com.au/getting_started)
-- Additional banks can be added by extending the connector registry
-
 Optional email configuration (choose one provider):
 - **Resend (Recommended):**
   - `RESEND_API_KEY` - Resend API key (get from https://resend.com/api-keys)
@@ -181,39 +177,20 @@ Optional email configuration (choose one provider):
 **Setup:**
 1. Copy `.env.example` to `.env`
 2. Set `SECRET_KEY` to a random value
-3. Add bank API keys for any connectors you want to use
-4. Add email credentials (Resend recommended - easiest setup)
-5. Run `pip install -r requirements.txt`
-6. Run `python app.py`
+3. Add email credentials (Resend recommended - easiest setup)
+4. Run `pip install -r requirements.txt`
+5. Run `python app.py`
 
-### Email Service
-The application uses a centralized email service (`services/email_service.py`) that abstracts all email complexity.
+### Email Sending
+All email sending lives in `services/email_sender.py`. Each notification has its
+own function — `send_magic_link_email`, `send_verification_email`,
+`send_borrower_invite_email`, `send_payment_notification_email`,
+`send_support_request_email`. Callers pass the fully built URL (e.g. the magic
+link) and recipient details.
 
-**Usage Pattern:**
-```python
-from services.email_service import email_service
-
-# Send support request notification
-email_service.send_support_request(user_id, user_email)
-
-# Send magic link
-email_service.send_magic_link(email, name, token)
-
-# Send borrower invite
-email_service.send_borrower_invite(borrower_email, borrower_name, portal_token, lender_name)
-
-# Send payment notification
-email_service.send_payment_notification(
-    borrower_email, borrower_name, portal_token, lender_name,
-    payment_amount, payment_date, payment_description, new_balance, original_amount
-)
-```
-
-**How It Works:**
-- Email service handles environment variables internally (APP_URL, ADMIN_EMAIL, etc.)
-- Tries providers in order: Resend → Mailgun → SMTP
-- All logging and error handling is centralized
-- Callers don't need to know about email infrastructure
+Each function tries providers in order: **Resend → Mailgun → SMTP**. On
+failure the function returns `(False, error_message)` so the caller can
+decide whether to log/flash/fall back.
 
 **Email Providers (in priority order):**
 1. **Resend API** (recommended) - Set `RESEND_API_KEY` and `MAIL_DEFAULT_SENDER`
@@ -227,77 +204,10 @@ email_service.send_payment_notification(
    - Works with Gmail, Outlook, etc.
    - Gmail requires app password: https://myaccount.google.com/apppasswords
 
-## Bank Connector Architecture
-
-### Overview
-The application uses a plugin-based connector architecture (`services/connectors/`) to support multiple banks and import methods. This makes it easy to add new bank integrations.
-
-### Connector Interface
-All connectors implement the `BankConnector` abstract base class (`services/connectors/base.py`):
-
-**Key Methods:**
-- `get_transactions(since_date, limit)` - Fetch transactions from the source
-- `test_connection()` - Verify API credentials/connectivity
-- `get_account_name()` - Return human-readable account identifier
-- `connector_name` - Property returning connector display name
-
-**Transaction Model:**
-Connectors return standardized `Transaction` objects with:
-- `date` (YYYY-MM-DD format)
-- `description` (transaction memo/description)
-- `amount` (float, positive for incoming, negative for outgoing)
-- `raw_data` (dict with full original API response - preserved for detailed matching UI)
-
-The `raw_data` field stores the complete API response, which varies by connector:
-- **Up Bank**: Includes message, rawText, settledAt, transactionType, status, category, tags, roundUp, cashback, etc.
-- **CSV**: Stores the original CSV row data
-- This data is displayed in the match review UI to help users make informed decisions
-
-### Available Connectors
-
-**Up Bank Connector** (`services/connectors/up_bank.py`):
-- Uses Up Bank API v1 (https://api.up.com.au/api/v1)
-- Requires `UP_BANK_API_KEY` in .env file
-- Supports pagination and date filtering
-- Automatically converts amounts from cents to dollars
-- Default fetch: last 30 days, max 100 transactions per page
-
-**CSV Connector** (`services/connectors/csv_connector.py`):
-- Manual upload fallback for any bank
-- Reuses existing CSV parser from `transaction_matcher.py`
-- No API key required
-
-### Adding New Connectors
-
-1. Create new connector class in `services/connectors/your_bank.py`
-2. Inherit from `BankConnector`
-3. Implement required methods
-4. Register in `ConnectorRegistry` (`services/connectors/registry.py`)
-5. Add environment variable handling in `create_from_env()`
-
-Example:
-```python
-class YourBankConnector(BankConnector):
-    @property
-    def connector_name(self) -> str:
-        return "Your Bank"
-
-    def get_transactions(self, since_date, limit):
-        # Fetch from API
-        # Return List[Transaction]
-        pass
-```
-
-### Connector Registry
-`ConnectorRegistry` manages all available connectors:
-- `get_available_connectors()` - Returns dict of {connector_id: display_name}
-- `create_from_env(connector_id)` - Instantiates connector with credentials from .env
-- `register_connector()` - Register custom connectors at runtime
-
 ## Transaction Matching Feature
 
 ### Overview
-The transaction matching system (`services/transaction_matcher.py`) helps users import existing bank transactions and automatically match them to loan repayments. Works with any connector source.
+The transaction matching system (`services/transaction_matcher.py`) lets users paste CSV exports from their bank and automatically match transactions to loan repayments.
 
 ### Matching Algorithm
 The matcher uses a confidence-based scoring system (0-100%) that considers:
@@ -329,37 +239,16 @@ Amounts are cleaned of currency symbols ($) and thousand separators (,) before p
 
 ### Workflow
 
-**CSV Import:**
 1. User visits `/match` route
-2. User selects "Manual CSV Upload" option
-3. User pastes CSV bank transaction data
-4. System parses transactions and queries all unpaid/partially-paid loans
-5. Matching algorithm generates suggested matches stored in session
-6. User reviews matches on `/match` review page
-7. User applies matches via `/apply-match` route, which updates `amount_repaid` in database
-
-**API Import (e.g., Up Bank):**
-1. User visits `/match` route
-2. User selects bank connector (e.g., "Up Bank")
-3. User selects date range (7/30/60/90 days, or custom date)
-4. System fetches transactions from bank API since specified date
-5. System filters to incoming transactions only (positive amounts)
-6. Matching algorithm generates suggested matches
-7. System filters out:
+2. User pastes CSV bank transaction data
+3. System parses transactions and queries all unpaid/partially-paid loans
+4. Matching algorithm generates suggested matches
+5. System filters out:
    - Transactions already applied (any loan)
    - Transactions rejected for this specific loan
-8. Matches stored in session, redirects to `/match/review`
-9. User reviews matches on review page
-10. For each match, user can:
-    - **Apply**: Records in `applied_transactions`, updates `amount_repaid`, removes from list
-    - **Not a Match**: Records in `rejected_matches` for this loan, removes from list
-11. Page stays on review with remaining matches after each action
-12. Re-importing same transactions won't show applied or rejected ones
-
-**Date Range Options:**
-- Preset ranges: 7, 30, 60, or 90 days
-- Custom date: User can select any start date
-- Default: 30 days (if not specified)
-
-### Session Storage
-Pending matches are stored in Flask session to allow multi-step review process without database persistence until confirmation.
+6. Matches are stored in the `pending_matches_data` DB table, keyed by a session token; redirects to `/match/review`
+7. User reviews matches on the review page
+8. For each match the user can:
+   - **Apply**: records in `applied_transactions`, updates `amount_repaid`, removes from list
+   - **Not a Match**: records in `rejected_matches` for this loan, removes from list
+9. Re-importing the same transactions won't show applied or rejected ones

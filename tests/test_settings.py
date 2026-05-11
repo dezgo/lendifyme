@@ -181,37 +181,6 @@ class TestPasswordManagement:
         assert b'too common' in response.data or b'compromised' in response.data
 
 
-class TestBankSettings:
-    """Test bank connection settings."""
-
-    def test_banks_page_requires_login(self, client):
-        """Test that bank settings require login."""
-        response = client.get('/settings/banks', follow_redirects=False)
-
-        assert response.status_code == 302
-        assert '/login' in response.location
-
-    def test_banks_page_loads(self, logged_in_client):
-        """Test that bank settings page loads."""
-        response = logged_in_client.get('/settings/banks')
-
-        assert response.status_code == 200
-
-    def test_banks_add_page_requires_login(self, client):
-        """Test that add bank page requires login."""
-        response = client.get('/settings/banks/add', follow_redirects=False)
-
-        assert response.status_code == 302
-        assert '/login' in response.location
-
-    def test_banks_add_page_loads(self, logged_in_client):
-        """Test that add bank page loads."""
-        response = logged_in_client.get('/settings/banks/add')
-
-        # Should load or redirect to password setup
-        assert response.status_code in [200, 302]
-
-
 class TestRecoverySettings:
     """Test recovery code management."""
 
