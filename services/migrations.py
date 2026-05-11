@@ -1438,6 +1438,37 @@ def migrate_v32_null_plaintext_loan_columns(conn):
     print(f"  Nulled {total} plaintext column value(s) on loans.")
 
 
+def migrate_v33_drop_abandoned_encrypted_columns(conn):
+    """
+    Drop encrypted columns from applied_transactions, rejected_matches, and
+    pending_matches_data. v25 added them in preparation for full envelope
+    encryption of transaction data, but no write path was ever updated to
+    populate them. All reads have always returned the plaintext column
+    anyway, so the encrypted twins are dead schema. Removing them clears the
+    way to simplify the transaction-decrypt code in loan_routes.py.
+
+    Idempotent: each DROP is guarded by a PRAGMA check.
+    """
+    c = conn.cursor()
+
+    columns_to_drop = [
+        ('applied_transactions', 'description_encrypted'),
+        ('applied_transactions', 'amount_encrypted'),
+        ('rejected_matches', 'description_encrypted'),
+        ('rejected_matches', 'amount_encrypted'),
+        ('pending_matches_data', 'matches_json_encrypted'),
+        ('pending_matches_data', 'context_transactions_json_encrypted'),
+    ]
+
+    for table, column in columns_to_drop:
+        c.execute(f"PRAGMA table_info({table})")
+        existing = [row[1] for row in c.fetchall()]
+        if column in existing:
+            c.execute(f"ALTER TABLE {table} DROP COLUMN {column}")
+            print(f"  Dropped {table}.{column}")
+
+    conn.commit()
+
 
 # ---------------------------------------------------------------------------
 # Migration table — add new migrations here as (version, function) tuples.
@@ -1476,4 +1507,5 @@ MIGRATIONS = [
     (30, migrate_v30_feedback_throttle),
     (31, migrate_v31_free_tier_one_loan),
     (32, migrate_v32_null_plaintext_loan_columns),
+    (33, migrate_v33_drop_abandoned_encrypted_columns),
 ]
