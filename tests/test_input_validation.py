@@ -398,15 +398,6 @@ not-a-date,Payment,50.00"""
 
         assert response.status_code == 200
 
-    def test_match_with_invalid_connection_id(self, logged_in_client):
-        """Test that invalid connection IDs are handled."""
-        response = logged_in_client.post('/match', data={
-            'import_source': 'abc'  # Non-numeric connection ID
-        }, follow_redirects=True)
-
-        assert response.status_code == 200
-
-
 class TestAuthenticationInputValidation:
     """Test input validation for authentication."""
 

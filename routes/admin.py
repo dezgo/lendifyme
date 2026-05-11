@@ -142,7 +142,6 @@ def admin_delete_user(user_id):
     c.execute("DELETE FROM loans WHERE user_id = ?", (user_id,))
 
     # Delete other user-related data
-    c.execute("DELETE FROM bank_connections WHERE user_id = ?", (user_id,))
     c.execute("DELETE FROM pending_matches_data WHERE user_id = ?", (user_id,))
     c.execute("DELETE FROM passkeys WHERE user_id = ?", (user_id,))
     c.execute("DELETE FROM magic_links WHERE user_id = ?", (user_id,))
@@ -214,7 +213,6 @@ def admin_cleanup_inactive():
     if not dry_run:
         for user_id, email, created_at, last_login_at, email_verified in candidates:
             # Delete all user-related data
-            c.execute("DELETE FROM bank_connections WHERE user_id = ?", (user_id,))
             c.execute("DELETE FROM pending_matches_data WHERE user_id = ?", (user_id,))
             c.execute("DELETE FROM passkeys WHERE user_id = ?", (user_id,))
             c.execute("DELETE FROM magic_links WHERE user_id = ?", (user_id,))

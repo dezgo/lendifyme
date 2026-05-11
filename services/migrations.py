@@ -1470,6 +1470,45 @@ def migrate_v33_drop_abandoned_encrypted_columns(conn):
     conn.commit()
 
 
+def migrate_v34_drop_bank_connection_schema(conn):
+    """
+    Drop residual schema from the removed bank-connector feature:
+      - bank_connections table (+ its indexes)
+      - applied_transactions.auto_applied / confidence_score / connection_id
+        (+ their index)
+
+    Idempotent: each DROP is guarded by existence checks.
+    """
+    c = conn.cursor()
+
+    # Drop indexes that reference columns we're about to remove.
+    # SQLite refuses to drop a column that's part of an index.
+    indexes_to_drop = [
+        'idx_applied_transactions_auto_applied',
+        'idx_bank_connections_user',
+        'idx_bank_connections_active',
+    ]
+    for index_name in indexes_to_drop:
+        c.execute(f"DROP INDEX IF EXISTS {index_name}")
+
+    # Drop bank_connections table if it exists
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='bank_connections'")
+    if c.fetchone():
+        c.execute("DROP TABLE bank_connections")
+        print("  Dropped bank_connections table.")
+
+    # Drop auto-sync columns from applied_transactions
+    columns_to_drop = ['auto_applied', 'confidence_score', 'connection_id']
+    c.execute("PRAGMA table_info(applied_transactions)")
+    existing = {row[1] for row in c.fetchall()}
+    for column in columns_to_drop:
+        if column in existing:
+            c.execute(f"ALTER TABLE applied_transactions DROP COLUMN {column}")
+            print(f"  Dropped applied_transactions.{column}")
+
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Migration table — add new migrations here as (version, function) tuples.
 # Defined at the bottom of the file so all migrate_vN functions are in scope.
@@ -1508,4 +1547,5 @@ MIGRATIONS = [
     (31, migrate_v31_free_tier_one_loan),
     (32, migrate_v32_null_plaintext_loan_columns),
     (33, migrate_v33_drop_abandoned_encrypted_columns),
+    (34, migrate_v34_drop_bank_connection_schema),
 ]

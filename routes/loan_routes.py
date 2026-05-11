@@ -255,7 +255,7 @@ def loan_transactions(loan_id):
     loan = (loan_row['id'], fields['borrower'], amount, loan_row['date_borrowed'], amount_repaid, fields['bank_name'], fields['note'])
 
     c.execute("""
-        SELECT id, date, description, amount, applied_at, auto_applied, confidence_score
+        SELECT id, date, description, amount, applied_at
         FROM applied_transactions
         WHERE loan_id = ?
         ORDER BY date DESC
@@ -271,8 +271,6 @@ def loan_transactions(loan_id):
             row['description'],
             float(row['amount']) if row['amount'] is not None else 0.0,
             row['applied_at'],
-            row['auto_applied'],
-            row['confidence_score'],
         )
         for row in transaction_rows
     ]
