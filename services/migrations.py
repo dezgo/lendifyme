@@ -1509,6 +1509,54 @@ def migrate_v34_drop_bank_connection_schema(conn):
     conn.commit()
 
 
+def migrate_v35_create_support_requests(conn):
+    """
+    Migration v35: Create support_requests table for the async support form.
+
+    Users submit a written support request (subject + message); it's stored here
+    and emailed to the admin, who replies by email. The stored row also lets the
+    admin re-open a live screen-share session for a request (opportunistic live).
+
+    Table: support_requests
+    - id: Primary key
+    - user_id: Foreign key to users table (NULL if somehow anonymous)
+    - user_email: Email of requester (for context / reply-to)
+    - subject: Optional short subject line
+    - message: The support request body (required)
+    - page_url: Page the user was on when they opened support (optional)
+    - user_agent: Browser user agent string (optional)
+    - ip_address: Requester IP (optional)
+    - status: new | replied | resolved | closed
+    - created_at: Timestamp
+    - admin_notes: Notes from admin handling the request
+    """
+    c = conn.cursor()
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS support_requests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            user_email TEXT,
+            subject TEXT,
+            message TEXT NOT NULL,
+            page_url TEXT,
+            user_agent TEXT,
+            ip_address TEXT,
+            status TEXT DEFAULT 'new',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            admin_notes TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    c.execute("CREATE INDEX IF NOT EXISTS idx_support_requests_status ON support_requests(status)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_support_requests_user ON support_requests(user_id)")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_support_requests_created ON support_requests(created_at)")
+
+    conn.commit()
+    print("  Created support_requests table with indexes.")
+
+
 # ---------------------------------------------------------------------------
 # Migration table — add new migrations here as (version, function) tuples.
 # Defined at the bottom of the file so all migrate_vN functions are in scope.
@@ -1548,4 +1596,5 @@ MIGRATIONS = [
     (32, migrate_v32_null_plaintext_loan_columns),
     (33, migrate_v33_drop_abandoned_encrypted_columns),
     (34, migrate_v34_drop_bank_connection_schema),
+    (35, migrate_v35_create_support_requests),
 ]

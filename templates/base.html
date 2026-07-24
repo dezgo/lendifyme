@@ -484,19 +484,6 @@
         })();
     </script>
 
-    <script>
-        // Hide "Get Support" link if we're inside the support iframe
-        if (window.self !== window.top) {
-            // We're in an iframe
-            document.addEventListener('DOMContentLoaded', function() {
-                const supportLink = document.getElementById('support-link');
-                if (supportLink) {
-                    supportLink.style.display = 'none';
-                }
-            });
-        }
-    </script>
-
     <script defer src="{{ url_for('static', filename='js/app.js', v=1) }}"></script>
 
     <script>

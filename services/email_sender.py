@@ -10,7 +10,8 @@ logger = logging.getLogger(__name__)
 
 
 def _send_via_resend(sender_email: str, sender_name: str, to_email: str, to_name: Optional[str],
-                     subject: str, html_body: str, text_body: str) -> tuple[bool, str]:
+                     subject: str, html_body: str, text_body: str,
+                     reply_to: Optional[str] = None) -> tuple[bool, str]:
     """
     Send email via Resend API.
 
@@ -25,6 +26,16 @@ def _send_via_resend(sender_email: str, sender_name: str, to_email: str, to_name
     logger.info(f"   From: {sender_name} <{sender_email}>")
     logger.info(f"   To: {to_email}")
 
+    payload = {
+        "from": f"{sender_name} <{sender_email}>",
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+        "text": text_body,
+    }
+    if reply_to:
+        payload["reply_to"] = reply_to
+
     try:
         response = requests.post(
             "https://api.resend.com/emails",
@@ -32,13 +43,7 @@ def _send_via_resend(sender_email: str, sender_name: str, to_email: str, to_name
                 "Authorization": f"Bearer {resend_api_key}",
                 "Content-Type": "application/json"
             },
-            json={
-                "from": f"{sender_name} <{sender_email}>",
-                "to": [to_email],
-                "subject": subject,
-                "html": html_body,
-                "text": text_body
-            },
+            json=payload,
             timeout=10
         )
 
@@ -592,15 +597,29 @@ LendifyMe - Simple Loan Tracking
         return False, f"Failed to send email: {str(e)}"
 
 
-def send_support_request_email(admin_email: str, user_email: str, user_id: int, app_url: str) -> tuple[bool, str]:
+def send_support_request_email(
+    admin_email: str,
+    user_email: str,
+    user_id: int,
+    app_url: str,
+    subject: Optional[str] = None,
+    message: Optional[str] = None,
+    request_id: Optional[int] = None,
+) -> tuple[bool, str]:
     """
-    Send support request notification email to admin.
+    Send a support request notification email to the admin.
+
+    The email carries the user's written request and sets Reply-To to the user's
+    address, so the admin can simply hit reply to respond directly.
 
     Args:
         admin_email: Admin's email address
-        user_email: User requesting support
+        user_email: User requesting support (used as Reply-To)
         user_id: User's ID
         app_url: Application base URL
+        subject: Optional subject line the user provided
+        message: Optional support request body the user wrote
+        request_id: Optional support_requests row id (for reference)
 
     Returns:
         tuple: (success: bool, message: str)
@@ -612,17 +631,29 @@ def send_support_request_email(admin_email: str, user_email: str, user_id: int, 
     sender_email = os.getenv('MAIL_DEFAULT_SENDER', f'postmaster@{mailgun_domain}' if mailgun_domain else 'noreply@lendifyme.app')
     sender_name = os.getenv('MAIL_SENDER_NAME', 'LendifyMe')
 
-    subject = "🆘 New Support Request - LendifyMe"
+    reply_to = user_email or None
+    user_subject = (subject or "").strip() or "(no subject)"
+    user_message = (message or "").strip() or "(no message provided)"
 
-    text_body = f"""A user has requested support on LendifyMe!
+    email_subject = f"🆘 Support Request from {user_email or 'a user'} - LendifyMe"
 
-User: {user_email}
-User ID: {user_id}
+    text_body = f"""New support request on LendifyMe.
+
+From: {user_email} (User #{user_id})
 Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Subject: {user_subject}
 
-Go to the support dashboard to help them:
-{app_url}/admin/support
+Message:
+{user_message}
+
+---
+Just reply to this email to respond to {user_email} directly.
+Manage requests: {app_url}/admin/support
 """
+
+    import html as _html
+    safe_message = _html.escape(user_message).replace("\n", "<br>")
+    safe_subject = _html.escape(user_subject)
 
     html_body = f"""
 <!DOCTYPE html>
@@ -637,17 +668,15 @@ Go to the support dashboard to help them:
             <h1 style="margin: 0; font-size: 24px;">🆘 New Support Request</h1>
         </div>
 
-        <p style="font-size: 16px; margin-bottom: 20px;">A user needs your help on LendifyMe!</p>
-
         <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
             <table style="width: 100%; border-collapse: collapse;">
                 <tr style="border-bottom: 1px solid #dee2e6;">
-                    <td style="padding: 10px 0; color: #6c757d; font-size: 14px; font-weight: bold;">User</td>
-                    <td style="padding: 10px 0; text-align: right;">{user_email}</td>
+                    <td style="padding: 10px 0; color: #6c757d; font-size: 14px; font-weight: bold;">From</td>
+                    <td style="padding: 10px 0; text-align: right;">{user_email} (#{user_id})</td>
                 </tr>
                 <tr style="border-bottom: 1px solid #dee2e6;">
-                    <td style="padding: 10px 0; color: #6c757d; font-size: 14px; font-weight: bold;">User ID</td>
-                    <td style="padding: 10px 0; text-align: right;">#{user_id}</td>
+                    <td style="padding: 10px 0; color: #6c757d; font-size: 14px; font-weight: bold;">Subject</td>
+                    <td style="padding: 10px 0; text-align: right;">{safe_subject}</td>
                 </tr>
                 <tr>
                     <td style="padding: 10px 0; color: #6c757d; font-size: 14px; font-weight: bold;">Time</td>
@@ -656,15 +685,20 @@ Go to the support dashboard to help them:
             </table>
         </div>
 
-        <div style="text-align: center; margin: 30px 0;">
-            <a href="{app_url}/admin/support" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">
-                Go to Support Dashboard
-            </a>
+        <div style="background: #fff; border: 1px solid #dee2e6; padding: 20px; border-radius: 8px; margin: 20px 0;">
+            <p style="margin: 0 0 8px 0; color: #6c757d; font-size: 13px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.5px;">Message</p>
+            <p style="margin: 0; color: #212529; font-size: 15px;">{safe_message}</p>
         </div>
 
-        <p style="color: #6c757d; font-size: 12px; text-align: center; margin-top: 30px;">
-            This email was sent automatically when a user requested live support.
+        <p style="font-size: 14px; color: #212529;">
+            Just <strong>reply to this email</strong> to respond to {user_email} directly.
         </p>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{app_url}/admin/support" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">
+                Manage Support Requests
+            </a>
+        </div>
     </div>
 </body>
 </html>
@@ -676,9 +710,10 @@ Go to the support dashboard to help them:
         sender_name=sender_name,
         to_email=admin_email,
         to_name=None,
-        subject=subject,
+        subject=email_subject,
         html_body=html_body,
-        text_body=text_body
+        text_body=text_body,
+        reply_to=reply_to,
     )
     if resend_result[0]:  # Success
         return resend_result
@@ -688,16 +723,20 @@ Go to the support dashboard to help them:
         logger.info(f"📧 Sending support request notification via Mailgun to {admin_email}")
 
         try:
+            mailgun_data = {
+                "from": f"{sender_name} <{sender_email}>",
+                "to": admin_email,
+                "subject": email_subject,
+                "text": text_body,
+                "html": html_body,
+            }
+            if reply_to:
+                mailgun_data["h:Reply-To"] = reply_to
+
             response = requests.post(
                 f"https://api.mailgun.net/v3/{mailgun_domain}/messages",
                 auth=("api", mailgun_api_key),
-                data={
-                    "from": f"{sender_name} <{sender_email}>",
-                    "to": admin_email,
-                    "subject": subject,
-                    "text": text_body,
-                    "html": html_body
-                },
+                data=mailgun_data,
                 timeout=10
             )
 
@@ -721,11 +760,12 @@ Go to the support dashboard to help them:
 
     try:
         msg = Message(
-            subject=subject,
+            subject=email_subject,
             sender=(sender_name, sender_email),
             recipients=[admin_email],
             body=text_body,
-            html=html_body
+            html=html_body,
+            reply_to=reply_to,
         )
 
         current_app.extensions['mail'].send(msg)

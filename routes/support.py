@@ -1,7 +1,25 @@
 """
-Support routes - Remote screen sharing support for users and agents.
+Support routes.
+
+The front door is an async support form (`GET/POST /support`): the user writes a
+request, we store it and email the admin, who replies by email. No live agent is
+promised, so the user never waits on a spinner.
+
+The Socket.IO / WebRTC screen-share machinery below is retained for
+*opportunistic* live support — the admin re-opening a session from a stored
+request when the timing happens to work. It is no longer auto-triggered by the
+user landing on the support page.
 """
-from flask import Blueprint, render_template, session, redirect, url_for, flash, request as flask_request
+from flask import (
+    Blueprint,
+    render_template,
+    session,
+    redirect,
+    url_for,
+    flash,
+    request,
+    request as flask_request,
+)
 from flask_socketio import emit, join_room, leave_room
 from helpers.decorators import login_required, admin_required
 from datetime import datetime
@@ -14,20 +32,76 @@ support_bp = Blueprint('support', __name__)
 active_sessions = {}
 
 
-@support_bp.route("/support")
+@support_bp.route("/support", methods=["GET", "POST"])
 @login_required
 def user_support():
-    """User support page - request help and share screen."""
-    user_id = session.get('user_id')
+    """Async support page: show the request form (GET) and handle it (POST)."""
+    if request.method == "POST":
+        return _handle_support_submit()
 
-    # Check if user already has an active session
-    existing_session = active_sessions.get(user_id)
+    return render_template("support.html")
 
-    return render_template(
-        "support.html",
-        user_id=user_id,
-        existing_session=existing_session
+
+def _handle_support_submit():
+    """Validate, store, and email a written support request."""
+    from flask import current_app
+    import os
+
+    from schemas.support import validate_support_input, ValidationError
+    from services.support_service import submit_support_request
+
+    ip_addr = (flask_request.headers.get("X-Forwarded-For") or flask_request.remote_addr or "").split(",")[0].strip()
+    user_agent = flask_request.headers.get("User-Agent")
+
+    try:
+        data = validate_support_input(
+            subject=flask_request.form.get("subject"),
+            message=flask_request.form.get("message"),
+            page_url=flask_request.form.get("page_url"),
+            user_id=session.get("user_id"),
+            user_email=session.get("user_email"),
+            ip_addr=ip_addr,
+            user_agent=user_agent,
+        )
+    except ValidationError as e:
+        flash(str(e), "error")
+        return redirect(url_for("support.user_support"))
+
+    try:
+        request_id, _ = submit_support_request(data)
+    except ValidationError as e:
+        flash(str(e), "error")
+        return redirect(url_for("support.user_support"))
+
+    # Notify the admin by email (best-effort — a delivery hiccup shouldn't lose
+    # the request, which is already safely stored).
+    try:
+        admin_email = os.getenv("ADMIN_EMAIL")
+        if admin_email:
+            from services.email_sender import send_support_request_email
+            app_url = os.getenv("APP_URL", "http://localhost:5000")
+            success, message = send_support_request_email(
+                admin_email=admin_email,
+                user_email=data.user_email or "",
+                user_id=data.user_id,
+                app_url=app_url,
+                subject=data.subject,
+                message=data.message,
+                request_id=request_id,
+            )
+            if not success:
+                current_app.logger.warning(f"Failed to send support email: {message}")
+        else:
+            current_app.logger.warning("ADMIN_EMAIL not configured, cannot send support notification")
+    except Exception:
+        current_app.logger.exception("Failed to send support request email")
+
+    flash(
+        "Thanks — your request has been sent. Derek will get back to you by email, "
+        "usually within a day.",
+        "success",
     )
+    return redirect(url_for("dashboard.index"))
 
 
 @support_bp.route("/admin/support")
