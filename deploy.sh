@@ -18,18 +18,16 @@ echo "Activating virtual environment and installing requirements..."
 # Make sure instance dir exists for SQLite file
 mkdir -p "$APP_DIR/instance"
 
+echo "Running database migrations (flask init-db)..."
+# Run as derek while the tree is derek-owned (the chown near the top); the
+# chown back to www-data below hands the updated DB to the service account.
+# Runs without sudo so the automated (non-interactive) deploy never needs a
+# password. Env vars (ENCRYPTION_KEY, STRIPE_SECRET_KEY, etc.) are loaded by
+# python-dotenv from /var/www/lendifyme/.env at app startup.
+PYTHONPATH="$APP_DIR" FLASK_APP=app "$VENV_DIR/bin/flask" init-db
+
 echo "Switching ownership back to www-data..."
 sudo chown -R www-data:www-data "$APP_DIR"
-
-echo "Running database migrations (flask init-db) as www-data..."
-# Env vars (ENCRYPTION_KEY, STRIPE_SECRET_KEY, etc.) are loaded by
-# python-dotenv from /var/www/lendifyme/.env at app startup.
-sudo -u www-data bash -lc '
-  cd /var/www/lendifyme
-  export PYTHONPATH=/var/www/lendifyme
-  export FLASK_APP=app
-  /var/www/lendifyme/.venv/bin/flask init-db
-'
 
 echo "Restarting Gunicorn service: $SERVICE_NAME..."
 sudo systemctl restart "$SERVICE_NAME"
