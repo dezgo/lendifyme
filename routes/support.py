@@ -31,6 +31,67 @@ support_bp = Blueprint('support', __name__)
 # Format: {user_id: {'room_id': str, 'status': 'waiting'|'connected', 'agent_sid': str, 'messages': []}}
 active_sessions = {}
 
+# ---------------------------------------------------------------------------
+# Phase 2 — opportunistic live *chat* support
+# ---------------------------------------------------------------------------
+# Presence: which logged-in users currently have a socket open (a user can have
+# several tabs, so we keep a set of sids). Used to decide whether "Start live
+# session" shows an in-app banner (online) or emails a time-boxed link (offline).
+# Format: {user_id: set(sid, ...)}
+online_users = {}
+
+# Open live chat sessions the admin has started, keyed by support_requests.id.
+# Format: {request_id: {'user_id': int}}
+live_sessions = {}
+
+
+def _live_room(request_id) -> str:
+    return f"live_{request_id}"
+
+
+def is_user_online(user_id) -> bool:
+    """True if the given user currently has at least one socket connected."""
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
+        return False
+    return bool(online_users.get(user_id))
+
+
+def _session_is_admin() -> bool:
+    """Role-based admin check usable inside HTTP and Socket.IO handlers."""
+    from helpers.session_helpers import is_user_admin
+    return is_user_admin()
+
+
+def _live_participant_allowed(request_id) -> bool:
+    """Admin may join any live room; a user may join only their own request's."""
+    if _session_is_admin():
+        return True
+    from helpers.session_helpers import get_current_user_id
+    from services.support_service import get_support_request
+    uid = get_current_user_id()
+    if not uid:
+        return False
+    req = get_support_request(request_id)
+    return bool(req and req["user_id"] == uid)
+
+
+def _display_name_for(user_id) -> str:
+    """Best-effort human name for a user id (falls back to email, then #id)."""
+    from helpers.db import get_db_connection
+    try:
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT name, email FROM users WHERE id = ?", (user_id,)
+        ).fetchone()
+        conn.close()
+        if row:
+            return row[0] or row[1] or f"User #{user_id}"
+    except Exception:
+        pass
+    return f"User #{user_id}"
+
 
 @support_bp.route("/support", methods=["GET", "POST"])
 @login_required
@@ -107,25 +168,139 @@ def _handle_support_submit():
 @support_bp.route("/admin/support")
 @admin_required
 def admin_support():
-    """Admin dashboard to view and join support requests."""
-    # Get all waiting and active sessions
+    """Admin dashboard to view stored requests and join live sessions."""
+    from services.support_service import list_support_requests
+
+    # Legacy live (WebRTC) sessions — retained but no longer user-triggered.
     waiting_sessions = [
         {'user_id': uid, **data}
         for uid, data in active_sessions.items()
         if data['status'] == 'waiting'
     ]
-
     active_support = [
         {'user_id': uid, **data}
         for uid, data in active_sessions.items()
         if data['status'] == 'connected'
     ]
 
+    # Phase 2 — stored written requests, annotated with live presence.
+    stored_requests = []
+    for row in list_support_requests():
+        item = dict(row)
+        item['user_online'] = is_user_online(item.get('user_id'))
+        stored_requests.append(item)
+
     return render_template(
         "admin_support.html",
         waiting_sessions=waiting_sessions,
-        active_sessions=active_support
+        active_sessions=active_support,
+        stored_requests=stored_requests,
     )
+
+
+@support_bp.route("/admin/support/<int:request_id>/start-live", methods=["POST"])
+@admin_required
+def admin_start_live(request_id):
+    """
+    Admin starts an opportunistic live chat for a stored request.
+
+    If the user is currently online, push an in-app banner inviting them to join.
+    Otherwise email a time-boxed join link. Returns JSON describing what happened
+    so the admin dashboard can react without a page reload.
+    """
+    from flask import jsonify, current_app
+    import os
+    from services.support_service import get_support_request, issue_live_token
+    from services.email_sender import send_live_support_invite_email
+
+    req = get_support_request(request_id)
+    if not req:
+        return jsonify({"ok": False, "error": "Request not found."}), 404
+
+    req = dict(req)
+    user_id = req.get("user_id")
+    user_email = req.get("user_email")
+
+    # Mark a live session open so the invited user is allowed to join the room.
+    live_sessions[request_id] = {"user_id": user_id}
+
+    # Online → in-app banner via the user's presence room.
+    if user_id and is_user_online(user_id):
+        socketio = current_app.extensions.get("socketio")
+        if socketio is not None:
+            socketio.emit(
+                "live_invite",
+                {
+                    "request_id": request_id,
+                    "subject": req.get("subject") or "your support request",
+                },
+                room=f"user_{int(user_id)}",
+            )
+        return jsonify({"ok": True, "mode": "banner"})
+
+    # Offline → time-boxed email link.
+    if not user_email:
+        return jsonify({
+            "ok": False,
+            "error": "User is offline and has no email on file.",
+        }), 400
+
+    from services.support_service import LIVE_TOKEN_TTL_MINUTES
+    token, _ = issue_live_token(request_id, ttl_minutes=LIVE_TOKEN_TTL_MINUTES)
+    app_url = os.getenv("APP_URL", "http://localhost:5000")
+    join_link = f"{app_url}/support/live?token={token}"
+
+    success, message = send_live_support_invite_email(
+        to_email=user_email,
+        to_name=None,
+        join_link=join_link,
+        expires_minutes=LIVE_TOKEN_TTL_MINUTES,
+    )
+    if not success:
+        current_app.logger.warning(f"Failed to send live invite email: {message}")
+        return jsonify({"ok": False, "error": "Couldn't send the invite email."}), 502
+
+    return jsonify({"ok": True, "mode": "email", "email": user_email})
+
+
+@support_bp.route("/support/live")
+@login_required
+def support_live():
+    """
+    User-facing live chat page. Reachable two ways:
+      - ?token=<t>  from a time-boxed email invite (offline path)
+      - ?r=<id>     from clicking the in-app banner (online path)
+    In both cases the logged-in user must own the request.
+    """
+    from services.support_service import get_support_request, resolve_live_token
+
+    token = request.args.get("token")
+    req = None
+
+    if token:
+        req = resolve_live_token(token)
+        if not req:
+            flash("That live-chat link has expired. Please reply to your support email.", "error")
+            return redirect(url_for("dashboard.index"))
+    else:
+        try:
+            request_id = int(request.args.get("r", ""))
+        except (TypeError, ValueError):
+            flash("Invalid live-chat link.", "error")
+            return redirect(url_for("dashboard.index"))
+        req = get_support_request(request_id)
+
+    req = dict(req) if req else None
+    if not req:
+        flash("Support request not found.", "error")
+        return redirect(url_for("dashboard.index"))
+
+    # Ownership: the live chat is for the user who filed the request.
+    if req.get("user_id") != session.get("user_id"):
+        flash("This live-chat link isn't for your account.", "error")
+        return redirect(url_for("dashboard.index"))
+
+    return render_template("support_live.html", request_id=req["id"], is_admin=False)
 
 
 @support_bp.route("/admin/support/sessions")
@@ -161,6 +336,75 @@ def register_socketio_handlers(socketio):
     from flask import request, current_app
     from helpers.db import get_db_connection
     import os
+
+    # ------------------------------------------------------------------
+    # Phase 2 — presence + opportunistic live *chat*
+    # ------------------------------------------------------------------
+    @socketio.on('connect')
+    def handle_connect():
+        """Track presence for any logged-in socket, and put them in a personal room."""
+        user_id = session.get('user_id')
+        if not user_id:
+            return
+        online_users.setdefault(int(user_id), set()).add(request.sid)
+        join_room(f"user_{int(user_id)}")
+
+    @socketio.on('live_join')
+    def handle_live_join(data):
+        """User or admin joins the live chat room for a support request."""
+        try:
+            request_id = int((data or {}).get('request_id'))
+        except (TypeError, ValueError):
+            emit('error', {'message': 'Invalid request.'})
+            return
+
+        if not _live_participant_allowed(request_id):
+            emit('error', {'message': 'Not authorized for this session.'})
+            return
+
+        room = _live_room(request_id)
+        join_room(room)
+        socketio.emit('live_presence', {
+            'request_id': request_id,
+            'who': 'admin' if _session_is_admin() else 'user',
+            'event': 'joined',
+        }, room=room)
+
+    @socketio.on('live_message')
+    def handle_live_message(data):
+        """Relay a chat message to everyone in the request's live room."""
+        try:
+            request_id = int((data or {}).get('request_id'))
+        except (TypeError, ValueError):
+            return
+        text = ((data or {}).get('message') or '').strip()
+        if not text:
+            return
+        if not _live_participant_allowed(request_id):
+            emit('error', {'message': 'Not authorized for this session.'})
+            return
+
+        is_admin = _session_is_admin()
+        sender = 'Derek (Support)' if is_admin else _display_name_for(session.get('user_id'))
+        socketio.emit('live_message', {
+            'request_id': request_id,
+            'sender': sender,
+            'text': text[:4000],
+            'is_admin': is_admin,
+            'timestamp': datetime.now().isoformat(),
+        }, room=_live_room(request_id))
+
+    @socketio.on('live_end')
+    def handle_live_end(data):
+        """End a live chat session (either party)."""
+        try:
+            request_id = int((data or {}).get('request_id'))
+        except (TypeError, ValueError):
+            return
+        if not _live_participant_allowed(request_id):
+            return
+        socketio.emit('live_ended', {'request_id': request_id}, room=_live_room(request_id))
+        live_sessions.pop(request_id, None)
 
     @socketio.on('request_support')
     def handle_request_support(data):
@@ -438,6 +682,14 @@ def register_socketio_handlers(socketio):
     def handle_disconnect():
         """Clean up when someone disconnects."""
         user_id = session.get('user_id')
+
+        # Drop this socket from presence tracking (Phase 2 live support).
+        if user_id:
+            sids = online_users.get(int(user_id))
+            if sids:
+                sids.discard(request.sid)
+                if not sids:
+                    online_users.pop(int(user_id), None)
 
         # If this was a user with an active session, clean it up
         if user_id and user_id in active_sessions:

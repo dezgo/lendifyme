@@ -777,6 +777,128 @@ Manage requests: {app_url}/admin/support
         return False, f"Failed to send email: {str(e)}"
 
 
+def send_live_support_invite_email(
+    to_email: str,
+    to_name: Optional[str],
+    join_link: str,
+    expires_minutes: int,
+) -> tuple[bool, str]:
+    """
+    Invite a user to an opportunistic live support chat (Phase 2, offline path).
+
+    Sent when the admin starts a live session but the user isn't currently in the
+    app. Carries a time-boxed join link; if they click it in time they drop into a
+    live text chat with the admin.
+
+    Returns (success, message). Tries Resend → Mailgun → SMTP.
+    """
+    mailgun_api_key = os.getenv('MAILGUN_API_KEY')
+    mailgun_domain = os.getenv('MAILGUN_DOMAIN')
+    sender_email = os.getenv('MAIL_DEFAULT_SENDER', f'postmaster@{mailgun_domain}' if mailgun_domain else 'noreply@lendifyme.app')
+    sender_name = os.getenv('MAIL_SENDER_NAME', 'LendifyMe')
+
+    email_subject = "💬 Derek's available for a live chat now – LendifyMe"
+
+    text_body = f"""Hi{(' ' + to_name) if to_name else ''},
+
+You recently sent a support request to LendifyMe. Derek is free right now and
+would like to sort it out with you over a quick live chat.
+
+Join here (link expires in about {expires_minutes} minutes):
+{join_link}
+
+If the link has expired by the time you see this, no worries — just reply to
+your original support email and we'll find another time.
+
+— LendifyMe
+"""
+
+    html_body = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; line-height: 1.6; background: #f8f9fa;">
+    <div style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+        <div style="background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; text-align: center;">
+            <h1 style="margin: 0; font-size: 22px;">💬 Derek's free for a live chat</h1>
+        </div>
+
+        <p style="font-size: 15px; color: #212529;">
+            Hi{(' ' + to_name) if to_name else ''}, you recently sent a support request to
+            LendifyMe. Derek is available right now and would like to help you sort it
+            out over a quick live chat.
+        </p>
+
+        <div style="text-align: center; margin: 30px 0;">
+            <a href="{join_link}" style="background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); color: white; padding: 14px 35px; text-decoration: none; border-radius: 6px; display: inline-block; font-weight: bold; font-size: 16px;">
+                Join the live chat
+            </a>
+        </div>
+
+        <p style="font-size: 13px; color: #6c757d; text-align: center;">
+            This link expires in about {expires_minutes} minutes. If it's expired by the
+            time you see it, just reply to your original support email and we'll find
+            another time.
+        </p>
+    </div>
+</body>
+</html>
+"""
+
+    # Try Resend first
+    resend_result = _send_via_resend(
+        sender_email=sender_email,
+        sender_name=sender_name,
+        to_email=to_email,
+        to_name=to_name,
+        subject=email_subject,
+        html_body=html_body,
+        text_body=text_body,
+    )
+    if resend_result[0]:
+        return resend_result
+
+    # Try Mailgun
+    if mailgun_api_key and mailgun_domain:
+        try:
+            response = requests.post(
+                f"https://api.mailgun.net/v3/{mailgun_domain}/messages",
+                auth=("api", mailgun_api_key),
+                data={
+                    "from": f"{sender_name} <{sender_email}>",
+                    "to": to_email,
+                    "subject": email_subject,
+                    "text": text_body,
+                    "html": html_body,
+                },
+                timeout=10,
+            )
+            if response.status_code == 200:
+                return True, "Live invite sent successfully"
+            return False, f"Mailgun API error: {response.status_code} - {response.text}"
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Mailgun request exception: {str(e)}")
+            return False, f"Failed to send email: {str(e)}"
+
+    # SMTP fallback
+    try:
+        msg = Message(
+            subject=email_subject,
+            sender=(sender_name, sender_email),
+            recipients=[to_email],
+            body=text_body,
+            html=html_body,
+        )
+        current_app.extensions['mail'].send(msg)
+        return True, "Live invite sent successfully via SMTP"
+    except Exception as e:
+        logger.error(f"Failed to send live invite via SMTP: {str(e)}")
+        return False, f"Failed to send email: {str(e)}"
+
+
 def send_verification_email(recipient_email: str, recipient_name: Optional[str], verification_link: str) -> tuple[bool, str]:
     """
     Send an email verification link to confirm the user's email address.
