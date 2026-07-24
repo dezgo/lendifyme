@@ -4,6 +4,10 @@ name: Deploy to production
 on:
   push:
     branches: [main]
+    paths-ignore:         # doc/markdown-only commits don't need a prod deploy
+      - 'docs/**'
+      - '**.md'
+      - '.gitignore'
   workflow_dispatch: {}   # also allow a manual "Run workflow" button
 
 # Never let two deploys run at once (they'd fight over git pull / systemctl).
