@@ -77,6 +77,39 @@
         </div>
     </div>
 
+    {% if session.user_id and not session.is_admin %}
+    <!-- Phase 2 — opportunistic live-support invite banner (hidden until pushed) -->
+    <style>
+        .live-invite-banner {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            gap: 1rem;
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: #fff;
+            padding: 0.75rem 1rem;
+            font-size: 0.95rem;
+            text-align: center;
+        }
+        .live-invite-actions { display: inline-flex; align-items: center; gap: 0.75rem; }
+        .live-invite-join {
+            background: #fff; color: #0056b3; text-decoration: none;
+            padding: 0.4rem 1.1rem; border-radius: 4px; font-weight: 700;
+        }
+        .live-invite-dismiss {
+            background: transparent; border: none; color: #fff;
+            font-size: 1.1rem; cursor: pointer; line-height: 1;
+        }
+    </style>
+    <div id="live-invite-banner" class="live-invite-banner">
+        <span id="live-invite-text">💬 Derek is free for a live chat right now.</span>
+        <span class="live-invite-actions">
+            <a href="#" id="live-invite-join" class="live-invite-join">Join chat</a>
+            <button id="live-invite-dismiss" class="live-invite-dismiss" aria-label="Dismiss">&times;</button>
+        </span>
+    </div>
+    {% endif %}
+
     <!-- Main Container -->
     <div class="container">
         <!-- Flash Messages -->
@@ -485,6 +518,30 @@
     </script>
 
     <script defer src="{{ url_for('static', filename='js/app.js', v=1) }}"></script>
+
+    {% if session.user_id and not session.is_admin %}
+    <!-- Phase 2 — presence socket + live-invite banner -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+    <script>
+        (function () {
+            if (typeof io === 'undefined') return;
+            // Connecting registers presence server-side (see support.py handle_connect).
+            const sock = io({ transports: ['websocket', 'polling'] });
+            const banner = document.getElementById('live-invite-banner');
+            const joinLink = document.getElementById('live-invite-join');
+            const dismissBtn = document.getElementById('live-invite-dismiss');
+
+            sock.on('live_invite', function (data) {
+                if (!banner) return;
+                if (joinLink) joinLink.href = '/support/live?r=' + encodeURIComponent(data.request_id);
+                banner.style.display = 'flex';
+            });
+            if (dismissBtn) {
+                dismissBtn.addEventListener('click', function () { banner.style.display = 'none'; });
+            }
+        })();
+    </script>
+    {% endif %}
 
     <script>
         {% block extra_js %}{% endblock %}

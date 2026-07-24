@@ -1557,6 +1557,40 @@ def migrate_v35_create_support_requests(conn):
     print("  Created support_requests table with indexes.")
 
 
+def migrate_v36_add_live_support_tokens(conn):
+    """
+    Migration v36: add live-session token columns to support_requests.
+
+    Phase 2 (opportunistic live support): when the admin starts a live session
+    for a stored request and the user is offline, we email them a time-boxed
+    link. The token + expiry are stored here so the link can be validated later
+    (they must survive a process restart, unlike the in-memory live session).
+
+    - live_token: unguessable token embedded in the emailed join link (NULL until issued)
+    - live_token_expires_at: UTC expiry; a link is only valid before this time
+
+    Idempotent: each ADD COLUMN is guarded by a PRAGMA check.
+    """
+    c = conn.cursor()
+
+    c.execute("PRAGMA table_info(support_requests)")
+    existing = {row[1] for row in c.fetchall()}
+
+    if 'live_token' not in existing:
+        c.execute("ALTER TABLE support_requests ADD COLUMN live_token TEXT")
+        print("  Added support_requests.live_token")
+    if 'live_token_expires_at' not in existing:
+        c.execute("ALTER TABLE support_requests ADD COLUMN live_token_expires_at TIMESTAMP")
+        print("  Added support_requests.live_token_expires_at")
+
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_support_requests_live_token "
+        "ON support_requests(live_token)"
+    )
+
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Migration table — add new migrations here as (version, function) tuples.
 # Defined at the bottom of the file so all migrate_vN functions are in scope.
@@ -1597,4 +1631,5 @@ MIGRATIONS = [
     (33, migrate_v33_drop_abandoned_encrypted_columns),
     (34, migrate_v34_drop_bank_connection_schema),
     (35, migrate_v35_create_support_requests),
+    (36, migrate_v36_add_live_support_tokens),
 ]
