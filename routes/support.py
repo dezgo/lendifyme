@@ -364,11 +364,28 @@ def register_socketio_handlers(socketio):
 
         room = _live_room(request_id)
         join_room(room)
+        is_admin = _session_is_admin()
+
+        # Record who's present so a late joiner learns the other party is already
+        # here (otherwise the first-joiner's presence ping is missed).
+        sess = live_sessions.setdefault(request_id, {})
+        sess['admin_present' if is_admin else 'user_present'] = True
+
+        # Announce this party to everyone already in the room...
         socketio.emit('live_presence', {
             'request_id': request_id,
-            'who': 'admin' if _session_is_admin() else 'user',
+            'who': 'admin' if is_admin else 'user',
             'event': 'joined',
         }, room=room)
+
+        # ...and catch the joiner up on the other party, if already present.
+        other = 'user' if is_admin else 'admin'
+        if sess.get(f'{other}_present'):
+            emit('live_presence', {
+                'request_id': request_id,
+                'who': other,
+                'event': 'joined',
+            })
 
     @socketio.on('live_message')
     def handle_live_message(data):
