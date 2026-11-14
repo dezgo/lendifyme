@@ -83,6 +83,9 @@ def borrower_portal(token):
     """, (loan_id,))
     transactions = c.fetchall()
 
+    from services.charges import get_charges
+    charges = get_charges(conn, loan_id)
+
     conn.close()
 
     # Prepare loan dict for template
@@ -102,7 +105,8 @@ def borrower_portal(token):
         'notifications_enabled': loan_row['borrower_notifications_enabled']
     }
 
-    return render_template("borrower_portal.html", loan=loan, transactions=transactions, token=token)
+    return render_template("borrower_portal.html", loan=loan, transactions=transactions,
+                           charges=charges, token=token)
 
 
 @borrower_bp.route("/borrower/<token>/notifications", methods=["POST"])

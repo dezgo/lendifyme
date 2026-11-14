@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block title %}Sync charges from Up – LendifyMe{% endblock %}
+
+{% block extra_css %}
+h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+.back-link { display: inline-block; margin-bottom: 1rem; color: #007bff; text-decoration: none; font-weight: 600; }
+.card { background: white; padding: 1.5rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 640px; }
+.intro { color: #495057; margin-bottom: 1.25rem; }
+label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
+input { width: 100%; padding: 0.65rem; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+.hint { color: #6c757d; font-size: 0.85rem; margin: 0.25rem 0 1.25rem; }
+.tag-row { display: grid; grid-template-columns: 1fr 120px; gap: 0.75rem; margin-bottom: 0.5rem; }
+.tag-head { display: grid; grid-template-columns: 1fr 120px; gap: 0.75rem; font-weight: bold; font-size: 0.9rem; margin-bottom: 0.25rem; }
+button { margin-top: 1rem; width: 100%; background: #007bff; color: white; border: none; padding: 0.8rem; font-size: 16px; font-weight: bold; border-radius: 4px; cursor: pointer; }
+button:hover { background: #0056b3; }
+{% endblock %}
+
+{% block content %}
+<a href="/loan/{{ loan_id }}/transactions" class="back-link">← Back to loan</a>
+<h1>Sync charges from Up</h1>
+
+<div class="card">
+    <p class="intro">
+        Pulls every transaction you've tagged in the Up app and lists them on this loan
+        {% if borrower %}so {{ borrower }} can see exactly what they owe{% endif %}.
+        Run it again any time — anything you've untagged drops off, and new tags are added.
+    </p>
+
+    <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <label for="up_token">Up access token</label>
+        <input type="password" id="up_token" name="up_token" placeholder="up:yeah:..." autocomplete="off" required>
+        <p class="hint">Make one at <a href="https://api.up.com.au" target="_blank" rel="noopener">api.up.com.au</a>.
+            It's only used for this sync and isn't saved.</p>
+
+        <div class="tag-head"><span>Up tag</span><span>Their share</span></div>
+        {% for i in range(max_rows) %}
+            {% set r = rules[i] if i < rules|length else None %}
+            <div class="tag-row">
+                <input type="text" name="tag_{{ i }}" value="{{ r.tag if r else '' }}" aria-label="Up tag {{ i + 1 }}">
+                <input type="text" inputmode="decimal" name="share_{{ i }}"
+                       value="{{ ('%g'|format(r.share_percent)) ~ '%' if r else '' }}" placeholder="100%" aria-label="Share for tag {{ i + 1 }}">
+            </div>
+        {% endfor %}
+        <p class="hint">Use 100% for things they pay for themselves and 50% for things you're splitting.
+            Tag names must match Up exactly.</p>
+
+        <button type="submit">Sync from Up</button>
+    </form>
+</div>
+{% endblock %}

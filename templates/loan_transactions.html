@@ -168,6 +168,33 @@ tr:hover {
     background: #157347;
 }
 
+
+.charges-table .num { text-align: right; white-space: nowrap; }
+.charges-table table { min-width: 0; }
+.charges-table .m-label { display: none; }
+.charges-table .c-total { font-weight: bold; background: #f8f9fa; }
+.charges-table .c-total-label { text-align: right; }
+@media (max-width: 640px) {
+    .charges-table { padding: 0.25rem 0.75rem; }
+    .charges-table thead { display: none; }
+    .charges-table table, .charges-table tbody, .charges-table tfoot { display: block; }
+    .charges-table tr { display: grid; grid-template-columns: 1fr auto; column-gap: 0.75rem;
+        padding: 0.7rem 0; border-bottom: 1px solid #eee; }
+    .charges-table tr:hover { background: none; }
+    .charges-table td { border: none; padding: 0; text-align: left; }
+    .charges-table .c-what { grid-column: 1; grid-row: 1; font-weight: 600; }
+    .charges-table .c-owed { grid-column: 2; grid-row: 1; text-align: right; }
+    .charges-table .c-date, .charges-table .c-paid, .charges-table .c-share {
+        grid-row: 2; color: #6c757d; font-size: 0.85rem; text-align: left; }
+    .charges-table .c-date { grid-column: 1; }
+    .charges-table .c-paid { display: none; }
+    .charges-table .c-share { grid-column: 2; text-align: right; }
+    .charges-table .c-share .m-label { display: none; }
+    .charges-table .c-total { border-bottom: none; background: none; font-size: 1.05rem; }
+    .charges-table .c-total-label { grid-column: 1; text-align: left; }
+}
+.pending-badge { display: inline-block; background: #fff3cd; color: #856404; padding: 0.1rem 0.45rem; border-radius: 10px; font-size: 0.75rem; margin-left: 0.35rem; }
+.charges-intro { color: #6c757d; font-size: 0.9rem; margin: -0.5rem 0 0.75rem; }
 @media print {
     .back-link, .btn-remove, .action-toolbar, .alert, .header {
         display: none !important;
@@ -208,6 +235,7 @@ tr:hover {
     {% else %}
         <a href="/pricing" class="btn-export" style="background: #6c757d;">📥 Export CSV (Upgrade)</a>
     {% endif %}
+    <a href="/loan/{{ loan[0] }}/charges/sync" class="btn-export" style="background: #007bff;">🔄 {% if charges %}Re-sync{% else %}Add{% endif %} charges from Up</a>
 </div>
 
 <div class="loan-summary">
@@ -219,7 +247,7 @@ tr:hover {
 
     <div class="summary-grid">
         <div class="summary-item">
-            <strong>Original Amount</strong>
+            <strong>{% if charges %}Total Charged{% else %}Original Amount{% endif %}</strong>
             <div class="value">${{ '%.2f'|format(loan[2]) }}</div>
         </div>
         <div class="summary-item">
@@ -236,8 +264,15 @@ tr:hover {
     </div>
 </div>
 
+{% if charges %}
+    <h2>Charges ({{ charges|length }})</h2>
+    <p class="charges-intro">From your Up tags. Untag something in Up and re-sync to take it off.</p>
+    {% set charges_total = loan[2] %}{% set show_pending = true %}
+    {% include "_charges_table.html" %}
+{% endif %}
+
 {% if transactions %}
-    <h2>Applied Transactions ({{ transactions|length }})</h2>
+    <h2>{% if charges %}Payments Received{% else %}Applied Transactions{% endif %} ({{ transactions|length }})</h2>
     <div class="table-container">
         <table>
             <thead>

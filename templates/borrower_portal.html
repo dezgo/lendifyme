@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Your Loan Details – LendifyMe{% endblock %}
+{% block title %}{% if charges %}Your Statement{% else %}Your Loan Details{% endif %} – LendifyMe{% endblock %}
 
 {% block extra_css %}
 .portal-container {
@@ -147,18 +147,49 @@ tr:hover {
         display: none;
     }
 }
+.charges-table .num { text-align: right; white-space: nowrap; }
+.charges-table table { min-width: 0; }
+.charges-table .m-label { display: none; }
+.charges-table .c-total { font-weight: bold; background: #f8f9fa; }
+.charges-table .c-total-label { text-align: right; }
+@media (max-width: 640px) {
+    .charges-table { padding: 0.25rem 0.75rem; }
+    .charges-table thead { display: none; }
+    .charges-table table, .charges-table tbody, .charges-table tfoot { display: block; }
+    .charges-table tr { display: grid; grid-template-columns: 1fr auto; column-gap: 0.75rem;
+        padding: 0.7rem 0; border-bottom: 1px solid #eee; }
+    .charges-table tr:hover { background: none; }
+    .charges-table td { border: none; padding: 0; text-align: left; }
+    .charges-table .c-what { grid-column: 1; grid-row: 1; font-weight: 600; }
+    .charges-table .c-owed { grid-column: 2; grid-row: 1; text-align: right; }
+    .charges-table .c-date, .charges-table .c-paid, .charges-table .c-share {
+        grid-row: 2; color: #6c757d; font-size: 0.85rem; text-align: left; }
+    .charges-table .c-date { grid-column: 1; }
+    .charges-table .c-paid { display: none; }
+    .charges-table .c-share { grid-column: 2; text-align: right; }
+    .charges-table .c-share .m-label { display: none; }
+    .charges-table .c-total { border-bottom: none; background: none; font-size: 1.05rem; }
+    .charges-table .c-total-label { grid-column: 1; text-align: left; }
+}
+.pending-badge { display: inline-block; background: #fff3cd; color: #856404; padding: 0.1rem 0.45rem; border-radius: 10px; font-size: 0.75rem; margin-left: 0.35rem; }
+.charges-intro { color: #6c757d; font-size: 0.9rem; margin: -0.5rem 0 0.75rem; }
 {% endblock %}
 
 {% block content %}
 <div class="portal-container">
+    {% if charges %}
+    <h1>What you owe{% if loan.borrower %}, {{ loan.borrower }}{% endif %}</h1>
+    <p class="subtitle">Everything that's been charged, what you've paid, and what's left</p>
+    {% else %}
     <h1>Your Loan Status</h1>
     <p class="subtitle">Track your loan balance and view payment history</p>
+    {% endif %}
 
     <div class="loan-summary">
         <h2>Current Balance</h2>
         <div class="summary-grid">
             <div class="summary-item">
-                <strong>Original Loan</strong>
+                <strong>{% if charges %}Total Charged{% else %}Original Loan{% endif %}</strong>
                 <div class="value">${{ '%.2f'|format(loan.amount) }}</div>
             </div>
             <div class="summary-item">
@@ -176,11 +207,19 @@ tr:hover {
             </div>
         {% else %}
             <div class="fully-paid-badge">
-                ✓ This loan has been fully repaid!
+                ✓ {% if charges %}All paid up — thank you!{% else %}This loan has been fully repaid!{% endif %}
             </div>
         {% endif %}
     </div>
 
+    {% if charges %}
+    {% if loan.note %}
+        <div class="info-section"><p>{{ loan.note }}</p></div>
+    {% endif %}
+    <h2>What's been charged ({{ charges|length }} items)</h2>
+    {% set charges_total = loan.amount %}
+    {% include "_charges_table.html" %}
+    {% else %}
     <h2>Loan Details</h2>
     <div class="info-section">
         <p><span class="info-label">Borrower:</span> {{ loan.borrower }}</p>
@@ -195,6 +234,7 @@ tr:hover {
             <p><span class="info-label">Notes:</span> {{ loan.note }}</p>
         {% endif %}
     </div>
+    {% endif %}
 
     {% if transactions %}
         <h2>Payment History ({{ transactions|length }} payments recorded)</h2>
@@ -230,7 +270,7 @@ tr:hover {
     {% else %}
         <div class="no-transactions">
             <h3>No Payments Recorded Yet</h3>
-            <p>When payments are made, they will appear here automatically.</p>
+            <p>{% if charges %}Pay back all at once or bit by bit — each payment will show up here.{% else %}When payments are made, they will appear here automatically.{% endif %}</p>
         </div>
     {% endif %}
 
@@ -260,7 +300,7 @@ tr:hover {
     </div>
 
     <div class="footer">
-        <p>This is your private loan status page. Keep this link secure.</p>
+        <p>This is your private {% if charges %}statement{% else %}loan status page{% endif %}. Keep this link secure.</p>
         <p>Questions? Contact the person who sent you this link.</p>
     </div>
 </div>

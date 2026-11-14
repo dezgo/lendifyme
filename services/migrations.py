@@ -1591,6 +1591,50 @@ def migrate_v36_add_live_support_tokens(conn):
     conn.commit()
 
 
+def migrate_v37_create_loan_charges(conn):
+    """
+    Migration v37: itemised charges on a loan ("shared costs" statements).
+
+    - loan_charge_tags: which bank tags feed a loan, and what share of each
+      tagged transaction the borrower owes (100 = all theirs, 50 = split).
+    - loan_charges: one row per synced transaction. full_amount is what the
+      lender paid; share_amount is the borrower's part. The loan's amount is
+      kept equal to the sum of share_amount, so balances work unchanged.
+
+    Plaintext, like applied_transactions.
+    """
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS loan_charge_tags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            loan_id INTEGER NOT NULL,
+            tag TEXT NOT NULL,
+            share_percent REAL NOT NULL,
+            UNIQUE (loan_id, tag),
+            FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE
+        )
+    """)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS loan_charges (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            loan_id INTEGER NOT NULL,
+            source_txn_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            description TEXT,
+            full_amount REAL NOT NULL,
+            share_percent REAL NOT NULL,
+            share_amount REAL NOT NULL,
+            tag TEXT,
+            pending INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (loan_id, source_txn_id),
+            FOREIGN KEY (loan_id) REFERENCES loans(id) ON DELETE CASCADE
+        )
+    """)
+    c.execute("CREATE INDEX IF NOT EXISTS idx_loan_charges_loan ON loan_charges(loan_id, date)")
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Migration table — add new migrations here as (version, function) tuples.
 # Defined at the bottom of the file so all migrate_vN functions are in scope.
@@ -1632,4 +1676,5 @@ MIGRATIONS = [
     (34, migrate_v34_drop_bank_connection_schema),
     (35, migrate_v35_create_support_requests),
     (36, migrate_v36_add_live_support_tokens),
+    (37, migrate_v37_create_loan_charges),
 ]

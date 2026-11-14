@@ -23,7 +23,7 @@ def _disable_csrf(app, monkeypatch):
     # If CSRFProtect is registered on the app, disable its request hook
     ext = getattr(app, "extensions", {}).get("csrf")
     if ext:
-        monkeypatch.setattr(ext, "protect", lambda: None, raising=False)
+        monkeypatch.setattr(ext, "protect", lambda *a, **k: None, raising=False)
 
     # Also short-circuit direct validators some forms call
     monkeypatch.setattr(csrf_mod, "validate_csrf", lambda *a, **k: None, raising=False)

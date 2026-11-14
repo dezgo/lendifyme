@@ -275,8 +275,14 @@ def loan_transactions(loan_id):
         for row in transaction_rows
     ]
 
+    from services.charges import get_charges
+    conn = sqlite3.connect(get_db_path())
+    charges = get_charges(conn, loan_id)
+    conn.close()
+
     has_export = has_feature(get_current_user_id(), 'transaction_export')
-    return render_template("loan_transactions.html", loan=loan, transactions=transactions, has_export=has_export)
+    return render_template("loan_transactions.html", loan=loan, transactions=transactions,
+                           charges=charges, has_export=has_export)
 
 
 @loan_bp.route("/loan/<int:loan_id>/transactions/export")

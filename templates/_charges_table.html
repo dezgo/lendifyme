@@ -1,0 +1,36 @@
+{# Itemised charges. Expects `charges` (list of dicts), `charges_total`, and
+   `show_pending` (lender only: flags charges the bank hasn't finalised). #}
+<div class="table-container charges-table">
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>What</th>
+                <th class="num">Paid</th>
+                <th class="num">Share</th>
+                <th class="num">Owed</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for ch in charges %}
+                {% set share_label = 'All' if ch.share_percent >= 100 else ('Half' if ch.share_percent == 50 else ('%g'|format(ch.share_percent)) ~ '%') %}
+                <tr>
+                    <td class="c-date">{{ ch.date|format_date }}</td>
+                    <td class="c-what">
+                        {{ ch.description }}
+                        {% if show_pending and ch.pending %}<span class="pending-badge" title="Up hasn't finalised this yet, so the amount could still change slightly">pending</span>{% endif %}
+                    </td>
+                    <td class="num c-paid"><span class="m-label">paid </span>${{ '%.2f'|format(ch.full_amount) }}</td>
+                    <td class="num c-share"><span class="m-label">· </span>{{ share_label }}</td>
+                    <td class="num c-owed"><strong>${{ '%.2f'|format(ch.share_amount) }}</strong></td>
+                </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="c-total">
+                <td colspan="4" class="c-total-label">Total</td>
+                <td class="num c-owed">${{ '%.2f'|format(charges_total) }}</td>
+            </tr>
+        </tfoot>
+    </table>
+</div>

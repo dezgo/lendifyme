@@ -158,6 +158,9 @@ app.register_blueprint(loan_bp)
 app.logger.info("Registered loan blueprint")
 print("✅ Registered loan blueprint")
 
+from routes.charges import charges_bp
+app.register_blueprint(charges_bp)
+
 from routes.borrower import borrower_bp
 app.register_blueprint(borrower_bp)
 app.logger.info("Registered borrower blueprint")
