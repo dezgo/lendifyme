@@ -1,5 +1,7 @@
 {# Itemised charges. Expects `charges` (list of dicts), `charges_total`, and
-   `show_pending` (lender only: flags charges the bank hasn't finalised). #}
+   `lender_view` (true on the lender's own page: shows pending flags and
+   remove buttons for hand-entered charges). #}
+{% set covered_total = charges | selectattr('share_percent', 'equalto', 0) | sum(attribute='full_amount') %}
 <div class="table-container charges-table">
     <table>
         <thead>
@@ -13,16 +15,26 @@
         </thead>
         <tbody>
             {% for ch in charges %}
-                {% set share_label = 'All' if ch.share_percent >= 100 else ('Half' if ch.share_percent == 50 else ('%g'|format(ch.share_percent)) ~ '%') %}
-                <tr>
+                {% if ch.share_percent == 0 %}{% set share_label = 'Covered' %}
+                {% elif ch.share_percent >= 100 %}{% set share_label = 'All' %}
+                {% elif ch.share_percent == 50 %}{% set share_label = 'Half' %}
+                {% else %}{% set share_label = ('%g'|format(ch.share_percent)) ~ '%' %}{% endif %}
+                <tr class="{% if ch.share_percent == 0 %}is-covered{% endif %}">
                     <td class="c-date">{{ ch.date|format_date }}</td>
                     <td class="c-what">
                         {{ ch.description }}
-                        {% if show_pending and ch.pending %}<span class="pending-badge" title="Up hasn't finalised this yet, so the amount could still change slightly">pending</span>{% endif %}
+                        {% if lender_view and ch.pending %}<span class="pending-badge" title="Up hasn't finalised this yet, so the amount could still change slightly">pending</span>{% endif %}
+                        {% if lender_view and ch.manual %}
+                            <form method="post" action="/loan/{{ loan_id }}/charges/{{ ch.id }}/remove" class="c-remove"
+                                  onsubmit="return confirm('Remove this charge?');">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" title="Remove this hand-entered charge">remove</button>
+                            </form>
+                        {% endif %}
                     </td>
-                    <td class="num c-paid"><span class="m-label">paid </span>${{ '%.2f'|format(ch.full_amount) }}</td>
-                    <td class="num c-share"><span class="m-label">· </span>{{ share_label }}</td>
-                    <td class="num c-owed"><strong>${{ '%.2f'|format(ch.share_amount) }}</strong></td>
+                    <td class="num c-paid">${{ '%.2f'|format(ch.full_amount) }}</td>
+                    <td class="num c-share">{% if ch.share_percent == 0 %}<span class="covered-badge">Covered</span>{% else %}{{ share_label }}{% endif %}</td>
+                    <td class="num c-owed">{% if ch.share_percent == 0 %}<span class="covered-amount">${{ '%.2f'|format(ch.full_amount) }}</span>{% else %}<strong>${{ '%.2f'|format(ch.share_amount) }}</strong>{% endif %}</td>
                 </tr>
             {% endfor %}
         </tbody>
@@ -31,6 +43,11 @@
                 <td colspan="4" class="c-total-label">Total</td>
                 <td class="num c-owed">${{ '%.2f'|format(charges_total) }}</td>
             </tr>
+            {% if covered_total > 0 %}
+            <tr class="c-covered-note">
+                <td colspan="5">{% if lender_view %}You covered{% else %}Also covered for you, not included above:{% endif %} ${{ '%.2f'|format(covered_total) }}</td>
+            </tr>
+            {% endif %}
         </tfoot>
     </table>
 </div>

@@ -91,3 +91,47 @@ def test_bad_share_rejected(logged_in_client, app, fake_up):
 def test_cannot_sync_someone_elses_loan(logged_in_client, app, fake_up):
     resp = logged_in_client.post("/loan/999/charges/sync", data=SYNC_FORM)
     assert resp.status_code == 302 and "/loan/999/transactions" not in resp.headers["Location"]
+
+
+def test_covered_tag_shows_but_adds_nothing(logged_in_client, app, fake_up):
+    fake_up["Sydney Derek"] = [_txn("t9", 30.00, desc="Parking I paid")]
+    loan_id, token = _make_loan(logged_in_client, app)
+    form = dict(SYNC_FORM, tag_2="Sydney Derek", share_2="0%")
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=form)
+
+    portal = logged_in_client.get(f"/borrower/{token}").data.decode()
+    assert "Parking I paid" in portal and "Covered" in portal
+    assert "$122.68" in portal  # unchanged by the covered item
+    assert "covered for you" in portal and "$30.00" in portal
+
+
+def test_manual_charge_survives_resync_and_can_be_removed(logged_in_client, app, fake_up):
+    loan_id, token = _make_loan(logged_in_client, app)
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=SYNC_FORM)
+    logged_in_client.post(f"/loan/{loan_id}/charges/add", data={
+        "date": "2026-11-14", "description": "Home charging", "amount": "5.81", "share": "0"})
+    logged_in_client.post(f"/loan/{loan_id}/charges/add", data={
+        "date": "2026-11-14", "description": "Snacks", "amount": "10", "share": "50"})
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=SYNC_FORM)
+
+    portal = logged_in_client.get(f"/borrower/{token}").data.decode()
+    assert "Home charging" in portal and "Snacks" in portal
+    assert "$127.68" in portal  # 122.68 + 5.00 half of snacks; home charging covered
+
+    conn = sqlite3.connect(app.config["DATABASE"])
+    snack_id = conn.execute("SELECT id FROM loan_charges WHERE description = 'Snacks'").fetchone()[0]
+    up_id = conn.execute("SELECT id FROM loan_charges WHERE source_txn_id = 't1'").fetchone()[0]
+    conn.close()
+    logged_in_client.post(f"/loan/{loan_id}/charges/{snack_id}/remove")
+    logged_in_client.post(f"/loan/{loan_id}/charges/{up_id}/remove")  # bank charge: refused
+    portal = logged_in_client.get(f"/borrower/{token}").data.decode()
+    assert "Snacks" not in portal and "Car park" in portal and "$122.68" in portal
+
+
+def test_manual_charge_refused_on_plain_loan(logged_in_client, app, fake_up):
+    loan_id, _ = _make_loan(logged_in_client, app)
+    logged_in_client.post(f"/loan/{loan_id}/charges/add", data={
+        "date": "2026-11-14", "description": "x", "amount": "5", "share": "100"})
+    conn = sqlite3.connect(app.config["DATABASE"])
+    assert conn.execute("SELECT COUNT(*) FROM loan_charges").fetchone()[0] == 0
+    conn.close()

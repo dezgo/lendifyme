@@ -35,9 +35,9 @@ def _parse_rules(form):
         try:
             pct = float(share)
         except ValueError:
-            return None, f"Share for '{tag}' must be a number between 1 and 100."
-        if not 0 < pct <= 100:
-            return None, f"Share for '{tag}' must be between 1 and 100."
+            return None, f"Share for '{tag}' must be a number between 0 and 100."
+        if not 0 <= pct <= 100:
+            return None, f"Share for '{tag}' must be between 0 and 100."
         if tag in seen:
             return None, f"'{tag}' is listed twice."
         seen.add(tag)
@@ -100,4 +100,69 @@ def sync_charges(loan_id):
         f"{result['removed']} removed. Total charged is now ${result['total']:.2f}.",
         "success",
     )
+    return redirect(f"/loan/{loan_id}/transactions")
+
+
+def _manual_context(loan_id):
+    """Open the DB and unlock an owned loan for a manual-charge change.
+    Returns (conn, dek) or (None, None) after flashing why."""
+    user_password = session.get('user_password')
+    conn = sqlite3.connect(get_db_path())
+    conn.row_factory = sqlite3.Row
+    if not _load_owned_loan(conn.cursor(), loan_id):
+        conn.close()
+        flash("Loan not found", "error")
+        return None, None
+    dek = get_loan_dek(loan_id, user_password=user_password) if user_password else None
+    if not dek:
+        conn.close()
+        flash("Couldn't unlock this loan. Log out and back in, then try again.", "error")
+        return None, None
+    return conn, dek
+
+
+@charges_bp.route("/loan/<int:loan_id>/charges/add", methods=["POST"])
+@login_required
+def add_charge(loan_id):
+    from datetime import date as _date
+    conn, dek = _manual_context(loan_id)
+    if not conn:
+        return redirect("/")
+    back = redirect(f"/loan/{loan_id}/transactions")
+
+    description = (request.form.get("description") or "").strip()[:200]
+    when = (request.form.get("date") or "").strip() or _date.today().isoformat()
+    try:
+        amount = float((request.form.get("amount") or "").replace("$", "").replace(",", "").strip())
+        share = float((request.form.get("share") or "").rstrip("%").strip())
+        _date.fromisoformat(when)
+    except ValueError:
+        conn.close()
+        flash("Enter a date, an amount and a share.", "error")
+        return back
+    if not description or not 0 < amount < 1_000_000 or not 0 <= share <= 100:
+        conn.close()
+        flash("Enter what it was, an amount above $0, and a share between 0 and 100%.", "error")
+        return back
+    if not charge_service.has_charges_setup(conn, loan_id):
+        conn.close()
+        flash("Hand-entered charges are only for loans that list charges.", "error")
+        return back
+
+    total = charge_service.add_manual_charge(conn, loan_id, when, description, amount, share, dek)
+    conn.close()
+    flash(f"Added '{description}'. Total charged is now ${total:.2f}.", "success")
+    return back
+
+
+@charges_bp.route("/loan/<int:loan_id>/charges/<int:charge_id>/remove", methods=["POST"])
+@login_required
+def remove_charge(loan_id, charge_id):
+    conn, dek = _manual_context(loan_id)
+    if not conn:
+        return redirect("/")
+    removed = charge_service.remove_manual_charge(conn, loan_id, charge_id, dek)
+    conn.close()
+    flash("Charge removed." if removed else "Only charges you typed in can be removed here — untag bank ones in Up.",
+          "success" if removed else "error")
     return redirect(f"/loan/{loan_id}/transactions")

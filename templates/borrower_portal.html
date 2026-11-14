@@ -152,6 +152,12 @@ tr:hover {
 .charges-table .m-label { display: none; }
 .charges-table .c-total { font-weight: bold; background: #f8f9fa; }
 .charges-table .c-total-label { text-align: right; }
+.charges-table .is-covered { color: #6c757d; }
+.charges-table .covered-badge { display: inline-block; background: #e8f5e9; color: #1b5e20; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.8rem; font-weight: 600; }
+.charges-table .covered-amount { text-decoration: line-through; color: #6c757d; }
+.charges-table .c-covered-note td { color: #1b5e20; font-size: 0.9rem; text-align: right; border: none; }
+.charges-table .c-remove { display: inline; margin: 0; }
+.charges-table .c-remove button { background: none; border: none; color: #dc3545; font-size: 0.8rem; cursor: pointer; padding: 0 0.25rem; text-decoration: underline; }
 @media (max-width: 640px) {
     .charges-table { padding: 0.25rem 0.75rem; }
     .charges-table thead { display: none; }
@@ -170,6 +176,7 @@ tr:hover {
     .charges-table .c-share .m-label { display: none; }
     .charges-table .c-total { border-bottom: none; background: none; font-size: 1.05rem; }
     .charges-table .c-total-label { grid-column: 1; text-align: left; }
+    .charges-table .c-covered-note td { grid-column: 1 / -1; text-align: left; }
 }
 .pending-badge { display: inline-block; background: #fff3cd; color: #856404; padding: 0.1rem 0.45rem; border-radius: 10px; font-size: 0.75rem; margin-left: 0.35rem; }
 .charges-intro { color: #6c757d; font-size: 0.9rem; margin: -0.5rem 0 0.75rem; }

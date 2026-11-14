@@ -174,6 +174,19 @@ tr:hover {
 .charges-table .m-label { display: none; }
 .charges-table .c-total { font-weight: bold; background: #f8f9fa; }
 .charges-table .c-total-label { text-align: right; }
+.add-charge { background: white; border-radius: 8px; padding: 0.75rem 1rem; margin: 0.75rem 0 1.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+.add-charge summary { cursor: pointer; font-weight: 600; color: #007bff; }
+.add-charge-form { display: grid; grid-template-columns: 150px 1fr 110px 160px; gap: 0.6rem; align-items: end; }
+.add-charge-form label { font-size: 0.85rem; font-weight: 600; color: #495057; }
+.add-charge-form input, .add-charge-form select { display: block; width: 100%; box-sizing: border-box; padding: 0.5rem; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; margin-top: 0.2rem; background: white; }
+.add-charge-form button { grid-column: 1 / -1; justify-self: start; background: #007bff; color: white; border: none; padding: 0.55rem 1.2rem; border-radius: 4px; font-weight: 600; cursor: pointer; }
+@media (max-width: 640px) { .add-charge-form { grid-template-columns: 1fr 1fr; } .add-charge-form .wide { grid-column: 1 / -1; } }
+.charges-table .is-covered { color: #6c757d; }
+.charges-table .covered-badge { display: inline-block; background: #e8f5e9; color: #1b5e20; padding: 0.1rem 0.5rem; border-radius: 10px; font-size: 0.8rem; font-weight: 600; }
+.charges-table .covered-amount { text-decoration: line-through; color: #6c757d; }
+.charges-table .c-covered-note td { color: #1b5e20; font-size: 0.9rem; text-align: right; border: none; }
+.charges-table .c-remove { display: inline; margin: 0; }
+.charges-table .c-remove button { background: none; border: none; color: #dc3545; font-size: 0.8rem; cursor: pointer; padding: 0 0.25rem; text-decoration: underline; }
 @media (max-width: 640px) {
     .charges-table { padding: 0.25rem 0.75rem; }
     .charges-table thead { display: none; }
@@ -192,6 +205,7 @@ tr:hover {
     .charges-table .c-share .m-label { display: none; }
     .charges-table .c-total { border-bottom: none; background: none; font-size: 1.05rem; }
     .charges-table .c-total-label { grid-column: 1; text-align: left; }
+    .charges-table .c-covered-note td { grid-column: 1 / -1; text-align: left; }
 }
 .pending-badge { display: inline-block; background: #fff3cd; color: #856404; padding: 0.1rem 0.45rem; border-radius: 10px; font-size: 0.75rem; margin-left: 0.35rem; }
 .charges-intro { color: #6c757d; font-size: 0.9rem; margin: -0.5rem 0 0.75rem; }
@@ -266,9 +280,28 @@ tr:hover {
 
 {% if charges %}
     <h2>Charges ({{ charges|length }})</h2>
-    <p class="charges-intro">From your Up tags. Untag something in Up and re-sync to take it off.</p>
-    {% set charges_total = loan[2] %}{% set show_pending = true %}
+    <p class="charges-intro">From your Up tags, plus any you've added by hand. To take an Up charge off, untag it in Up and re-sync.</p>
+    {% set charges_total = loan[2] %}{% set lender_view = true %}{% set loan_id = loan[0] %}
     {% include "_charges_table.html" %}
+
+    <details class="add-charge" {% if not charges %}open{% endif %}>
+        <summary>+ Add a charge by hand</summary>
+        <p class="charges-intro" style="margin-top:0.5rem;">For things that aren't in Up, like home charging. Pick "Covered" to show it without asking them to pay.</p>
+        <form method="post" action="/loan/{{ loan[0] }}/charges/add" class="add-charge-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <label>Date<input type="date" name="date" required></label>
+            <label class="wide">What<input type="text" name="description" maxlength="200" placeholder="Home charging before/after the trip" required></label>
+            <label>Amount<input type="text" inputmode="decimal" name="amount" placeholder="$0.00" required></label>
+            <label>Their share
+                <select name="share">
+                    <option value="0">Covered (I pay)</option>
+                    <option value="50">Half</option>
+                    <option value="100">All theirs</option>
+                </select>
+            </label>
+            <button type="submit">Add charge</button>
+        </form>
+    </details>
 {% endif %}
 
 {% if transactions %}
@@ -322,9 +355,14 @@ tr:hover {
     </div>
 {% else %}
     <div class="no-transactions">
+        {% if charges %}
+        <h3>No Payments Yet</h3>
+        <p>When they pay you, record it with the repayment box on your loans page, or match it from a bank statement.</p>
+        {% else %}
         <h3>No Transactions Yet</h3>
         <p>No transactions have been matched to this loan.</p>
         <p>Use the "Match Bank Transactions" feature to automatically match payments.</p>
+        {% endif %}
     </div>
 {% endif %}
 {% endblock %}
