@@ -47,9 +47,22 @@ def _parse_rules(form):
     return rules, None
 
 
+def _form_context(conn, loan_id, dek, borrower, rules):
+    from services import up_bank
+    payer_name, _ = charge_service.payment_settings(conn, loan_id, dek)
+    row = conn.execute("SELECT u.up_token_encrypted FROM loans l JOIN users u ON u.id = l.user_id "
+                       "WHERE l.id = ?", (loan_id,)).fetchone()
+    return dict(loan_id=loan_id, borrower=borrower, rules=rules, max_rows=MAX_TAG_ROWS,
+                payer_name=payer_name or "", has_saved_token=bool(row and row[0]),
+                can_save_token=up_bank.can_store_tokens())
+
+
 @charges_bp.route("/loan/<int:loan_id>/charges/sync", methods=["GET", "POST"])
 @login_required
 def sync_charges(loan_id):
+    from services import up_bank
+    from services.encryption import encrypt_field
+
     user_password = session.get('user_password')
     if not user_password:
         flash("Please log in with your password first.", "error")
@@ -69,12 +82,18 @@ def sync_charges(loan_id):
     saved_rules = charge_service.get_charge_tags(conn, loan_id)
 
     if request.method == "GET":
+        ctx = _form_context(conn, loan_id, dek, borrower, saved_rules)
         conn.close()
-        return render_template("charges_sync.html", loan_id=loan_id, borrower=borrower,
-                               rules=saved_rules, max_rows=MAX_TAG_ROWS)
+        return render_template("charges_sync.html", **ctx)
 
     rules, error = _parse_rules(request.form)
+    ctx = _form_context(conn, loan_id, dek, borrower, rules or saved_rules)
+    user_id = get_current_user_id()
+
     token = (request.form.get("up_token") or "").strip()
+    if not token and ctx["has_saved_token"]:
+        token = up_bank.decrypt_token(conn.execute(
+            "SELECT up_token_encrypted FROM users WHERE id = ?", (user_id,)).fetchone()[0]) or ""
     if not error and not token:
         error = "Paste your Up access token."
     if not error and not dek:
@@ -82,24 +101,39 @@ def sync_charges(loan_id):
     if error:
         conn.close()
         flash(error, "error")
-        return render_template("charges_sync.html", loan_id=loan_id, borrower=borrower,
-                               rules=rules or saved_rules, max_rows=MAX_TAG_ROWS), 400
+        return render_template("charges_sync.html", **ctx), 400
+
+    payer_name = (request.form.get("payer_name") or "").strip()[:100]
+    conn.execute("UPDATE loans SET bank_name_encrypted = ? WHERE id = ?",
+                 (encrypt_field(payer_name, dek) if payer_name else None, loan_id))
+    since = conn.execute("SELECT date_borrowed FROM loans WHERE id = ?", (loan_id,)).fetchone()[0]
 
     try:
-        result = charge_service.sync_from_up(conn, loan_id, token, rules, dek)
+        result = charge_service.sync_from_up(conn, loan_id, token, rules, dek,
+                                             payer_name or None, (since or "")[:10] or None)
     except UpError as e:
         conn.close()
         flash(str(e), "error")
-        return render_template("charges_sync.html", loan_id=loan_id, borrower=borrower,
-                               rules=rules, max_rows=MAX_TAG_ROWS), 400
+        return render_template("charges_sync.html", **ctx), 400
+
+    keep = request.form.get("keep_token") == "on"
+    if keep and request.form.get("up_token") and up_bank.can_store_tokens():
+        conn.execute("UPDATE users SET up_token_encrypted = ? WHERE id = ?",
+                     (up_bank.encrypt_token(token), user_id))
+    elif not keep:
+        conn.execute("UPDATE users SET up_token_encrypted = NULL WHERE id = ?", (user_id,))
+    conn.commit()
     conn.close()
 
     log_event("charges_synced", event_data={"loan_id": loan_id, **result})
-    flash(
-        f"Synced from Up: {result['added']} added, {result['updated']} changed, "
-        f"{result['removed']} removed. Total charged is now ${result['total']:.2f}.",
-        "success",
-    )
+    msg = (f"Synced from Up: {result['added']} added, {result['updated']} changed, "
+           f"{result['removed']} removed")
+    if payer_name:
+        msg += f", {result['payments']} new payment{'s' if result['payments'] != 1 else ''}"
+    msg += f". Total charged is now ${result['total']:.2f}."
+    if keep:
+        msg += " It'll keep itself up to date from now on."
+    flash(msg, "success")
     return redirect(f"/loan/{loan_id}/transactions")
 
 

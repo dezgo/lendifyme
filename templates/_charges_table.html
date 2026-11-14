@@ -46,7 +46,7 @@
             </tr>
             {% if covered_total > 0 %}
             <tr class="c-covered-note">
-                <td colspan="5">{% if lender_view %}You covered{% else %}Also covered for you, not included above:{% endif %} ${{ '%.2f'|format(covered_total) }}</td>
+                <td colspan="5">{% if lender_view %}You covered ${{ '%.2f'|format(covered_total) }} of the items above (not in the total){% else %}${{ '%.2f'|format(covered_total) }} of the items above is covered for you, so it isn't in the total{% endif %}</td>
             </tr>
             {% endif %}
         </tfoot>

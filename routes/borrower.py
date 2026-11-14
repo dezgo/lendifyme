@@ -53,6 +53,12 @@ def borrower_portal(token):
         flash("Unable to decrypt loan data. Please contact the lender.", "error")
         return render_template("borrower_portal_error.html"), 500
 
+    # Charges statements fed from Up refresh themselves (at most hourly)
+    from services.charges import maybe_auto_sync
+    if maybe_auto_sync(conn, loan_id, dek, logger=app.logger):
+        c.execute("SELECT amount_encrypted FROM loans WHERE id = ?", (loan_id,))
+        loan_row = dict(loan_row) | {"amount_encrypted": c.fetchone()[0]}
+
     # Decrypt loan fields
     fields = decrypt_loan_row(loan_row, dek)
     borrower = fields['borrower']

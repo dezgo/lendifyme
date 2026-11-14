@@ -19,8 +19,20 @@ FAKE_UP = {
 @pytest.fixture
 def fake_up(monkeypatch):
     data = {k: list(v) for k, v in FAKE_UP.items()}
-    monkeypatch.setattr(up_bank, "list_tags", lambda token: list(data) + ["Bill"])
-    monkeypatch.setattr(up_bank, "fetch_tagged_transactions", lambda token, tag, since=None: data.get(tag, []))
+    data["_incoming"] = []
+    data["_calls"] = []
+
+    def tagged(token, tag, since=None):
+        data["_calls"].append((token, tag))
+        return data.get(tag, [])
+
+    def incoming(token, payer_name, since):
+        return [p for p in data["_incoming"]
+                if payer_name.lower() in p["description"].lower() and p["date"] >= since]
+
+    monkeypatch.setattr(up_bank, "list_tags", lambda token: [k for k in data if not k.startswith("_")] + ["Bill"])
+    monkeypatch.setattr(up_bank, "fetch_tagged_transactions", tagged)
+    monkeypatch.setattr(up_bank, "fetch_incoming_from", incoming)
     return data
 
 
@@ -102,7 +114,7 @@ def test_covered_tag_shows_but_adds_nothing(logged_in_client, app, fake_up):
     portal = logged_in_client.get(f"/borrower/{token}").data.decode()
     assert "Parking I paid" in portal and "Covered" in portal
     assert "$122.68" in portal  # unchanged by the covered item
-    assert "covered for you" in portal and "$30.00" in portal
+    assert "covered for you, so it isn" in portal and "$30.00" in portal
 
 
 def test_manual_charge_survives_resync_and_can_be_removed(logged_in_client, app, fake_up):
@@ -147,3 +159,89 @@ def test_negative_adjustment_shows_as_taken_off(logged_in_client, app, fake_up):
     conn.commit(); conn.close()
     portal = logged_in_client.get(f"/borrower/{token}").data.decode()
     assert "Taken off" in portal and "&minus;$2.68" in portal and "$-2.68" not in portal
+
+
+
+def _pay(tid, amount, date="2026-11-20", who="Ms Gemma Clare"):
+    return {"id": tid, "date": date, "description": who, "amount": amount}
+
+
+def test_payments_from_named_payer_are_recorded_once(logged_in_client, app, fake_up):
+    loan_id, token = _make_loan(logged_in_client, app)  # loan starts 2026-11-12
+    fake_up["_incoming"] = [_pay("p1", 50), _pay("p0", 30, date="2026-10-01"),  # before the loan: ignored
+                            _pay("p2", 99, who="GILLETT S")]                       # someone else: ignored
+    form = dict(SYNC_FORM, payer_name="Gemma Clare")
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=form)
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=form)  # no double count
+
+    portal = logged_in_client.get(f"/borrower/{token}").data.decode()
+    assert "$72.68" in portal  # 122.68 - 50
+    conn = sqlite3.connect(app.config["DATABASE"])
+    assert conn.execute("SELECT COUNT(*) FROM applied_transactions").fetchone()[0] == 1
+    conn.close()
+
+
+def test_removed_payment_does_not_come_back(logged_in_client, app, fake_up):
+    loan_id, _ = _make_loan(logged_in_client, app)
+    fake_up["_incoming"] = [_pay("p1", 35.5)]
+    form = dict(SYNC_FORM, payer_name="Gemma Clare")
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=form)
+    conn = sqlite3.connect(app.config["DATABASE"])
+    pid = conn.execute("SELECT id FROM applied_transactions").fetchone()[0]
+    conn.close()
+    logged_in_client.post(f"/remove-transaction/{pid}")
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=form)
+    conn = sqlite3.connect(app.config["DATABASE"])
+    assert conn.execute("SELECT COUNT(*) FROM applied_transactions").fetchone()[0] == 0
+    conn.close()
+
+
+def test_saved_token_auto_syncs_when_borrower_opens_page(logged_in_client, app, fake_up, monkeypatch):
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    loan_id, token = _make_loan(logged_in_client, app)
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync",
+                          data=dict(SYNC_FORM, payer_name="Gemma Clare", keep_token="on"))
+    conn = sqlite3.connect(app.config["DATABASE"])
+    stored = conn.execute("SELECT up_token_encrypted FROM users").fetchone()[0]
+    assert stored and "up:yeah" not in stored  # kept, but not in plain text
+
+    # Later: she pays, and the last sync is over an hour old
+    fake_up["_incoming"] = [_pay("p1", 22.68)]
+    conn.execute("UPDATE loans SET charges_synced_at = datetime('now', '-2 hours')")
+    conn.commit(); conn.close()
+    portal = logged_in_client.get(f"/borrower/{token}").data.decode()
+    assert "$100.00" in portal and "Ms Gemma Clare" in portal
+    assert fake_up["_calls"][-1][0] == "up:yeah:fake"
+
+    # Opening again straight away doesn't hit Up again
+    n = len(fake_up["_calls"])
+    logged_in_client.get(f"/borrower/{token}")
+    assert len(fake_up["_calls"]) == n
+
+
+def test_auto_sync_failure_does_not_break_page(logged_in_client, app, fake_up, monkeypatch):
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    loan_id, token = _make_loan(logged_in_client, app)
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=dict(SYNC_FORM, keep_token="on"))
+    conn = sqlite3.connect(app.config["DATABASE"])
+    conn.execute("UPDATE loans SET charges_synced_at = datetime('now', '-2 hours')")
+    conn.commit(); conn.close()
+
+    def boom(token):
+        raise up_bank.UpError("expired")
+    monkeypatch.setattr(up_bank, "list_tags", boom)
+    resp = logged_in_client.get(f"/borrower/{token}")
+    assert resp.status_code == 200 and "$122.68" in resp.data.decode()
+
+
+def test_unticking_forgets_saved_token(logged_in_client, app, fake_up, monkeypatch):
+    from cryptography.fernet import Fernet
+    monkeypatch.setenv("ENCRYPTION_KEY", Fernet.generate_key().decode())
+    loan_id, _ = _make_loan(logged_in_client, app)
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=dict(SYNC_FORM, keep_token="on"))
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=dict(SYNC_FORM, up_token=""))  # uses saved, unticked
+    conn = sqlite3.connect(app.config["DATABASE"])
+    assert conn.execute("SELECT up_token_encrypted FROM users").fetchone()[0] is None
+    conn.close()

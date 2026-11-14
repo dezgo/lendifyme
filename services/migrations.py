@@ -1635,6 +1635,32 @@ def migrate_v37_create_loan_charges(conn):
     conn.commit()
 
 
+def migrate_v38_up_auto_sync(conn):
+    """
+    Migration v38: keep charges statements up to date from Up automatically.
+
+    - users.up_token_encrypted: the lender's Up token, Fernet-encrypted with the
+      server ENCRYPTION_KEY (needed because syncs run when the *borrower* opens
+      their page, without the lender's password). Only stored if they opt in.
+    - loans.charges_synced_at: last time the loan was synced from Up (throttle).
+    - applied_transactions.source_txn_id: the Up transaction a payment came
+      from, so a payment is never recorded twice.
+    """
+    c = conn.cursor()
+    c.execute("PRAGMA table_info(users)")
+    if 'up_token_encrypted' not in {r[1] for r in c.fetchall()}:
+        c.execute("ALTER TABLE users ADD COLUMN up_token_encrypted TEXT")
+    c.execute("PRAGMA table_info(loans)")
+    if 'charges_synced_at' not in {r[1] for r in c.fetchall()}:
+        c.execute("ALTER TABLE loans ADD COLUMN charges_synced_at TEXT")
+    c.execute("PRAGMA table_info(applied_transactions)")
+    if 'source_txn_id' not in {r[1] for r in c.fetchall()}:
+        c.execute("ALTER TABLE applied_transactions ADD COLUMN source_txn_id TEXT")
+    c.execute("CREATE INDEX IF NOT EXISTS idx_applied_transactions_source "
+              "ON applied_transactions(loan_id, source_txn_id)")
+    conn.commit()
+
+
 # ---------------------------------------------------------------------------
 # Migration table — add new migrations here as (version, function) tuples.
 # Defined at the bottom of the file so all migrate_vN functions are in scope.
@@ -1677,4 +1703,5 @@ MIGRATIONS = [
     (35, migrate_v35_create_support_requests),
     (36, migrate_v36_add_live_support_tokens),
     (37, migrate_v37_create_loan_charges),
+    (38, migrate_v38_up_auto_sync),
 ]

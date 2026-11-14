@@ -169,8 +169,35 @@ def remove_manual_charge(conn, loan_id, charge_id, dek):
     return removed
 
 
-def sync_from_up(conn, loan_id, token, rules, dek):
-    """Fetch every rule's tag from Up and apply. Raises up_bank.UpError."""
+def apply_payments(conn, loan_id, payments):
+    """
+    Record incoming payments as repayments. Skips any already recorded (by Up
+    id) and any the lender removed before (kept in rejected_matches).
+    Returns how many were added.
+    """
+    c = conn.cursor()
+    added = 0
+    for p in payments:
+        c.execute("SELECT 1 FROM applied_transactions WHERE loan_id = ? AND source_txn_id = ?",
+                  (loan_id, p["id"]))
+        if c.fetchone():
+            continue
+        c.execute("""SELECT 1 FROM rejected_matches
+                     WHERE loan_id = ? AND date = ? AND description = ? AND amount = ?""",
+                  (loan_id, p["date"], p["description"], p["amount"]))
+        if c.fetchone():
+            continue
+        c.execute("""INSERT INTO applied_transactions
+                         (date, description, amount, loan_id, source_txn_id)
+                     VALUES (?, ?, ?, ?, ?)""",
+                  (p["date"], p["description"], p["amount"], loan_id, p["id"]))
+        added += 1
+    return added
+
+
+def sync_from_up(conn, loan_id, token, rules, dek, payer_name=None, payments_since=None):
+    """Fetch every rule's tag (and the borrower's payments) from Up and apply.
+    Raises up_bank.UpError."""
     available = set(up_bank.list_tags(token))
     missing = [r["tag"] for r in rules if r["tag"] not in available]
     if missing:
@@ -182,5 +209,55 @@ def sync_from_up(conn, loan_id, token, rules, dek):
     charges = build_charges(rules, by_tag)
     save_charge_tags(conn, loan_id, rules)
     result = apply_charges(conn, loan_id, charges, dek)
+    result["payments"] = 0
+    if payer_name and payments_since:
+        result["payments"] = apply_payments(
+            conn, loan_id, up_bank.fetch_incoming_from(token, payer_name, payments_since))
+    conn.execute("UPDATE loans SET charges_synced_at = datetime('now') WHERE id = ?", (loan_id,))
     conn.commit()
     return result
+
+
+def payment_settings(conn, loan_id, dek):
+    """(payer_name, payments_since) for a loan: the bank name its payments
+    show as, and the loan's start date."""
+    from services.encryption import decrypt_field
+    row = conn.execute("SELECT bank_name_encrypted, date_borrowed FROM loans WHERE id = ?",
+                       (loan_id,)).fetchone()
+    if not row:
+        return None, None
+    name = decrypt_field(row[0], dek) if (row[0] and dek) else None
+    return name, (row[1] or "")[:10] or None
+
+
+def maybe_auto_sync(conn, loan_id, dek, max_age_minutes=60, logger=None):
+    """
+    If this loan is synced from Up and its owner saved a token, re-sync when
+    the last sync is older than `max_age_minutes`. Never raises: a failure is
+    logged and the page carries on with what it has. Returns True if synced.
+    """
+    if not dek:
+        return False
+    row = conn.execute("""
+        SELECT u.up_token_encrypted,
+               (l.charges_synced_at IS NULL OR l.charges_synced_at < datetime('now', ?)) AS stale
+        FROM loans l JOIN users u ON u.id = l.user_id
+        WHERE l.id = ?
+    """, (f"-{int(max_age_minutes)} minutes", loan_id)).fetchone()
+    if not row or not row[0] or not row[1]:
+        return False
+    rules = get_charge_tags(conn, loan_id)
+    token = up_bank.decrypt_token(row[0])
+    if not rules or not token:
+        return False
+    payer_name, since = payment_settings(conn, loan_id, dek)
+    try:
+        sync_from_up(conn, loan_id, token, rules, dek, payer_name, since)
+        return True
+    except Exception as e:  # never break the page over a background refresh
+        conn.rollback()
+        conn.execute("UPDATE loans SET charges_synced_at = datetime('now') WHERE id = ?", (loan_id,))
+        conn.commit()
+        if logger:
+            logger.warning("Auto-sync from Up failed for loan %s: %s", loan_id, e)
+        return False

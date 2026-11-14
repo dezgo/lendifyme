@@ -10,6 +10,8 @@ h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
 label { display: block; font-weight: bold; margin-bottom: 0.25rem; }
 input { width: 100%; padding: 0.65rem; font-size: 16px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
 .hint { color: #6c757d; font-size: 0.85rem; margin: 0.25rem 0 1.25rem; }
+.check { display: flex; align-items: center; gap: 0.5rem; font-weight: 600; }
+.check input { width: auto; }
 .tag-row { display: grid; grid-template-columns: 1fr 120px; gap: 0.75rem; margin-bottom: 0.5rem; }
 .tag-head { display: grid; grid-template-columns: 1fr 120px; gap: 0.75rem; font-weight: bold; font-size: 0.9rem; margin-bottom: 0.25rem; }
 button { margin-top: 1rem; width: 100%; background: #007bff; color: white; border: none; padding: 0.8rem; font-size: 16px; font-weight: bold; border-radius: 4px; cursor: pointer; }
@@ -31,9 +33,21 @@ button:hover { background: #0056b3; }
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
         <label for="up_token">Up access token</label>
-        <input type="password" id="up_token" name="up_token" placeholder="up:yeah:..." autocomplete="off" required>
+        <input type="password" id="up_token" name="up_token" autocomplete="off"
+               placeholder="{% if has_saved_token %}Saved — leave blank to use it{% else %}up:yeah:...{% endif %}"
+               {% if not has_saved_token %}required{% endif %}>
         <p class="hint">Make one at <a href="https://api.up.com.au" target="_blank" rel="noopener">api.up.com.au</a>.
-            It's only used for this sync and isn't saved.</p>
+            It can only read your account, not move money.</p>
+
+        {% if can_save_token %}
+        <label class="check">
+            <input type="checkbox" name="keep_token" {% if has_saved_token %}checked{% endif %}>
+            Keep this token so the statement updates itself
+        </label>
+        <p class="hint">Whenever you or they open the statement, it re-checks Up (at most once an hour) for new
+            tags, untagged items and payments. Choose "until revoked" when you make the token, or it will stop
+            working when it expires. Untick to forget a saved token.</p>
+        {% endif %}
 
         <div class="tag-head"><span>Up tag</span><span>Their share</span></div>
         {% for i in range(max_rows) %}
@@ -44,8 +58,13 @@ button:hover { background: #0056b3; }
                        value="{{ ('%g'|format(r.share_percent)) ~ '%' if r else '' }}" placeholder="100%" aria-label="Share for tag {{ i + 1 }}">
             </div>
         {% endfor %}
-        <p class="hint">Use 100% for things they pay for themselves and 50% for things you're splitting.
+        <p class="hint">Use 100% for things they pay for themselves, 50% for things you're splitting, and 0% to show something you covered.
             Tag names must match Up exactly.</p>
+
+        <label for="payer_name">Their payments show in Up as <span style="font-weight:normal;color:#6c757d;">(optional)</span></label>
+        <input type="text" id="payer_name" name="payer_name" value="{{ payer_name }}" placeholder="e.g. Ms Gemma Clare">
+        <p class="hint">Money from this name, from the loan's start date on, is recorded as a payment. If one gets
+            picked up that wasn't for this, remove it on the loan page and it won't come back.</p>
 
         <button type="submit">Sync from Up</button>
     </form>

@@ -241,6 +241,12 @@ def loan_transactions(loan_id):
 
     # Get DEK for decryption using user password
     dek = get_loan_dek(loan_row['id'], user_password=user_password)
+
+    # Charges statements fed from Up refresh themselves (at most hourly)
+    from services.charges import maybe_auto_sync
+    if maybe_auto_sync(conn, loan_id, dek, logger=current_app.logger):
+        c.execute("SELECT amount_encrypted FROM loans WHERE id = ?", (loan_id,))
+        loan_row = dict(loan_row) | {"amount_encrypted": c.fetchone()[0]}
     fields = decrypt_loan_row(loan_row, dek)
     amount = fields['amount'] or 0.0
 
@@ -407,7 +413,7 @@ def remove_transaction(transaction_id):
 
     # Get the transaction details and verify ownership
     c.execute("""
-        SELECT at.loan_id, at.amount, at.description, at.date
+        SELECT at.loan_id, at.amount, at.description, at.date, at.source_txn_id
         FROM applied_transactions at
         JOIN loans l ON at.loan_id = l.id
         WHERE at.id = ? AND l.user_id = ?
@@ -416,7 +422,14 @@ def remove_transaction(transaction_id):
     transaction = c.fetchone()
 
     if transaction:
-        loan_id, amount, description, date = transaction
+        loan_id, amount, description, date, source_txn_id = transaction
+        transaction = transaction[:4]
+
+        # A payment picked up from Up: remember it was removed, so the next
+        # automatic sync doesn't add it straight back.
+        if source_txn_id:
+            c.execute("INSERT INTO rejected_matches (date, description, amount, loan_id) VALUES (?, ?, ?, ?)",
+                      (date, description, amount, loan_id))
 
         # Delete the applied transaction (amount_repaid will recalculate automatically)
         c.execute("""
