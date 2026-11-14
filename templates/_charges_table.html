@@ -15,7 +15,8 @@
         </thead>
         <tbody>
             {% for ch in charges %}
-                {% if ch.share_percent == 0 %}{% set share_label = 'Covered' %}
+                {% if ch.share_amount < 0 %}{% set share_label = 'Taken off' %}
+                {% elif ch.share_percent == 0 %}{% set share_label = 'Covered' %}
                 {% elif ch.share_percent >= 100 %}{% set share_label = 'All' %}
                 {% elif ch.share_percent == 50 %}{% set share_label = 'Half' %}
                 {% else %}{% set share_label = ('%g'|format(ch.share_percent)) ~ '%' %}{% endif %}
@@ -32,9 +33,9 @@
                             </form>
                         {% endif %}
                     </td>
-                    <td class="num c-paid">${{ '%.2f'|format(ch.full_amount) }}</td>
-                    <td class="num c-share">{% if ch.share_percent == 0 %}<span class="covered-badge">Covered</span>{% else %}{{ share_label }}{% endif %}</td>
-                    <td class="num c-owed">{% if ch.share_percent == 0 %}<span class="covered-amount">${{ '%.2f'|format(ch.full_amount) }}</span>{% else %}<strong>${{ '%.2f'|format(ch.share_amount) }}</strong>{% endif %}</td>
+                    <td class="num c-paid">{% if ch.full_amount < 0 %}&minus;${{ '%.2f'|format(-ch.full_amount) }}{% else %}${{ '%.2f'|format(ch.full_amount) }}{% endif %}</td>
+                    <td class="num c-share">{% if ch.share_percent == 0 or ch.share_amount < 0 %}<span class="covered-badge">{{ share_label }}</span>{% else %}{{ share_label }}{% endif %}</td>
+                    <td class="num c-owed">{% if ch.share_percent == 0 %}<span class="covered-amount">${{ '%.2f'|format(ch.full_amount) }}</span>{% elif ch.share_amount < 0 %}<strong class="discount-amount">&minus;${{ '%.2f'|format(-ch.share_amount) }}</strong>{% else %}<strong>${{ '%.2f'|format(ch.share_amount) }}</strong>{% endif %}</td>
                 </tr>
             {% endfor %}
         </tbody>

@@ -135,3 +135,15 @@ def test_manual_charge_refused_on_plain_loan(logged_in_client, app, fake_up):
     conn = sqlite3.connect(app.config["DATABASE"])
     assert conn.execute("SELECT COUNT(*) FROM loan_charges").fetchone()[0] == 0
     conn.close()
+
+
+def test_negative_adjustment_shows_as_taken_off(logged_in_client, app, fake_up):
+    loan_id, token = _make_loan(logged_in_client, app)
+    logged_in_client.post(f"/loan/{loan_id}/charges/sync", data=SYNC_FORM)
+    conn = sqlite3.connect(app.config["DATABASE"])
+    conn.execute("""INSERT INTO loan_charges (loan_id, source_txn_id, date, description, full_amount,
+                    share_percent, share_amount) VALUES (?, 'manual:r', '2026-11-14', 'Rounded down', -2.68, 100, -2.68)""",
+                 (loan_id,))
+    conn.commit(); conn.close()
+    portal = logged_in_client.get(f"/borrower/{token}").data.decode()
+    assert "Taken off" in portal and "&minus;$2.68" in portal and "$-2.68" not in portal
